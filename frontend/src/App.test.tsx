@@ -114,6 +114,23 @@ describe("DealOS public routes", () => {
       await screen.findByRole("heading", { name: "Welcome back." }),
     ).toBeInTheDocument();
   });
+  it("shows the dedicated invitation-only customer sign-in", async () => {
+    window.history.replaceState({}, "", "/customer");
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Everything shared with you, in one place." })).toBeInTheDocument();
+    expect(screen.getByLabelText("Invited email address")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign in with Google" })).toBeInTheDocument();
+  });
+  it("opens customer-scoped invoices in the new deal room", async () => {
+    window.history.replaceState({}, "", "/customer");
+    const portalWorkspace = { user:{id:'customer',name:'Priya Nair',email:'customer@dealos.demo',role:'CUSTOMER',moduleAccess:[],actorType:'USER',platformSuperAdmin:false,viewContext:null},organization:{id:'org',name:'DealOS Demo'},users:[],customers:[],quotes:[],products:[],policies:[],warehouses:[],subscriptions:[],invoices:[{id:'invoice',number:'INV-1042',customer:'Acme Corp',amount:'2520',paidAmount:'0',state:'UNPAID',dueAt:'2026-09-20T00:00:00.000Z',lines:[],payments:[]}],alerts:[],audits:[] };
+    fetchMock.mockResolvedValue({ok:true,json:async()=>({success:true,data:portalWorkspace})});
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Review your quotations" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Invoices/ }));
+    expect(screen.getByRole("heading", { name: "INV-1042" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Download PDF" })).toHaveAttribute("href", "/api/v1/invoices/invoice/pdf");
+  });
   it("uses the dedicated Platform Owner login and opens global control", async () => {
     window.history.replaceState({}, "", "/login/super-admin");
     const ownerWorkspace = { user: { id: "platform-owner", name: "Platform Owner", email: "superadmin", role: "ADMIN", moduleAccess: [], actorType: "PLATFORM_OWNER", platformSuperAdmin: true, viewContext: null }, organization: null, users: [], quotes: [], products: [], policies: [], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] };

@@ -29,7 +29,7 @@ declare global {
   }
 }
 
-function GoogleAuth({ mode, organizationName = "", onComplete, onError }: { mode: "signup" | "login"; organizationName?: string; onComplete: () => void | Promise<void>; onError: (message: string) => void }) {
+function GoogleAuth({ mode, organizationName = "", email = "", hideDivider = false, onComplete, onError }: { mode: "signup" | "login" | "customer"; organizationName?: string; email?: string; hideDivider?: boolean; onComplete: () => void | Promise<void>; onError: (message: string) => void }) {
   const buttonRef = useRef<HTMLDivElement>(null);
   const [clientId, setClientId] = useState<string | null>(null);
   const [configurationLoaded, setConfigurationLoaded] = useState(false);
@@ -57,7 +57,7 @@ function GoogleAuth({ mode, organizationName = "", onComplete, onError }: { mode
           try {
             await request(`/auth/google/${mode}`, {
               method: "POST",
-              body: JSON.stringify(mode === "signup" ? { credential, organizationName } : { credential }),
+              body: JSON.stringify(mode === "signup" ? { credential, organizationName } : mode === "customer" ? { credential, email } : { credential }),
             });
             await onComplete();
           } catch (error) {
@@ -93,7 +93,7 @@ function GoogleAuth({ mode, organizationName = "", onComplete, onError }: { mode
       script.removeEventListener("load", render);
       buttonRef.current?.replaceChildren();
     };
-  }, [clientId, mode, onComplete, onError, organizationName]);
+  }, [clientId, email, mode, onComplete, onError, organizationName]);
 
   if (!clientId) return (
     <>
@@ -113,7 +113,7 @@ function GoogleAuth({ mode, organizationName = "", onComplete, onError }: { mode
         </svg>
         {mode === "signup" ? "Sign up with Google" : "Sign in with Google"}
       </button>
-      <div className="auth-divider"><span>or continue with work email</span></div>
+      {!hideDivider&&<div className="auth-divider"><span>or continue with work email</span></div>}
     </>
   );
   return (
@@ -121,9 +121,33 @@ function GoogleAuth({ mode, organizationName = "", onComplete, onError }: { mode
       <div className="google-signup" ref={buttonRef} aria-label={`Google ${mode}`}>
         <span className="google-loading">Loading Google…</span>
       </div>
-      <div className="auth-divider"><span>or continue with work email</span></div>
+      {!hideDivider&&<div className="auth-divider"><span>or continue with work email</span></div>}
     </>
   );
+}
+
+export function CustomerAuthPage({ onSuccess, signedInRole }: { onSuccess: () => void | Promise<void>; signedInRole?: string | null }) {
+  const [email, setEmail] = useState("");
+  const [error, setError] = useState("");
+  const ready = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  return <main className="customer-auth-page">
+    <div className="customer-auth-brand"><Brand/><span>Customer portal</span></div>
+    <section className="customer-auth-card">
+      <div className="customer-auth-mark"><ShieldCheck/></div>
+      <span className="section-label">SECURE DEAL ROOM</span>
+      <h1>Everything shared with you, in one place.</h1>
+      <p>Use the email address that received your DealOS invitation. Google verifies the address before any quotation or invoice is shown.</p>
+      {signedInRole&&signedInRole!=="CUSTOMER"&&<div className="auth-error" role="alert">This session belongs to an internal workspace. Sign out there before entering the customer portal.</div>}
+      <label className="customer-email-field">Invited email address<input type="email" autoComplete="email" placeholder="you@company.com" value={email} onChange={event=>{setEmail(event.target.value);setError("")}}/></label>
+      <div className={!ready?"customer-google-disabled":""}>
+        <GoogleAuth mode="customer" email={email.trim().toLowerCase()} hideDivider onComplete={onSuccess} onError={setError}/>
+      </div>
+      {!ready&&<small>Enter your invited email to enable Google sign-in.</small>}
+      {error&&<div className="auth-error" role="alert">{error}</div>}
+      <div className="customer-auth-trust"><span><Check/>Verified email only</span><span><LockKeyhole/>Customer-scoped access</span></div>
+    </section>
+    <footer>Invitations are issued by the business that shared a quotation or invoice with you.</footer>
+  </main>;
 }
 
 export function AuthPage({
@@ -143,6 +167,20 @@ export function AuthPage({
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  useEffect(() => {
+    if (signup) return;
+    const generated = window.sessionStorage.getItem("dealos_generated_login");
+    if (!generated) return;
+    try {
+      const credentials = JSON.parse(generated) as { email?: string; loginId?: string; password?: string };
+      if (credentials.loginId) setEmail(credentials.loginId);
+      if (credentials.password) setPassword(credentials.password);
+    } catch {
+      // Ignore malformed local handoff data and show the normal sign-in form.
+    } finally {
+      window.sessionStorage.removeItem("dealos_generated_login");
+    }
+  }, [signup]);
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (signup && step < 2) {
@@ -347,7 +385,6 @@ export function AuthPage({
                       ["manager", "Manager"],
                       ["finance", "Finance"],
                       ["admin", "Admin"],
-                      ["customer", "Customer"],
                     ].map(([v, t]) => (
                       <button
                         type="button"
