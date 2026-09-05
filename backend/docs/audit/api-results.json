@@ -1,5 +1,5 @@
 {
-  "date": "2026-09-05T08:20:09.452Z",
+  "date": "2026-09-05T10:46:06.474Z",
   "environment": "isolated PostgreSQL schema; synthetic fixtures",
   "results": [
     {
@@ -185,6 +185,107 @@
       }
     },
     {
+      "name": "Stock API derives available on the backend",
+      "status": "PASS",
+      "actual": {
+        "onHand": 100,
+        "reserved": 2,
+        "available": 98
+      }
+    },
+    {
+      "name": "Partial allocation creates explicit backorder",
+      "status": "PASS",
+      "actual": {
+        "state": "BACKORDER",
+        "split": {
+          "split": [
+            {
+              "quantity": 98,
+              "productId": "e8c1e451-022e-49e9-95e3-bdcfde3384c7",
+              "warehouseId": "27ffa3ee-f56a-42b0-988f-8c3781ec1b23",
+              "warehouseName": "Audit warehouse"
+            }
+          ],
+          "backorders": [
+            {
+              "quantity": 2,
+              "productId": "e8c1e451-022e-49e9-95e3-bdcfde3384c7"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Backorder is not consolidatable without new stock",
+      "status": "PASS",
+      "actual": false
+    },
+    {
+      "name": "Sales Rep cannot manage backorder",
+      "status": "PASS",
+      "actual": 403
+    },
+    {
+      "name": "Restock identifies consolidation candidate",
+      "status": "PASS",
+      "actual": [
+        "6d58c07a-f0e1-4dae-a624-a859ee05136d"
+      ]
+    },
+    {
+      "name": "Backorder becomes consolidatable after restock",
+      "status": "PASS",
+      "actual": true
+    },
+    {
+      "name": "Consolidation reserves restock and completes fulfillment",
+      "status": "PASS",
+      "actual": {
+        "state": "FULFILLED",
+        "backorders": []
+      }
+    },
+    {
+      "name": "Manual override rejects unavailable quantity",
+      "status": "PASS",
+      "actual": {
+        "status": 409,
+        "code": "STOCK_CHANGED"
+      }
+    },
+    {
+      "name": "Manual override preserves unallocated demand as backorder",
+      "status": "PASS",
+      "actual": {
+        "state": "BACKORDER",
+        "split": {
+          "split": [
+            {
+              "quantity": 3,
+              "productId": "e8c1e451-022e-49e9-95e3-bdcfde3384c7",
+              "warehouseId": "27ffa3ee-f56a-42b0-988f-8c3781ec1b23",
+              "warehouseName": "Audit warehouse"
+            }
+          ],
+          "backorders": [
+            {
+              "quantity": 2,
+              "productId": "e8c1e451-022e-49e9-95e3-bdcfde3384c7"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Stale recommendation is rejected after stock change",
+      "status": "PASS",
+      "actual": {
+        "status": 409,
+        "code": "STOCK_CHANGED"
+      }
+    },
+    {
       "name": "Overpayment rejected",
       "status": "PASS",
       "actual": 422
@@ -252,8 +353,8 @@
       "name": "Duplicate SKU lines cannot overreserve stock",
       "status": "PASS",
       "actual": {
-        "onHand": 100,
-        "reserved": 100
+        "onHand": 110,
+        "reserved": 110
       }
     },
     {

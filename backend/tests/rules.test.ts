@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allocateStock, billingSchedule, calculateQuote } from '../src/rules.js';
+import { allocateStock, allocationMetrics, billingSchedule, calculateQuote, manualAllocation } from '../src/rules.js';
 
 describe('quotation governance', () => {
   it('routes an 18% service discount over a 10% limit to finance', () => {
@@ -51,6 +51,37 @@ describe('warehouse allocation', () => {
     ]);
     expect(result.split).toEqual([{ productId: 'p1', warehouseId: 'w1', warehouseName: 'Main', quantity: 100 }]);
     expect(result.backorders).toEqual([{ productId: 'p1', quantity: 20 }]);
+  });
+
+  it('uses one warehouse when it can cover the full demand', () => {
+    const result = allocateStock([{ productId: 'p1', quantity: 8 }], [
+      { productId: 'p1', warehouseId: 'w1', warehouseName: 'Main', priority: 1, shippingCost: 5, onHand: 3, reserved: 0 },
+      { productId: 'p1', warehouseId: 'w2', warehouseName: 'East', priority: 2, shippingCost: 20, onHand: 10, reserved: 0 },
+    ]);
+    expect(result.split).toEqual([{ productId: 'p1', warehouseId: 'w2', warehouseName: 'East', quantity: 8 }]);
+    expect(result.backorders).toEqual([]);
+  });
+
+  it('reuses a selected warehouse across products to avoid an unnecessary shipment', () => {
+    const result = allocateStock([{ productId: 'p1', quantity: 4 }, { productId: 'p2', quantity: 3 }], [
+      { productId: 'p1', warehouseId: 'w1', warehouseName: 'Main', priority: 1, shippingCost: 10, onHand: 4, reserved: 0 },
+      { productId: 'p2', warehouseId: 'w1', warehouseName: 'Main', priority: 1, shippingCost: 10, onHand: 3, reserved: 0 },
+      { productId: 'p2', warehouseId: 'w2', warehouseName: 'East', priority: 2, shippingCost: 5, onHand: 3, reserved: 0 },
+    ]);
+    expect(new Set(result.split.map((row) => row.warehouseId))).toEqual(new Set(['w1']));
+  });
+
+  it('validates manual overrides and keeps every missing unit as backorder', () => {
+    const balances = [{ productId: 'p1', warehouseId: 'w1', warehouseName: 'Main', priority: 1, shippingCost: 20, onHand: 6, reserved: 1 }];
+    expect(manualAllocation([{ productId: 'p1', quantity: 8 }], [{ productId: 'p1', warehouseId: 'w1', quantity: 5 }], balances)).toEqual({
+      split: [{ productId: 'p1', warehouseId: 'w1', warehouseName: 'Main', quantity: 5 }],
+      backorders: [{ productId: 'p1', quantity: 3 }],
+    });
+    expect(() => manualAllocation([{ productId: 'p1', quantity: 8 }], [{ productId: 'p1', warehouseId: 'w1', quantity: 6 }], balances)).toThrow(/enough available stock/);
+  });
+
+  it('calculates shipment count and cost once per selected warehouse', () => {
+    expect(allocationMetrics([{ warehouseId: 'w1' }, { warehouseId: 'w1' }, { warehouseId: 'w2' }], [{ warehouseId: 'w1', shippingCost: 45 }, { warehouseId: 'w2', shippingCost: 28 }])).toEqual({ shipmentCount: 2, estimatedCost: 73 });
   });
 });
 

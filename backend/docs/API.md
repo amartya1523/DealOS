@@ -347,11 +347,22 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 - **Errors:** common error contract above; validation, permission, lifecycle and concurrency conditions are enforced before commit.
 - **Business rules:** BR-003–006, BR-017.
 
+#### Current workspace policy editor
+
+- **Method/path:** `PATCH /api/v1/policies/:id`
+- **Purpose:** Edit and publish the selected customer tier's overall ceiling, Hardware, Services and Subscriptions ceilings, and Finance escalation threshold in one audited operation.
+- **Actor / authorization:** Organization Admin or Manager with the Rules module; organization scope is enforced server-side. Platform Owner view-as sessions remain read-only.
+- **Authentication:** Active session, matching origin and CSRF token required.
+- **Request:** `{maxDiscount, hardwareLimit, servicesLimit, subscriptionLimit, financeThreshold, reason}`. All numeric values are percentages/points from 0 through 100; `reason` is 5–240 characters.
+- **Validation:** The request is complete and strict. Every category ceiling must be less than or equal to the overall tier ceiling. Invalid input returns 422 with field details.
+- **Response:** 200 updated policy. A successful save increments `version`, refreshes `publishedAt`, and records `POLICY_UPDATED` with the supplied reason in the same transaction.
+- **Business rules:** BR-003, BR-004, BR-017. This is the current compact editor endpoint; SET-02/SET-03 remain the target draft/publish model for immutable policy history.
+
 ### SET-04 — Read recurring-plan configurations
 
 - **Method/path:** `GET /api/v1/settings/subscription-plans`
 - **Purpose:** Read recurring-plan configurations.
-- **Actor / authorization:** Internal identities; resource scope and global restrictions above apply.
+- **Actor / authorization:** Admin only; resource scope and global restrictions above apply.
 - **Authentication:** Active database-backed session required.
 - **Request:** `query: active?, cursor?, limit?`.
 - **Validation:** known filters.
@@ -682,6 +693,7 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 - **Response:** 200 Page<WarehouseDTO>.
 - **Errors:** common error contract above; validation, permission, lifecycle and concurrency conditions are enforced before commit.
 - **Business rules:** BR-009.
+- **Implemented compatibility route:** `GET /api/v1/warehouses/stock` returns active organization warehouses and product balances with backend-derived `available = onHand - reserved`.
 
 ### FUL-02 — Configure warehouse and shipping weights
 
@@ -706,6 +718,7 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 - **Response:** 200 WarehouseDTO.
 - **Errors:** common error contract above; validation, permission, lifecycle and concurrency conditions are enforced before commit.
 - **Business rules:** R-008, BR-009, BR-017.
+- **Implemented compatibility route:** `PATCH /api/v1/warehouses/:id` is Admin-only and accepts `{name?,priority?,shippingCost?,active?,reason}`.
 
 ### FUL-04 — Record receipt or justified stock adjustment
 
@@ -718,6 +731,7 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 - **Response:** 201 {movement, balance, consolidationCandidates}.
 - **Errors:** common error contract above; validation, permission, lifecycle and concurrency conditions are enforced before commit.
 - **Business rules:** BR-009, BR-011, BR-015, BR-017.
+- **Implemented compatibility route:** `POST /api/v1/warehouses/:id/restock` accepts `{productId,quantity,reason}` for Finance/Admin, increments `onHand` transactionally, audits the receipt, and returns matching backorder candidate quotation IDs.
 
 ### FUL-05 — List orders needing fulfillment
 
@@ -730,6 +744,7 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 - **Response:** 200 Page<FulfillmentSummaryDTO>.
 - **Errors:** common error contract above; validation, permission, lifecycle and concurrency conditions are enforced before commit.
 - **Business rules:** BR-009, BR-011.
+- **Implemented compatibility route:** `GET /api/v1/fulfillment` returns confirmed, non-complete hardware orders scoped by organization and Sales Rep ownership.
 
 ### FUL-06 — Read current split, shipments and backorder
 
@@ -742,6 +757,7 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 - **Response:** 200 FulfillmentDTO.
 - **Errors:** common error contract above; validation, permission, lifecycle and concurrency conditions are enforced before commit.
 - **Business rules:** BR-009–011.
+- **Implemented compatibility route:** `GET /api/v1/fulfillment/:quoteId` returns the accepted split, product-level ordered/fulfilled/backordered quantities, costs, shipment count, and `consolidationAvailable` derived from current stock.
 
 ### FUL-07 — Calculate suggested warehouse allocation
 
@@ -754,6 +770,7 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 - **Response:** 200 AllocationPreviewDTO {lines,shortages,shipmentCount,estimatedCost,orderVersion}.
 - **Errors:** common error contract above; validation, permission, lifecycle and concurrency conditions are enforced before commit.
 - **Business rules:** BR-009, BR-010.
+- **Implemented compatibility route:** `GET /api/v1/fulfillment/:quoteId/preview`. It is read-only, accepts a confirmed quotation backed by an order, returns `{state,split:{split,backorders},items,estimatedCost,shipmentCount,stockFingerprint,preview:true}`, and never increments reserved stock. Any authorized internal user with Fulfillment module access can inspect the preview. The fingerprint binds acceptance to the stock snapshot shown to the user.
 
 ### FUL-08 — Accept split, override or consolidate remaining demand
 
@@ -766,6 +783,7 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 - **Response:** 201 FulfillmentDTO.
 - **Errors:** common error contract above; validation, permission, lifecycle and concurrency conditions are enforced before commit.
 - **Business rules:** BR-009–011, BR-015, BR-017.
+- **Implemented compatibility routes:** `POST /api/v1/fulfillment/:quoteId/allocate` accepts `{stockFingerprint?}` and rejects a stale preview; `POST /api/v1/fulfillment/:quoteId/allocate-manual` accepts `{allocations:[{productId,warehouseId,quantity}],reason}`; and `POST /api/v1/fulfillment/:quoteId/consolidate-backorder` accepts `{reason}`. Finance/Admin commits lock and revalidate stock, preserve every shortage as a backorder, calculate unique-warehouse shipment cost/count, update order/fulfillment state, and audit the decision.
 
 ### FUL-09 — Dispatch reserved quantities
 
@@ -783,7 +801,7 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 
 - **Method/path:** `GET /api/v1/subscriptions`
 - **Purpose:** List recurring obligations.
-- **Actor / authorization:** Internal identities; resource scope and global restrictions above apply.
+- **Actor / authorization:** Admin only; the subscription module cannot be delegated through module access.
 - **Authentication:** Active database-backed session required.
 - **Request:** `query: state?, customerId?, cursor?, limit?`.
 - **Validation:** scope through order/customer; no fabricated paused state.
@@ -795,7 +813,7 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 
 - **Method/path:** `GET /api/v1/subscriptions/:id`
 - **Purpose:** Read recurring terms, history and next periods.
-- **Actor / authorization:** Internal identities; resource scope and global restrictions above apply.
+- **Actor / authorization:** Admin only; resource scope and global restrictions above apply.
 - **Authentication:** Active database-backed session required.
 - **Request:** `none`.
 - **Validation:** authorized linked order; history immutable.
@@ -807,7 +825,7 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 
 - **Method/path:** `POST /api/v1/subscriptions/:id/change-preview`
 - **Purpose:** Preview mid-period quantity or plan change.
-- **Actor / authorization:** Finance/Operations; resource scope and global restrictions above apply.
+- **Actor / authorization:** Admin only; resource scope and global restrictions above apply.
 - **Authentication:** Active database-backed session required.
 - **Request:** `{expectedVersion, quantity?, planId?, effectiveAt}`.
 - **Validation:** positive quantity; valid plan; effectiveAt within allowed future/current period; no settled backdating.
@@ -819,7 +837,7 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 
 - **Method/path:** `POST /api/v1/subscriptions/:id/changes`
 - **Purpose:** Commit subscription change and adjustment.
-- **Actor / authorization:** Finance/Operations; resource scope and global restrictions above apply.
+- **Actor / authorization:** Admin only; resource scope and global restrictions above apply.
 - **Authentication:** Active database-backed session required.
 - **Request:** `{expectedVersion, quantity?, planId?, effectiveAt, reason}`.
 - **Validation:** same as preview; recompute in transaction; no trust in preview totals.
@@ -831,7 +849,7 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 
 - **Method/path:** `POST /api/v1/subscriptions/:id/cancel-preview`
 - **Purpose:** Preview cancellation and eligible unused-period credit.
-- **Actor / authorization:** Finance/Operations; resource scope and global restrictions above apply.
+- **Actor / authorization:** Admin only; resource scope and global restrictions above apply.
 - **Authentication:** Active database-backed session required.
 - **Request:** `{expectedVersion, effectiveAt}`.
 - **Validation:** valid snapshotted cancellation policy; active subscription.
@@ -843,13 +861,20 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 
 - **Method/path:** `POST /api/v1/subscriptions/:id/cancellations`
 - **Purpose:** Stop future obligation and create eligible credit.
-- **Actor / authorization:** Finance/Operations; resource scope and global restrictions above apply.
+- **Actor / authorization:** Admin only; resource scope and global restrictions above apply.
 - **Authentication:** Active database-backed session required.
 - **Request:** `{expectedVersion, effectiveAt, reason}`.
 - **Validation:** active subscription; no duplicate interval credit; re-evaluate preview.
 - **Response:** 201 {subscription,creditNote?,cashRefundRequired}.
 - **Errors:** common error contract above; validation, permission, lifecycle and concurrency conditions are enforced before commit.
 - **Business rules:** BR-014, BR-015, BR-017.
+
+#### Current compact subscription change endpoint
+
+- **Method/path:** `POST /api/v1/subscriptions/:id/change`
+- **Actor / authorization:** Organization Admin only. Non-admin users receive no subscription data from the workspace endpoint, cannot be assigned the subscription module, and cannot call this mutation.
+- **Current request:** `{amount?, action?: "PAUSE"|"RESUME"|"CANCEL", reason}` with a positive amount or lifecycle action and a 5–240 character reason. Invalid lifecycle transitions return 409.
+- **Current limitation:** This endpoint changes amount/state and writes a reasoned audit event, but does not yet calculate proration, create a credit note, accept an effective date, or retain a dedicated change-history record. BIL-03 through BIL-06 define the required completion path.
 
 ### BIL-07 — List invoices and outstanding amounts
 
@@ -1063,7 +1088,7 @@ AUTH-01 is implemented as organization onboarding: `POST /api/v1/auth/signup` ac
 
 ## Audit repair implementation update — 2026-09-05
 
-Implemented in the compatibility API: session-derived CSRF tokens and Origin checks for mutations; request IDs; bounded login throttling; Admin user listing/activation; owner/customer-scoped workspace projections; customer-safe quotation/invoice DTOs; explicit `POST /quotations/:id/send`; proposal adoption/decline; immutable revision/cycle approval behavior; atomic confirmation creating Acceptance/Order/OrderLines/Invoice/Subscriptions; retry-safe allocation; and locked/idempotent payment posting. Existing `/approvals/:id/decision`, `/portal/quotations/:id/message`, `/portal/quotations/:id/confirm`, and `/fulfillment/:quoteId/allocate` compatibility paths remain available while enforcing the stronger state model.
+Implemented in the compatibility API: session-derived CSRF tokens and Origin checks for mutations; request IDs; bounded login throttling; Admin user listing/activation; owner/customer-scoped workspace projections; customer-safe quotation/invoice DTOs; explicit `POST /quotations/:id/send`; proposal adoption/decline; immutable revision/cycle approval behavior; atomic confirmation creating Acceptance/Order/OrderLines/Invoice/Subscriptions; read-only live allocation preview; retry-safe suggested allocation; reasoned manual allocation; and locked/idempotent payment posting. Existing `/approvals/:id/decision`, `/portal/quotations/:id/message`, `/portal/quotations/:id/confirm`, and `/fulfillment/:quoteId/allocate` compatibility paths remain available while enforcing the stronger state model.
 
 ## Platform Owner implementation update — 2026-09-05
 

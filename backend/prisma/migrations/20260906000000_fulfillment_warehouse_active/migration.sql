@@ -1,0 +1,1 @@
+ALTER TABLE "Warehouse" ADD COLUMN "active" BOOLEAN NOT NULL DEFAULT true;
