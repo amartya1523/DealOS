@@ -625,18 +625,44 @@ class Payment {
     required this.id,
     required this.amount,
     required this.reference,
+    required this.currency,
+    required this.provider,
+    required this.status,
     required this.paidAt,
+    this.razorpayOrderId,
+    this.razorpayPaymentId,
+    this.failureCode,
+    this.failureDescription,
+    this.verifiedAt,
   });
   final String id;
   final double amount;
   final String reference;
+  final String currency;
+  final String provider;
+  final String status;
   final DateTime? paidAt;
+  final String? razorpayOrderId;
+  final String? razorpayPaymentId;
+  final String? failureCode;
+  final String? failureDescription;
+  final DateTime? verifiedAt;
+
+  bool get successful => status == 'SUCCESS';
 
   factory Payment.fromJson(JsonMap json) => Payment(
     id: _string(json, 'id'),
     amount: asDouble(json['amount']),
     reference: _string(json, 'reference'),
+    currency: _string(json, 'currency', 'INR'),
+    provider: _string(json, 'provider', 'MANUAL'),
+    status: _string(json, 'status', 'SUCCESS'),
     paidAt: DateTime.tryParse('${json['paidAt'] ?? ''}'),
+    razorpayOrderId: json['razorpayOrderId']?.toString(),
+    razorpayPaymentId: json['razorpayPaymentId']?.toString(),
+    failureCode: json['failureCode']?.toString(),
+    failureDescription: json['failureDescription']?.toString(),
+    verifiedAt: DateTime.tryParse('${json['verifiedAt'] ?? ''}'),
   );
 }
 

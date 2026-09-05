@@ -5,6 +5,9 @@ import '../../../core/api/api_client.dart';
 import '../../../core/errors/app_exception.dart';
 import '../../workspace/domain/models.dart';
 
+const _platformOwnerWebOnlyMessage =
+    'Platform Owner accounts can only sign in on the DealOS website.';
+
 enum SessionStatus { booting, unauthenticated, authenticated }
 
 class SessionState {
@@ -69,6 +72,14 @@ class SessionController extends Notifier<SessionState> {
         return;
       }
       final cached = await ref.read(workspaceRepositoryProvider).loadCached();
+      if (cached?.user.isPlatformOwner == true) {
+        await _clearProtectedState();
+        state = const SessionState(
+          status: SessionStatus.unauthenticated,
+          error: _platformOwnerWebOnlyMessage,
+        );
+        return;
+      }
       if (cached != null) {
         state = SessionState(
           status: SessionStatus.authenticated,
@@ -85,26 +96,16 @@ class SessionController extends Notifier<SessionState> {
     }
   }
 
-  Future<void> login(
-    String identifier,
-    String password, {
-    bool platformOwner = false,
-  }) async {
+  Future<void> login(String identifier, String password) async {
     state = const SessionState(
       status: SessionStatus.unauthenticated,
       busy: true,
     );
     try {
       await ref.read(workspaceRepositoryProvider).clearCache();
-      if (platformOwner) {
-        await ref
-            .read(authRepositoryProvider)
-            .loginPlatformOwner(loginId: identifier, password: password);
-      } else {
-        await ref
-            .read(authRepositoryProvider)
-            .login(identifier: identifier, password: password);
-      }
+      await ref
+          .read(authRepositoryProvider)
+          .login(identifier: identifier, password: password);
       await _loadAuthorized();
     } on AppException catch (error) {
       state = SessionState(
@@ -330,16 +331,16 @@ class SessionController extends Notifier<SessionState> {
 
   Future<void> _loadAuthorized({String? notice}) async {
     final workspace = await ref.read(workspaceRepositoryProvider).load();
-    PlatformDashboard? platformDashboard;
-    if (workspace.user.isPlatformOwner && workspace.organization == null) {
-      platformDashboard = await ref
-          .read(workspaceRepositoryProvider)
-          .loadPlatformDashboard();
+    if (workspace.user.isPlatformOwner) {
+      await _clearProtectedState();
+      throw const AppException(
+        code: 'PLATFORM_OWNER_WEB_ONLY',
+        message: _platformOwnerWebOnlyMessage,
+      );
     }
     state = SessionState(
       status: SessionStatus.authenticated,
       workspace: workspace,
-      platformDashboard: platformDashboard,
       notice: notice,
     );
   }

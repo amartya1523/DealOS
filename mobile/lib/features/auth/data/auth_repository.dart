@@ -30,15 +30,6 @@ class AuthRepository {
         data: {'identifier': identifier.trim(), 'password': password},
       );
 
-  Future<void> loginPlatformOwner({
-    required String loginId,
-    required String password,
-  }) => _api.request(
-    '/auth/super-admin/login',
-    method: 'POST',
-    data: {'loginId': loginId.trim(), 'password': password},
-  );
-
   Future<GoogleAuthConfig> googleAuthConfig() => _api.get(
     '/auth/google/config',
     (data) => GoogleAuthConfig.fromJson(

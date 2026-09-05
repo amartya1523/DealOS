@@ -11,7 +11,7 @@ class LoginScreen extends ConsumerStatefulWidget {
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
-enum _LoginMode { organization, customer, platformOwner }
+enum _LoginMode { organization, customer }
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
@@ -21,7 +21,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _obscure = true;
 
   bool get _customer => _mode == _LoginMode.customer;
-  bool get _platformOwner => _mode == _LoginMode.platformOwner;
   bool get _validCustomerEmail =>
       RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(_identifier.text.trim());
 
@@ -102,18 +101,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         const SizedBox(height: 10),
                       ],
                       Text(
-                        _platformOwner
-                            ? 'Platform control plane'
-                            : _customer
+                        _customer
                             ? 'Everything shared with you, in one place.'
                             : 'Your deals, moving forward.',
                         style: Theme.of(context).textTheme.displaySmall,
                       ),
                       const SizedBox(height: 10),
                       Text(
-                        _platformOwner
-                            ? 'Use the separately configured Platform Owner credentials.'
-                            : _customer
+                        _customer
                             ? 'Enter the email that received your portal invitation, then continue with the same Google account.'
                             : 'Sign in with the same organization account used on the DealOS website.',
                         style: TextStyle(
@@ -183,8 +178,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               decoration: InputDecoration(
                                 labelText: _customer
                                     ? 'Invited email address'
-                                    : _platformOwner
-                                    ? 'Platform login ID'
                                     : 'Email or login ID',
                               ),
                               onChanged: _customer
@@ -285,25 +278,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         onPressed: session.busy
                             ? null
                             : () => _switchMode(
-                                _customer || _platformOwner
+                                _customer
                                     ? _LoginMode.organization
                                     : _LoginMode.customer,
                               ),
                         child: Text(
-                          _platformOwner
-                              ? 'Return to organization sign in'
-                              : _customer
+                          _customer
                               ? 'Organization user sign in'
                               : 'Customer portal',
                         ),
                       ),
                       if (_mode == _LoginMode.organization) ...[
-                        TextButton(
-                          onPressed: session.busy
-                              ? null
-                              : () => _switchMode(_LoginMode.platformOwner),
-                          child: const Text('Platform Owner sign in'),
-                        ),
                         TextButton(
                           onPressed: session.busy
                               ? null
@@ -331,11 +316,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (_customer) {
       controller.loginCustomer(_identifier.text);
     } else {
-      controller.login(
-        _identifier.text,
-        _password.text,
-        platformOwner: _platformOwner,
-      );
+      controller.login(_identifier.text, _password.text);
     }
   }
 

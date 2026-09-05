@@ -153,7 +153,8 @@ void main() {
 
     expect(find.text('Download PDF'), findsOneWidget);
     expect(find.text('Request due-date change'), findsOneWidget);
-    expect(find.text('Pay now'), findsNothing);
+    expect(find.text('RAZORPAY TEST MODE'), findsOneWidget);
+    expect(find.textContaining('Pay now'), findsOneWidget);
   });
 
   testWidgets('customer quote detail hides margin, costs and approval policy', (

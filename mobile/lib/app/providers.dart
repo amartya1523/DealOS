@@ -6,6 +6,8 @@ import '../core/security/session_store.dart';
 import '../features/auth/application/session_controller.dart';
 import '../features/auth/data/auth_repository.dart';
 import '../features/auth/data/customer_identity_provider.dart';
+import '../features/billing/application/razorpay_checkout.dart';
+import '../features/billing/data/payment_repository.dart';
 import '../features/workspace/data/workspace_cache.dart';
 import '../features/workspace/data/workspace_repository.dart';
 
@@ -29,6 +31,12 @@ final authRepositoryProvider = Provider<AuthRepository>(
 );
 final customerIdentityProvider = Provider<CustomerIdentityProvider>(
   (ref) => GoogleCustomerIdentityProvider(),
+);
+final paymentRepositoryProvider = Provider<PaymentRepository>(
+  (ref) => PaymentRepository(ref.watch(apiClientProvider)),
+);
+final paymentCheckoutProvider = Provider<PaymentCheckout>(
+  (ref) => RazorpayPaymentCheckout(),
 );
 final workspaceRepositoryProvider = Provider<WorkspaceRepository>(
   (ref) => WorkspaceRepository(

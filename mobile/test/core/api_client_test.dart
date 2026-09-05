@@ -6,6 +6,7 @@ import 'package:dealos_mobile/core/config/app_config.dart';
 import 'package:dealos_mobile/core/errors/app_exception.dart';
 import 'package:dealos_mobile/core/security/session_store.dart';
 import 'package:dealos_mobile/features/auth/data/auth_repository.dart';
+import 'package:dealos_mobile/features/billing/data/payment_repository.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -213,5 +214,65 @@ void main() {
     });
     expect(store.cookies['dealos_session'], 'customer-session');
     expect(store.csrf, 'customer-csrf');
+  });
+
+  test('Razorpay checkout never sends a client-selected amount', () async {
+    final store = MemorySessionStore()
+      ..cookies = {'dealos_session': 'opaque'}
+      ..csrf = 'csrf-123';
+    RequestOptions? createOrder;
+    RequestOptions? verifyPayment;
+    final dio = Dio()
+      ..httpClientAdapter = StubAdapter((options) {
+        if (options.path.endsWith('/payments/orders')) {
+          createOrder = options;
+          return jsonBody({
+            'success': true,
+            'data': {
+              'paymentRecordId': 'payment-record-1',
+              'orderId': 'order_test_1',
+              'amount': 112100,
+              'amountRupees': '1121.00',
+              'currency': 'INR',
+              'keyId': 'rzp_test_public',
+              'testMode': true,
+              'invoice': {'number': 'INV-1'},
+              'prefill': {'email': 'buyer@example.com'},
+            },
+          }, 201);
+        }
+        verifyPayment = options;
+        return jsonBody({
+          'success': true,
+          'data': {
+            'payment': {'status': 'SUCCESS'},
+          },
+        }, 200);
+      });
+    final repository = PaymentRepository(
+      ApiClient(config: config, sessionStore: store, dio: dio),
+    );
+
+    final order = await repository.createOrder(
+      '00000000-0000-0000-0000-000000000001',
+    );
+    await repository.verify(
+      order: order,
+      razorpayPaymentId: 'pay_test_1',
+      razorpayOrderId: order.orderId,
+      razorpaySignature: 'a' * 64,
+    );
+
+    expect(createOrder?.data, {
+      'invoiceId': '00000000-0000-0000-0000-000000000001',
+    });
+    expect((createOrder?.data as Map).containsKey('amount'), isFalse);
+    expect(createOrder?.headers['X-CSRF-Token'], 'csrf-123');
+    expect(verifyPayment?.data, {
+      'paymentRecordId': 'payment-record-1',
+      'razorpayPaymentId': 'pay_test_1',
+      'razorpayOrderId': 'order_test_1',
+      'razorpaySignature': 'a' * 64,
+    });
   });
 }
