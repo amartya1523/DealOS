@@ -14,6 +14,7 @@ const fetchMock = vi.fn();
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   window.scrollTo = vi.fn();
+  window.localStorage.clear();
   fetchMock.mockReset();
   fetchMock.mockResolvedValue({
     ok: false,
@@ -94,6 +95,18 @@ describe("DealOS public routes", () => {
     );
     expect(await screen.findByRole("heading", {name:"Sales dashboard"})).toBeInTheDocument();
     expect(window.location.pathname).toBe("/app");
+    expect(screen.queryByText(/^Live$/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(document.querySelector(".app-shell")).toHaveClass("sidebar-collapsed");
+    expect(screen.getByRole("button", { name: "Expand sidebar" })).toHaveAttribute("aria-expanded", "false");
+    expect(window.localStorage.getItem("dealos.sidebar.collapsed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Quotations" }));
+    expect(screen.getByRole("heading", { name: "Quotation pipeline" })).toBeInTheDocument();
+    const requestsBeforeBrandClick = fetchMock.mock.calls.length;
+    fireEvent.click(screen.getByRole("link", { name: "DealOS home" }));
+    expect(screen.getByRole("heading", { name: "Sales dashboard" })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/app");
+    expect(fetchMock).toHaveBeenCalledTimes(requestsBeforeBrandClick);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/auth/signup",
       expect.objectContaining({
@@ -113,6 +126,91 @@ describe("DealOS public routes", () => {
     expect(
       await screen.findByRole("heading", { name: "Welcome back." }),
     ).toBeInTheDocument();
+  });
+  it("creates a quotation through the UI and reloads real workspace totals", async () => {
+    window.history.replaceState({}, "", "/app");
+    const baseWorkspace = {
+      user: {
+        id: "admin",
+        name: "Admin User",
+        email: "admin@example.com",
+        role: "ADMIN",
+        moduleAccess: [],
+        actorType: "USER",
+        platformSuperAdmin: false,
+        viewContext: null,
+      },
+      organization: { id: "org", name: "Acme" },
+      users: [],
+      quotes: [],
+      products: [],
+      policies: [],
+      warehouses: [],
+      subscriptions: [],
+      invoices: [],
+      alerts: [],
+      audits: [],
+    };
+    const now = new Date().toISOString();
+    const createdQuote = {
+      id: "quote-real",
+      number: "Q-REAL-001",
+      customer: "Real Customer",
+      customerTier: "Gold",
+      stage: "DRAFT",
+      version: 1,
+      orderDiscount: 0,
+      total: 0,
+      margin: 0,
+      riskScore: 0,
+      createdAt: now,
+      updatedAt: now,
+      lastActivity: now,
+      owner: { id: "admin", name: "Admin User" },
+      lines: [],
+      approvals: [],
+      negotiation: [],
+      invoices: [],
+    };
+    let workspaceReads = 0;
+    fetchMock.mockImplementation((url: string) =>
+      Promise.resolve({
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: url.endsWith("/workspace")
+            ? ++workspaceReads > 1
+              ? { ...baseWorkspace, quotes: [createdQuote] }
+              : baseWorkspace
+            : url.endsWith("/quotations")
+              ? createdQuote
+              : { id: "admin", role: "ADMIN" },
+        }),
+      }),
+    );
+    render(<App />);
+    expect(
+      await screen.findByRole("heading", { name: "Sales dashboard" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Quotations" }));
+    fireEvent.click(screen.getByRole("button", { name: "New quotation" }));
+    fireEvent.change(screen.getByLabelText("Customer"), {
+      target: { value: "Real Customer" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    expect(await screen.findByText("Q-REAL-001")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Overview" }));
+    expect(screen.getByText("1 active quotations")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/quotations",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          customer: "Real Customer",
+          customerTier: "Gold",
+        }),
+      }),
+    );
   });
   it("edits and publishes every discount ceiling with an audit reason", async () => {
     window.history.replaceState({}, "", "/app");

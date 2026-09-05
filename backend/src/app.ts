@@ -388,14 +388,14 @@ app.get('/api/v1/workspace', authenticate, async (req: AuthRequest, res) => {
     db.organization.findUnique({ where: { id: req.user!.organizationId }, select: { id: true, name: true } }),
     req.user!.role === 'ADMIN' ? db.organizationMembership.findMany({ where: { organizationId: req.user!.organizationId }, select: { accessRole: true, businessRole: true, status: true, createdAt: true, user: { select: { id: true, name: true, email: true, loginId: true, status: true, moduleAccess: true, createdAt: true } } }, orderBy: { createdAt: 'desc' } }).then((memberships) => memberships.map(({ user, ...membership }) => ({ ...user, role: membership.businessRole, membershipStatus: membership.status, accessRole: membership.accessRole, joinedAt: membership.createdAt }))) : [],
     !portal && (hasModule(req.user, 'customers') || hasModule(req.user, 'invoices')) ? db.customer.findMany({ where: { organizationId: req.user!.organizationId }, include: { quotes: { select: { id: true, number: true, stage: true, total: true, updatedAt: true }, orderBy: { updatedAt: 'desc' }, take: 5 }, invoices: { select: { id: true, number: true, state: true, amount: true, paidAmount: true, dueAt: true }, orderBy: { createdAt: 'desc' }, take: 5 }, users: { where: { role: 'CUSTOMER' }, select: { id: true, email: true, status: true, googleSubject: true } }, invitations: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true, email: true, status: true, expiresAt: true, createdAt: true } } }, orderBy: { updatedAt: 'desc' } }) : [],
-    db.quote.findMany({ where: quoteWhere, include: { lines: { include: { product: true } }, approvals: { orderBy: [{ cycle: 'desc' }, { sequence: 'asc' }] }, fulfillment: true, order: true, negotiation: { orderBy: { createdAt: 'desc' } }, invoices: true }, orderBy: { updatedAt: 'desc' } }),
+    db.quote.findMany({ where: quoteWhere, include: { owner: { select: { id: true, name: true } }, lines: { include: { product: true } }, approvals: { orderBy: [{ cycle: 'desc' }, { sequence: 'asc' }] }, fulfillment: true, order: true, negotiation: { orderBy: { createdAt: 'desc' } }, invoices: true }, orderBy: { updatedAt: 'desc' } }),
     !portal && (hasModule(req.user, 'products') || hasModule(req.user, 'invoices')) ? db.product.findMany({ where: { organizationId: req.user!.organizationId }, include: { stocks: { include: { warehouse: true } } }, orderBy: { name: 'asc' } }) : [],
     !portal && hasModule(req.user, 'policies') ? db.discountPolicy.findMany({ where: { organizationId: req.user!.organizationId }, orderBy: { tier: 'asc' } }) : [],
     !portal && hasModule(req.user, 'fulfillment') ? db.warehouse.findMany({ where: { organizationId: req.user!.organizationId }, include: { stocks: { include: { product: true } } }, orderBy: { priority: 'asc' } }) : [],
     !portal && req.user!.role === 'ADMIN' ? db.subscription.findMany({ where: { organizationId: req.user!.organizationId }, orderBy: { nextBillAt: 'asc' } }) : [],
     (portal || hasModule(req.user, 'invoices')) ? db.invoice.findMany({ where: { organizationId: req.user!.organizationId, ...(portal ? { customerId: req.user!.customerId! } : req.user!.role === 'REP' ? { quote: { ownerId: req.user!.id } } : {}) }, include: { payments: true, customerRecord: { select: { id: true, email: true, phone: true, countryCode: true, contactPerson: true } } }, orderBy: { createdAt: 'desc' } }) : [],
     !portal && hasModule(req.user, 'health') ? db.alert.findMany({ where: { organizationId: req.user!.organizationId }, orderBy: { createdAt: 'desc' } }) : [],
-    !portal && hasModule(req.user, 'reports') ? db.auditEvent.findMany({ where: { organizationId: req.user!.organizationId, ...(req.user!.role === 'REP' ? { actorId: req.user!.id } : {}) }, orderBy: { createdAt: 'desc' }, take: 30 }) : [],
+    !portal && (hasModule(req.user, 'reports') || hasModule(req.user, 'health')) ? db.auditEvent.findMany({ where: { organizationId: req.user!.organizationId, ...(req.user!.role === 'REP' ? { actorId: req.user!.id } : {}) }, orderBy: { createdAt: 'desc' }, take: 60 }) : [],
   ]);
   const quotes = portal ? rawQuotes.map(portalQuoteDto) : rawQuotes;
   const invoices = portal ? rawInvoices.map(portalInvoiceDto) : rawInvoices;
@@ -968,6 +968,28 @@ app.post('/api/v1/alerts/:id/nudge', authenticate, requireModule('health'), requ
   const existing = await db.alert.findFirst({ where: { id: routeParam(req, 'id'), organizationId: req.user!.organizationId } });
   if (!existing) return fail(req, res, 404, 'NOT_FOUND', 'Alert not found.');
   const alert = await db.$transaction(async (tx) => { const updated = await tx.alert.update({ where: { id: existing.id }, data: { nudged: true } }); await audit(tx, req, 'ALERT_NUDGED', 'Alert', updated.id); return updated; });
+  return ok(req, res, alert);
+});
+
+app.post('/api/v1/alerts/:id/escalate', authenticate, requireModule('health'), requireRole('REP', 'MANAGER', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
+  const existing = await db.alert.findFirst({ where: { id: routeParam(req, 'id'), organizationId: req.user!.organizationId, resolved: false } });
+  if (!existing) return fail(req, res, 404, 'NOT_FOUND', 'Active alert not found.');
+  const alert = await db.$transaction(async (tx) => {
+    const updated = await tx.alert.update({ where: { id: existing.id }, data: { nudged: true } });
+    await audit(tx, req, 'ALERT_ESCALATED', 'Alert', updated.id, `${updated.kind}:${updated.resourceId}`);
+    return updated;
+  });
+  return ok(req, res, alert);
+});
+
+app.post('/api/v1/alerts/:id/resolve', authenticate, requireModule('health'), requireRole('REP', 'MANAGER', 'FINANCE', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
+  const existing = await db.alert.findFirst({ where: { id: routeParam(req, 'id'), organizationId: req.user!.organizationId, resolved: false } });
+  if (!existing) return fail(req, res, 404, 'NOT_FOUND', 'Active alert not found.');
+  const alert = await db.$transaction(async (tx) => {
+    const updated = await tx.alert.update({ where: { id: existing.id }, data: { resolved: true } });
+    await audit(tx, req, 'ALERT_RESOLVED', 'Alert', updated.id, `${updated.kind}:${updated.resourceId}`);
+    return updated;
+  });
   return ok(req, res, alert);
 });
 
