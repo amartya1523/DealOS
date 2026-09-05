@@ -369,11 +369,13 @@ export function Landing() {
         top: sequence.start + ((sequence.end - sequence.start) * index) / 3,
         behavior: "auto",
       });
-    } else
-      document.getElementById(`chapter-${index}`)?.scrollIntoView({
+    } else {
+      const chapter = document.getElementById(`chapter-${index}`);
+      if (typeof chapter?.scrollIntoView === "function") chapter.scrollIntoView({
         behavior: paused ? "auto" : "smooth",
         block: "center",
       });
+    }
   }
   return (
     <div ref={root} className={`cinematic ${paused ? "motion-paused" : ""}`}>
