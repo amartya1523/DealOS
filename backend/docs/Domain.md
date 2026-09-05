@@ -38,9 +38,9 @@ Status: design baseline. C/I/P classifications refer to [PRD.md](PRD.md). Propos
 |---|---|---|---|---|
 | Sales Rep | Build viable deals and respond to negotiation | Own/assigned-team quotes and customer context; internal margin | Draft, revise, submit, send, propose, inspect allocation | Cannot approve own deal, change stock or record payments; receives stage/risk explanations |
 | Sales Manager | Protect team pricing and progress | Team quotes, risk, review history, health, team reports | Approve/reject/return eligible step; configure approval policy | Cannot review a case they submitted; cannot skip Finance; receives reasons and audit |
-| Finance/Operations | Control high-risk discounts, stock and receivables | Approved commercial details, stock, invoices, plans | Second review, allocate, ship, receive stock, change subscriptions, record payment/credit | Sequential approval and immutable ledger restrictions; receives reconciliation results |
+| Finance/Operations | Control high-risk discounts, stock and receivables | Approved commercial details, stock and invoices | Second review, allocate, ship, receive stock and record payment | No subscription-module access; sequential approval and immutable ledger restrictions apply |
 | Customer | Understand and agree commercial offer | Own business's sent quotes, allowed terms/comments and invoices | Submit proposal/comment, accept current revision | Cannot access draft quotes, other customers, internal notes/cost/risk; receives confirmation/pending-review state |
-| Admin | Maintain correct setup and identities | Organization configuration, identities and reports | Activate accounts; assign roles/team/customer links; configure catalog, warehouses/plans/policies | No implicit reviewer bypass; cannot edit issued financial history; receives configuration audit |
+| Admin | Maintain correct setup, identities and recurring obligations | Organization configuration, identities, subscriptions and reports | Activate accounts; assign roles/team/customer links; configure catalog, warehouses/plans/policies; preview and commit subscription changes/cancellations | Subscription module is Admin-only; no implicit reviewer bypass; cannot edit issued financial history; receives configuration audit |
 | Platform Super Admin / Platform Owner | Securely oversee the complete installation | Global organization/member and tenant operational summaries | Create/suspend/archive organizations; manage memberships; inspect records; enter read-only View As | Independent environment identity and session, never an organization user or role; privileged mutations are audited |
 | System scheduler | Process due billing and health rules | Only job-required domain data | Claim due jobs, generate recurring invoices, resolve/reopen alerts | No interactive login; transaction/idempotency protections apply; receives durable job status |
 
@@ -71,7 +71,7 @@ Invoice: `DRAFT → ISSUED → PARTIALLY_PAID → PAID`, with credit-adjusted ba
 
 - Trigger/actor: Admin configures products/prices, tier/category caps, warehouses/stock and subscription plans; Manager may configure discount policy.
 - Input: validated category/variant, fixed-precision price/cost, plan cadence, ceilings, approval thresholds, stock adjustment reason.
-- Processing/logic: validate completeness, publish policy version, reject impossible ranges; archived referenced products remain in historical snapshots.
+- Processing/logic: edit the tier, Hardware, Services and Subscriptions ceilings together; require a change reason; reject category ceilings above the overall tier ceiling; publish a new version marker. Archived referenced products remain in historical snapshots.
 - Database: configuration tables, stock movement ledger, policy version and audit in transaction.
 - Output: selectable active catalog, operational stock availability and effective policy.
 - Failure/recovery: invalid overlapping rules rejected; stale update gives 409; correct and retry with latest version. Prior published policy remains effective on failure.
@@ -111,10 +111,11 @@ Invoice: `DRAFT → ISSUED → PARTIALLY_PAID → PAID`, with credit-adjusted ba
 - Database: allocation version, reservations, stock movements, shipment lines, backorder remainder and audit.
 - Output: accepted split, estimated cost and outstanding demand; consolidation prompt for unshipped remainder.
 - Failure/recovery: stock race produces fresh preview/409; no negative stock. Partial operations roll back; shipped stock never moves during consolidation.
+- Current compatibility behavior: the workspace and stock endpoint supply backend-derived live availability; `GET /fulfillment/:quoteId/preview` calculates without reserving and fingerprints the stock snapshot; suggested and manual commits lock balances and create one fulfillment record. Finance/Admin can record stock receipts and consolidate newly available backorder quantities transactionally. Manual allocation, receipts and consolidation require audit reasons.
 
 ### W-07 Hybrid billing and subscription changes
 
-- Trigger/actor: confirmed order, due billing job, Finance change/cancel request.
+- Trigger/actor: confirmed order, due billing job, or Admin change/cancel request. Interactive subscription access is Admin-only.
 - Input: order line snapshots; effective change date; plan/quantity; expected version and reason.
 - Processing/logic: separate one-time and recurring buckets; generate period keys; actual-period day proration; credit only according to snapshotted plan rules; sequential calendar advancement.
 - Database: subscriptions, periods, invoice/lines, change event and credit notes atomically.
@@ -159,7 +160,7 @@ Condition: quote preview/save/submit. Behavior: backend resolves price and calcu
 Condition: line discount `l` and order discount `o` apply. Behavior: proposed sequential composition `effective = 1 − (1−l)(1−o)`; allocate order discount to eligible lines and evaluate the resulting rate. Reason: an order discount must not bypass line policy. Owner: pricing/governance; W-03/04. Edge cases: 10% + 10% becomes 19%, not 20%; 100% discount has explicit zero-revenue/margin handling; excluded charges are disclosed.
 
 ### BR-003 — Effective ceiling [C/P]
-Condition: both tier and category caps exist. Behavior: proposed effective cap is `min(tierCap, categoryCap)` unless an explicit versioned override exists. Reason: preserve stricter category protection demonstrated by Gold services example. Owner: governance; W-04. Edge cases: missing rule blocks submission rather than unlimited discretion.
+Condition: both tier and category caps exist. Behavior: the editor permits each tier and each Hardware, Services and Subscriptions ceiling to be changed, but a category cap cannot exceed its overall tier cap. Quote evaluation uses `min(tierCap, categoryCap)` unless an explicit versioned override exists. Every change requires an audit reason and advances the published version marker. Reason: preserve stricter category protection demonstrated by the Gold services example. Owner: governance; W-04. Edge cases: missing rule blocks submission rather than unlimited discretion.
 
 ### BR-004 — Explainable blended risk [C/P]
 Condition: quote submission or commercial revision. Behavior: for each line compute excess points `e=max(0,effectiveDiscount−cap)`; compute `worst=max(e)` and `weighted=Σ(baseValue×e)/Σ(baseValue)` within comparable cadence/currency buckets. Route to the highest level from any worst-line band, weighted band, aggregate-discount ceiling or minimum-margin breach. Any excess requires at least Manager. Reason: a small violating service line cannot disappear in an average, and aggregate rules cover margin erosion. Owner: governance; W-04/05. Edge cases: zero base value blocks undefined ratios; multiple small excesses still require review; incomparable monthly/yearly/one-time revenue is never directly summed. **Proposed example defaults:** Finance if worst exceeds 5 percentage points, weighted exceeds 3 points or configured minimum margin is breached. These values are seed policy, not hardcoded constants or source requirements. Service 18% vs 10% yields excess 8 and Finance under these defaults. Store all component values and policy version; do not display an invented opaque score as fact.

@@ -11,7 +11,7 @@ const quotes = [
   quote({ id: "quote-1", number: "Q-001", stage: "CONFIRMED", ownerId: "rep-1", ownerName: "Aarav Mehta", total: 200000, discount: 5 }),
   quote({ id: "quote-2", number: "Q-002", stage: "PENDING_APPROVAL", ownerId: "rep-2", ownerName: "Maya Shah", total: 300000, discount: 18 }),
 ];
-const workspace = { user: { id: "admin", name: "Admin", email: "admin@example.com", role: "ADMIN", moduleAccess: [], actorType: "USER", platformSuperAdmin: false, viewContext: null }, organization: { id: "org", name: "Acme" }, users: [], quotes, products: [product], policies: [], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] } as Workspace;
+const workspace = { user: { id: "admin", name: "Admin", email: "admin@example.com", role: "ADMIN", moduleAccess: [], actorType: "USER", platformSuperAdmin: false, viewContext: null }, organization: { id: "org", name: "Acme" }, users: [], customers: [], quotes, products: [product], policies: [], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] } as Workspace;
 
 beforeEach(() => {
   vi.stubGlobal("print", vi.fn());
