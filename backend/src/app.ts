@@ -248,7 +248,7 @@ async function ensureCustomerPortalInvite(tx: Tx, req: AuthRequest, customer: { 
 function portalQuoteDto(quote: any) {
   return {
     id: quote.id, number: quote.number, customer: quote.customer, customerTier: quote.customerTier,
-    stage: quote.stage, version: quote.version, orderDiscount: quote.orderDiscount, total: quote.total,
+    stage: quote.stage, version: quote.version, currentRevisionId: quote.currentRevisionId, revisionNumber: quote.currentRevision?.revisionNumber ?? quote.version, orderDiscount: quote.orderDiscount, total: quote.total,
     taxTotal: quote.taxTotal, totalsByCadence: quote.totalsByCadence, sentAt: quote.sentAt,
     lines: quote.lines.map((line: any) => ({
       id: line.id, productId: line.productId, quantity: line.quantity, unitPrice: line.unitPrice,
@@ -985,12 +985,20 @@ app.post('/api/v1/quotations/:id/send', authenticate, requireModule('quotations'
 app.post('/api/v1/portal/quotations/:id/message', authenticate, requireRole('CUSTOMER'), requireCsrf, async (req: AuthRequest, res) => {
   const parsed = z.object({ message: z.string().trim().min(2).max(2000), counterDiscount: z.number().min(0).max(100).optional() }).strict().safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter a valid request.');
-  const quote = await db.quote.findFirst({ where: { id: routeParam(req, 'id'), organizationId: req.user!.organizationId, customerId: req.user!.customerId ?? '__none__', sentAt: { not: null } } });
-  if (!quote?.currentRevisionId) return fail(req, res, 404, 'NOT_FOUND', 'Quotation not found.');
   const kind = parsed.data.counterDiscount === undefined ? 'COMMENT' : 'PROPOSAL';
   const negotiation = await db.$transaction(async (tx) => {
+    const quoteId = routeParam(req, 'id');
+    await tx.$queryRaw`SELECT "id" FROM "Quote" WHERE "id" = ${quoteId} FOR UPDATE`;
+    const quote = await tx.quote.findFirst({ where: { id: quoteId, organizationId: req.user!.organizationId, customerId: req.user!.customerId ?? '__none__', sentAt: { not: null }, order: { is: null }, stage: { in: ['APPROVED', 'NEGOTIATION'] } } });
+    if (!quote?.currentRevisionId) throw new DomainError(404, 'NOT_FOUND', 'Quotation not found or is no longer open for negotiation.');
+    if (kind === 'PROPOSAL') {
+      await tx.negotiation.updateMany({
+        where: { quoteId: quote.id, kind: 'PROPOSAL', state: 'OPEN' },
+        data: { state: 'DECLINED' },
+      });
+    }
     const record = await tx.negotiation.create({ data: { quoteId: quote.id, revisionId: quote.currentRevisionId!, author: req.user!.name, message: parsed.data.message, counterDiscount: parsed.data.counterDiscount, kind } });
-    if (kind === 'PROPOSAL') await tx.quote.update({ where: { id: quote.id }, data: { stage: 'NEGOTIATION', lastActivity: new Date() } });
+    if (kind === 'PROPOSAL') await tx.quote.update({ where: { id: quote.id }, data: { stage: 'NEGOTIATION', version: { increment: 1 }, lastActivity: new Date() } });
     await audit(tx, req, kind === 'COMMENT' ? 'CUSTOMER_COMMENTED' : 'CUSTOMER_PROPOSED_CHANGE', 'Quote', quote.id, parsed.data.message, quote.currentRevisionId!);
     return record;
   });
@@ -998,27 +1006,50 @@ app.post('/api/v1/portal/quotations/:id/message', authenticate, requireRole('CUS
 });
 
 app.post('/api/v1/quotations/:id/proposals/:proposalId/respond', authenticate, requireModule('quotations'), requireRole('REP', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
-  const parsed = z.object({ decision: z.enum(['ADOPT', 'DECLINE']), reason: z.string().trim().min(2).max(2000) }).strict().safeParse(req.body);
+  const parsed = z.object({
+    decision: z.enum(['ADOPT', 'COUNTER', 'DECLINE']),
+    reason: z.string().trim().min(2).max(2000),
+    counterDiscount: z.number().min(0).max(100).optional(),
+  }).strict().superRefine((value, context) => {
+    if (value.decision === 'COUNTER' && value.counterDiscount === undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ['counterDiscount'], message: 'Enter a counter discount.' });
+  }).safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'A decision and reason are required.');
-  const quote = await db.quote.findUnique({ where: { id: routeParam(req, 'id') }, include: { lines: { include: { product: true } }, currentRevision: true } });
+  const quote = await db.quote.findUnique({ where: { id: routeParam(req, 'id') }, include: { lines: { include: { product: true } }, currentRevision: true, approvals: true, negotiation: true, order: true } });
   if (!quote || !(await canAccessInternalQuote(req.user!, quote))) return fail(req, res, 404, 'NOT_FOUND', 'Quotation not found.');
+  if (!quotationCapabilities(req.user!, quote).negotiate) return fail(req, res, 403, 'FORBIDDEN', 'Only the quotation owner or an administrator can respond to this active negotiation.');
   const proposal = await db.negotiation.findFirst({ where: { id: routeParam(req, 'proposalId'), quoteId: quote.id, revisionId: quote.currentRevisionId ?? '__none__', kind: 'PROPOSAL', state: 'OPEN' } });
   if (!proposal) return fail(req, res, 409, 'INVALID_STATE', 'This proposal is no longer open.');
   if (parsed.data.decision === 'DECLINE') {
-    const declined = await db.$transaction(async (tx) => { const record = await tx.negotiation.update({ where: { id: proposal.id }, data: { state: 'DECLINED' } }); await audit(tx, req, 'CUSTOMER_PROPOSAL_DECLINED', 'Quote', quote.id, parsed.data.reason, proposal.revisionId); return record; });
+    const declined = await db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Quote" WHERE "id" = ${quote.id} FOR UPDATE`;
+      const current = await tx.negotiation.findFirst({ where: { id: proposal.id, quoteId: quote.id, revisionId: quote.currentRevisionId!, kind: 'PROPOSAL', state: 'OPEN' } });
+      if (!current) throw new DomainError(409, 'INVALID_STATE', 'This proposal has already been answered or superseded.');
+      const record = await tx.negotiation.update({ where: { id: current.id }, data: { state: 'DECLINED' } });
+      await tx.negotiation.updateMany({ where: { quoteId: quote.id, kind: 'PROPOSAL', state: 'OPEN' }, data: { state: 'DECLINED' } });
+      await tx.negotiation.create({ data: { quoteId: quote.id, revisionId: current.revisionId, author: req.user!.name, message: parsed.data.reason, kind: 'COMMENT' } });
+      await tx.quote.update({ where: { id: quote.id }, data: { stage: 'APPROVED', version: { increment: 1 }, lastActivity: new Date() } });
+      await audit(tx, req, 'CUSTOMER_PROPOSAL_DECLINED', 'Quote', quote.id, parsed.data.reason, current.revisionId);
+      return record;
+    });
     return ok(req, res, { proposal: declined, quotation: quote });
   }
   const policy = await db.discountPolicy.findFirst({ where: { organizationId: req.user!.organizationId, tier: quote.customerTier } });
-  const proposedDiscount = proposal.counterDiscount;
+  const proposedDiscount = parsed.data.decision === 'COUNTER' ? new Prisma.Decimal(parsed.data.counterDiscount!) : proposal.counterDiscount;
   if (!policy || proposedDiscount === null) return fail(req, res, 422, 'CONFIGURATION_REQUIRED', 'The proposal cannot be calculated.');
   const calculation = calculateQuote(quote.lines.map((line) => ({ quantity: line.quantity, unitPrice: line.unitPrice, unitCost: line.unitCost, discount: line.discount, allowedDiscount: line.allowedDiscount, taxRate: line.product.taxRate, cadence: line.product.recurring ? line.product.cadence : 'One-time' })), proposedDiscount, { financeThreshold: policy.financeThreshold });
   const adopted = await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Quote" WHERE "id" = ${quote.id} FOR UPDATE`;
+    const current = await tx.quote.findUnique({ where: { id: quote.id }, select: { currentRevisionId: true } });
+    const openProposal = await tx.negotiation.findFirst({ where: { id: proposal.id, quoteId: quote.id, revisionId: quote.currentRevisionId!, kind: 'PROPOSAL', state: 'OPEN' } });
+    if (current?.currentRevisionId !== quote.currentRevisionId || !openProposal) throw new DomainError(409, 'INVALID_STATE', 'A newer negotiation response already exists. Refresh the quotation.');
     await tx.quoteRevision.update({ where: { id: quote.currentRevisionId! }, data: { state: 'SUPERSEDED' } });
     const latest = await tx.quoteRevision.findFirst({ where: { quoteId: quote.id }, orderBy: { revisionNumber: 'desc' } });
-    const revision = await tx.quoteRevision.create({ data: { quoteId: quote.id, revisionNumber: (latest?.revisionNumber ?? 0) + 1, state: 'DRAFT', orderDiscount: proposedDiscount, subtotal: calculation.subtotal, taxTotal: calculation.taxTotal, total: calculation.total, margin: calculation.margin, riskScore: calculation.riskScore, totalsByCadence: asJson(calculation.totalsByCadence), linesSnapshot: quote.currentRevision!.linesSnapshot as Prisma.InputJsonValue, policySnapshot: asJson({ id: policy.id, version: policy.version, tier: policy.tier, financeThreshold: policy.financeThreshold.toString(), minimumMarginPercent: '12', calculation: { worstExcess: calculation.worstExcess, weightedExcess: calculation.weightedExcess, marginPercent: calculation.marginPercent } }), termsHash: termsHash({ source: proposal.revisionId, counterDiscount: proposedDiscount.toString(), calculation }) } });
+    const revision = await tx.quoteRevision.create({ data: { quoteId: quote.id, revisionNumber: (latest?.revisionNumber ?? 0) + 1, state: 'DRAFT', currency: quote.currentRevision!.currency, validUntil: quote.currentRevision!.validUntil, promisedDeliveryAt: quote.currentRevision!.promisedDeliveryAt, terms: quote.currentRevision!.terms, orderDiscount: proposedDiscount, subtotal: calculation.subtotal, taxTotal: calculation.taxTotal, total: calculation.total, margin: calculation.margin, riskScore: calculation.riskScore, totalsByCadence: asJson(calculation.totalsByCadence), linesSnapshot: quote.currentRevision!.linesSnapshot as Prisma.InputJsonValue, policySnapshot: asJson({ id: policy.id, version: policy.version, tier: policy.tier, financeThreshold: policy.financeThreshold.toString(), minimumMarginPercent: '12', calculation: { worstExcess: calculation.worstExcess, weightedExcess: calculation.weightedExcess, marginPercent: calculation.marginPercent } }), termsHash: termsHash({ source: proposal.revisionId, counterDiscount: proposedDiscount.toString(), decision: parsed.data.decision, nonce: crypto.randomUUID() }) } });
     const updated = await tx.quote.update({ where: { id: quote.id }, data: { currentRevisionId: revision.id, stage: 'DRAFT', sentAt: null, orderDiscount: proposedDiscount, total: calculation.total, taxTotal: calculation.taxTotal, totalsByCadence: asJson(calculation.totalsByCadence), margin: calculation.margin, riskScore: calculation.riskScore, version: { increment: 1 }, lastActivity: new Date() } });
-    const record = await tx.negotiation.update({ where: { id: proposal.id }, data: { state: 'ADOPTED' } });
-    await audit(tx, req, 'CUSTOMER_PROPOSAL_ADOPTED', 'Quote', quote.id, parsed.data.reason, revision.id);
+    const record = await tx.negotiation.update({ where: { id: proposal.id }, data: { state: parsed.data.decision === 'ADOPT' ? 'ADOPTED' : 'DECLINED' } });
+    await tx.negotiation.updateMany({ where: { quoteId: quote.id, id: { not: proposal.id }, kind: 'PROPOSAL', state: 'OPEN' }, data: { state: 'DECLINED' } });
+    await tx.negotiation.create({ data: { quoteId: quote.id, revisionId: revision.id, author: req.user!.name, message: parsed.data.reason, counterDiscount: parsed.data.decision === 'COUNTER' ? proposedDiscount : null, kind: parsed.data.decision === 'COUNTER' ? 'PROPOSAL' : 'COMMENT', state: parsed.data.decision === 'COUNTER' ? 'ADOPTED' : 'OPEN' } });
+    await audit(tx, req, parsed.data.decision === 'ADOPT' ? 'CUSTOMER_PROPOSAL_ADOPTED' : 'SELLER_COUNTER_PROPOSED', 'Quote', quote.id, parsed.data.reason, revision.id);
     return { proposal: record, quotation: updated, calculation };
   });
   return ok(req, res, adopted);

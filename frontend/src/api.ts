@@ -27,7 +27,7 @@ export type RiskBreakdown = {
   financeReason:string;
   cards:RiskExplanationCard[];
 };
-export type Quote = { id:string; number:string; customer:string; customerTier:string; stage:string; version:number; currentRevisionId?:string|null; sentAt?:string|null; orderDiscount:number|string; total:number|string; margin:number|string; riskScore:number|string; createdAt?:string; updatedAt:string; lastActivity?:string; riskBreakdown?:RiskBreakdown; owner?:{id:string;name:string}; order?:{id:string;number:string;state:string}; lines: Array<{id:string;productId:string;quantity:number;unitPrice:number|string;unitCost:number|string;discount:number|string;allowedDiscount:number|string;product:Product}>; approvals:Array<{id:string;step:string;sequence:number;state:string;reason?:string;createdAt?:string;decidedAt?:string}>; fulfillment?:{state:string;split:{split:Array<{warehouseId?:string;warehouseName:string;quantity:number;productId:string}>;backorders:Array<{productId:string;quantity:number}>};estimatedCost:number|string;shipmentCount:number;updatedAt?:string;stockFingerprint?:string;items?:Array<{orderLineId?:string|null;productId:string;productName:string;orderedQuantity:number;fulfilledQuantity:number;backorderedQuantity:number}>;consolidationAvailable?:boolean}; negotiation:Array<{id:string;author:string;message:string;counterDiscount?:number|string;createdAt:string}>; invoices:Array<{id:string;number:string;state:string}> };
+export type Quote = { id:string; number:string; customer:string; customerTier:string; stage:string; version:number; revisionNumber?:number; currentRevisionId?:string|null; sentAt?:string|null; orderDiscount:number|string; total:number|string; margin:number|string; riskScore:number|string; createdAt?:string; updatedAt:string; lastActivity?:string; riskBreakdown?:RiskBreakdown; owner?:{id:string;name:string}; order?:{id:string;number:string;state:string}; lines: Array<{id:string;productId:string;quantity:number;unitPrice:number|string;unitCost:number|string;discount:number|string;allowedDiscount:number|string;product:Product}>; approvals:Array<{id:string;step:string;sequence:number;state:string;reason?:string;createdAt?:string;decidedAt?:string}>; fulfillment?:{state:string;split:{split:Array<{warehouseId?:string;warehouseName:string;quantity:number;productId:string}>;backorders:Array<{productId:string;quantity:number}>};estimatedCost:number|string;shipmentCount:number;updatedAt?:string;stockFingerprint?:string;items?:Array<{orderLineId?:string|null;productId:string;productName:string;orderedQuantity:number;fulfilledQuantity:number;backorderedQuantity:number}>;consolidationAvailable?:boolean}; negotiation:Array<{id:string;author:string;message:string;counterDiscount?:number|string;createdAt:string}>; invoices:Array<{id:string;number:string;state:string}> };
 export type QuoteCalculation = {
   revisionId:string;
   version:number;
@@ -90,8 +90,8 @@ export type QuotationsResponse = {
 };
 
 export type QuotationCapabilities = {
-  editDraft:boolean;saveDraft:boolean;submit:boolean;assign:boolean;approve:boolean;send:boolean;previewCustomer:boolean;downloadPdf:boolean;viewCost:boolean;viewMargin:boolean;viewActivity:boolean;
-  reasons:Partial<Record<'editDraft'|'saveDraft'|'submit'|'assign'|'approve'|'send',string>>;
+  editDraft:boolean;saveDraft:boolean;submit:boolean;assign:boolean;approve:boolean;send:boolean;negotiate:boolean;previewCustomer:boolean;downloadPdf:boolean;viewCost:boolean;viewMargin:boolean;viewActivity:boolean;
+  reasons:Partial<Record<'editDraft'|'saveDraft'|'submit'|'assign'|'approve'|'send'|'negotiate',string>>;
 };
 export type QuotationDetail = QuotationSummary & {
   team:{id:string;name:string}|null;
@@ -108,7 +108,7 @@ export type QuotationDetail = QuotationSummary & {
   activity:Array<{id:string;action:string;reason:string|null;revisionId:string|null;actor:{id:string;name:string};createdAt:string}>;
   assignmentOptions:{teams:Array<{id:string;name:string;managerId:string|null;memberIds:string[]}>;owners:Array<{id:string;name:string;role:string}>;managers?:Array<{id:string;name:string;role:string}>;canCreateTeam?:boolean};
   catalog:Array<{id:string;name:string;sku:string;category:string;description:string;unit:string;price:string;cost?:string;taxRate:string;recurring:boolean;cadence:string|null;active:boolean}>;
-  negotiation:Array<{id:string;author:string;message:string;counterDiscount?:string;createdAt:string}>;
+  negotiation:Array<{id:string;revisionId:string;kind:'COMMENT'|'PROPOSAL';state:'OPEN'|'ADOPTED'|'DECLINED';author:string;message:string;counterDiscount?:string|null;createdAt:string}>;
   order:{id:string;number:string;state:string}|null;
   invoices:Array<{id:string;number:string;state:string}>;
 };

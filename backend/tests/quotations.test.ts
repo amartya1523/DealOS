@@ -33,6 +33,9 @@ describe('quotation list read model', () => {
     expect(quotationCapabilities({id:'manager-1',role:'MANAGER',organizationId:'org-1'},pending).approve).toBe(true);
     expect(quotationCapabilities({id:'rep-1',role:'ADMIN',organizationId:'org-1'},pending).approve).toBe(false);
     expect(quotationCapabilities({id:'admin-1',role:'ADMIN',organizationId:'org-1',readOnlyView:true},draft).submit).toBe(false);
+    const negotiation={...base,stage:'NEGOTIATION',ownerId:'rep-1',negotiation:[{revisionId:'revision-1',kind:'PROPOSAL',state:'OPEN'}],currentRevision:{id:'revision-1',state:'SENT',submittedById:'rep-1'}};
+    expect(quotationCapabilities({id:'rep-1',role:'REP',organizationId:'org-1'},negotiation).negotiate).toBe(true);
+    expect(quotationCapabilities({id:'rep-2',role:'REP',organizationId:'org-1'},negotiation).negotiate).toBe(false);
   });
 
   it('sends the approved revision directly to the customer after the final approval', () => {

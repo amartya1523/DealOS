@@ -68,7 +68,7 @@ describe("DealOS public routes", () => {
     const workspace = {
       user:{id:'customer-user',name:'Buyer User',email:'buyer@example.com',role:'CUSTOMER',customerId:'customer-1',moduleAccess:[],actorType:'USER',platformSuperAdmin:false,viewContext:null},
       organization:{id:'org-1',name:'Acme'},users:[],customers:[],products:[],policies:[],warehouses:[],subscriptions:[],alerts:[],audits:[],
-      quotes:[{id:'quote-1',number:'Q-EMAIL-1',customer:'Buyer Company',customerTier:'Gold',stage:'APPROVED',version:1,orderDiscount:0,total:1180,margin:0,riskScore:0,updatedAt:'2026-09-05T00:00:00.000Z',lines:[],approvals:[],negotiation:[],invoices:[]}],
+      quotes:[{id:'quote-1',number:'Q-EMAIL-1',customer:'Buyer Company',customerTier:'Gold',stage:'APPROVED',version:2,revisionNumber:2,orderDiscount:27,total:1180,margin:0,riskScore:0,updatedAt:'2026-09-05T00:00:00.000Z',lines:[],approvals:[],negotiation:[],invoices:[]}],
       invoices:[{id:'invoice-1',number:'INV-EMAIL-1',customer:'Buyer Company',amount:1180,paidAmount:0,state:'UNPAID',dueAt:'2026-09-20T00:00:00.000Z',lines:[],payments:[]}],
     };
     let authenticated = false;
@@ -89,6 +89,8 @@ describe("DealOS public routes", () => {
     fireEvent.change(screen.getByLabelText('Password'),{target:{value:'CustomerPass12!'}});
     fireEvent.click(screen.getByRole('button',{name:'Sign in with Email ID'}));
     expect((await screen.findAllByText('Q-EMAIL-1')).length).toBeGreaterThan(0);
+    expect(screen.getByText('27%')).toBeInTheDocument();
+    expect(screen.getByText('Negotiated order discount')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button',{name:/Invoices/}));
     expect((await screen.findAllByText('INV-EMAIL-1')).length).toBeGreaterThan(0);
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/auth/customer/login',expect.objectContaining({method:'POST',body:JSON.stringify({email:'buyer@example.com',password:'CustomerPass12!'})}));
@@ -101,6 +103,7 @@ describe("DealOS public routes", () => {
     expect(await screen.findByRole("heading", {name:"Sales dashboard"})).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", {name:"Customers"}));
     fireEvent.click(screen.getByRole("button", {name:"Add Customer"}));
+    expect(screen.getByLabelText("Tier")).not.toHaveTextContent("Enterprise");
     fireEvent.change(screen.getByLabelText("Company Name *"), {target:{value:"Portal Customer"}});
     fireEvent.change(screen.getByLabelText(/^Email ID/), {target:{value:"portal@example.com"}});
     fireEvent.change(screen.getByLabelText(/^Customer portal password/), {target:{value:"CustomerPass12!"}});
@@ -110,6 +113,24 @@ describe("DealOS public routes", () => {
       method:'POST',
       body:expect.stringContaining('"portalPassword":"CustomerPass12!"'),
     })));
+  });
+  it("lets an admin edit and safely delete a customer from customer details", async () => {
+    window.history.replaceState({}, "", "/app?screen=customer&record=customer-1");
+    const customer = {id:'customer-1',name:'Portal Customer',tier:'Gold',currency:'INR',customerType:'Business / Company',region:'India',contactPerson:'Asha Rao',email:'portal@example.com',phone:'9876543210',countryCode:'+91',gstin:null,billingAddress:'1 Market Road',shippingAddress:'1 Market Road',paymentTerms:7,active:true,createdAt:'2026-09-05T00:00:00.000Z',updatedAt:'2026-09-05T00:00:00.000Z',quotes:[],invoices:[],users:[],invitations:[]};
+    const workspace = { user:{id:'admin',name:'Admin User',email:'admin@example.com',role:'ADMIN',moduleAccess:[],actorType:'USER',platformSuperAdmin:false,viewContext:null}, organization:{id:'org',name:'Acme'}, users:[], customers:[customer], quotes:[], products:[], policies:[], warehouses:[], subscriptions:[], invoices:[], alerts:[], audits:[] };
+    fetchMock.mockResolvedValue({ok:true,json:async()=>({success:true,data:workspace})});
+    render(<App/>);
+    expect(await screen.findByRole('heading',{name:'Portal Customer'})).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'Edit customer'}));
+    expect(screen.getByRole('heading',{name:'Edit Customer'})).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Company Name *'),{target:{value:'Updated Customer'}});
+    fireEvent.change(screen.getByLabelText('Contact Person'),{target:{value:'Asha Sharma'}});
+    fireEvent.click(screen.getByRole('button',{name:'Save Changes'}));
+    await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith('/api/v1/customers/customer-1',expect.objectContaining({method:'PATCH',body:expect.stringContaining('"name":"Updated Customer"')})));
+    fireEvent.click(screen.getByRole('button',{name:'Delete customer'}));
+    expect(screen.getByText(/Existing quotations, invoices, and audit records will be preserved/)).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button',{name:'Delete customer'}).at(-1)!);
+    await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith('/api/v1/customers/customer-1',expect.objectContaining({method:'PATCH',body:JSON.stringify({active:false})})));
   });
   it("creates an organization admin and opens the isolated admin dashboard", async () => {
     window.history.replaceState({}, "", "/sign-up");

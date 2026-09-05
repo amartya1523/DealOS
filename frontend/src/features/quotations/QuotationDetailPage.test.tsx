@@ -1,12 +1,12 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QuotationDetailPage } from './QuotationDetailPage';
 import type { QuotationDetail } from '../../api';
 
 const detail:QuotationDetail={
   id:'quote-1',number:'Q-1001',customer:{id:'customer-1',name:'Acme Corp',tier:'Gold'},owner:{id:'rep-1',name:'Priya Shah'},team:{id:'team-1',name:'Enterprise Sales'},stage:'DRAFT',subtotal:'40',total:'40',currency:'INR',riskScore:'0',currentApprovalStep:null,currentRevisionId:'revision-1',version:1,lastActivityAt:'2026-09-05T10:00:00.000Z',sentAt:null,orderDiscount:'0',taxTotal:'0',margin:'28',
-  capabilities:{editDraft:true,saveDraft:true,submit:true,assign:false,approve:false,send:false,previewCustomer:true,downloadPdf:true,viewCost:false,viewMargin:true,viewActivity:true,reasons:{approve:'There is no active approval step.'}},
+  capabilities:{editDraft:true,saveDraft:true,submit:true,assign:false,approve:false,send:false,negotiate:false,previewCustomer:true,downloadPdf:true,viewCost:false,viewMargin:true,viewActivity:true,reasons:{approve:'There is no active approval step.',negotiate:'There is no active customer proposal to review.'}},
   currentRevision:{id:'revision-1',revisionNumber:1,state:'DRAFT',currency:'INR',validUntil:null,promisedDeliveryAt:null,terms:'Net 30',submittedBy:null},
   lines:[{id:'line-1',productId:'product-1',quantity:1,unitPrice:'40',discount:'5',allowedDiscount:'10',product:{id:'product-1',name:'Care Plan',sku:'SUB-CARE',category:'Subscriptions',description:'Support',unit:'Seat',price:'40',taxRate:'18',recurring:true,cadence:'Monthly',active:true}}],
   approval:{explanation:'All persisted lines are within their line-level discount limits.',riskBreakdown:{worstExcess:0,weightedExcess:0,orderDiscount:0,marginPercent:70,financeThreshold:5,minimumMarginPercent:12,policyVersion:1,policyTier:'Gold',managerReason:'Manager approval was not required.',financeReason:'Finance approval was not required.',cards:[{key:'worst-line-excess',label:'Worst individual line excess',value:'0 pts',detail:'No individual line exceeds its policy limit.',tone:'ok'},{key:'weighted-excess',label:'Value-weighted excess',value:'0 pts',detail:'Weighted by each line gross value so larger lines influence routing more.',tone:'ok'},{key:'order-discount',label:'Order discount',value:'0%',detail:'Applied across the order after line discounts.',tone:'ok'},{key:'margin-percentage',label:'Margin percentage',value:'70%',detail:'Minimum margin floor is 12%.',tone:'ok'},{key:'approval-threshold',label:'Approval threshold and policy version',value:'5 pts / v1',detail:'Gold tier policy used for this revision.',tone:'neutral'},{key:'required-review',label:'Exact required review reason',value:'None',detail:'No manager or finance approval is required for this revision.',tone:'ok'}]},violations:[],currentStep:null,timeline:[]},revisions:[],activity:[],assignmentOptions:{teams:[],owners:[]},catalog:[{id:'product-1',name:'Care Plan',sku:'SUB-CARE',category:'Subscriptions',description:'Support',unit:'Seat',price:'40',taxRate:'18',recurring:true,cadence:'Monthly',active:true}],negotiation:[],order:null,invoices:[],
@@ -18,6 +18,7 @@ beforeEach(()=>{fetchMock.mockReset();vi.stubGlobal('fetch',fetchMock);fetchMock
   if(url==='/api/v1/quotations/quote-1'&&(!options?.method||options.method==='GET'))return json(detail);
   if(url==='/api/v1/quotations/quote-1/draft'&&options?.method==='PUT')return json({quote:{...detail,version:2}});
   if(url==='/api/v1/quotations/quote-1/submit'&&options?.method==='POST')return json({stage:'PENDING_APPROVAL'});
+  if(url==='/api/v1/quotations/quote-1/customer-preview'&&(!options?.method||options.method==='GET'))return json({organization:{name:'DealOS Demo'},quotation:{number:'Q-1001',customer:'Acme Corp',customerTier:'Gold',revisionNumber:1,state:'DRAFT',currency:'INR',validUntil:null,promisedDeliveryAt:null,terms:'Net 30',subtotal:'38',taxTotal:'7',total:'45',sentAt:null},lines:[{name:'Care Plan',sku:'SUB-CARE',description:'Support',quantity:1,unitPrice:'40',discount:'5',net:'38',cadence:'Monthly'}]});
   if(url==='/api/v1/quotations/quote-1/preview')return json({total:38,subtotal:38,taxTotal:0,margin:26,riskScore:0,lines:[{productId:'product-1',net:38,allowedDiscount:'10',excess:0}]});
   return json({message:'Not found'},404);
 })});
@@ -41,5 +42,33 @@ describe('quotation detail lifecycle',()=>{
     expect(await screen.findByLabelText('Care Plan discount')).toBeDisabled();
     expect(screen.queryByRole('button',{name:/Submit for approval/})).not.toBeInTheDocument();
     expect(screen.getByText('This submitted revision is read-only.')).toBeInTheDocument();
+  });
+
+  it('opens a complete customer-safe preview dialog',async()=>{
+    render(<QuotationDetailPage quoteId="quote-1" onBack={vi.fn()} onChanged={vi.fn()}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'Customer preview'}));
+    const dialog=await screen.findByRole('dialog',{name:'Q-1001'});
+    expect(dialog).toHaveClass('customer-preview-dialog');
+    expect(within(dialog).getByText('DealOS Demo')).toBeInTheDocument();
+    expect(within(dialog).getByText('Acme Corp')).toBeInTheDocument();
+    expect(within(dialog).getByText('Care Plan')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button',{name:'Close customer preview'})).toBeInTheDocument();
+  });
+
+  it('lets the quotation owner counter the latest customer proposal',async()=>{
+    const negotiated:QuotationDetail={...detail,stage:'NEGOTIATION',sentAt:'2026-09-06T10:00:00.000Z',currentRevision:{...detail.currentRevision!,state:'SENT'},capabilities:{...detail.capabilities,editDraft:false,saveDraft:false,submit:false,negotiate:true,reasons:{}},negotiation:[{id:'proposal-1',revisionId:'revision-1',kind:'PROPOSAL',state:'OPEN',author:'Customer',message:'Please improve the price.',counterDiscount:'15',createdAt:'2026-09-06T11:00:00.000Z'}]};
+    fetchMock.mockImplementation((url:string,options?:RequestInit)=>{
+      if(url==='/api/v1/quotations/quote-1'&&(!options?.method||options.method==='GET'))return json(negotiated);
+      if(url==='/api/v1/quotations/quote-1/proposals/proposal-1/respond'&&options?.method==='POST')return json({});
+      if(url==='/api/v1/quotations/quote-1/submit'&&options?.method==='POST')return json({stage:'PENDING_APPROVAL'});
+      return json({message:'Not found'},404);
+    });
+    render(<QuotationDetailPage quoteId="quote-1" onBack={vi.fn()} onChanged={vi.fn(async()=>undefined)}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'Respond to customer'}));
+    fireEvent.change(screen.getByLabelText('Message to customer'),{target:{value:'We can offer twelve percent.'}});
+    fireEvent.change(screen.getByLabelText('Your counter order discount %'),{target:{value:'12'}});
+    fireEvent.click(screen.getByRole('button',{name:'Create and submit 12% counter'}));
+    await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith('/api/v1/quotations/quote-1/proposals/proposal-1/respond',expect.objectContaining({method:'POST',body:JSON.stringify({decision:'COUNTER',reason:'We can offer twelve percent.',counterDiscount:12})})));
+    await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith('/api/v1/quotations/quote-1/submit',expect.objectContaining({method:'POST'})));
   });
 });

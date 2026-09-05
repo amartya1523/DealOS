@@ -261,3 +261,13 @@ Harden the current vertical flow without replacing it:
 - **Security:** Client price, cost, risk and limit fields are rejected by the strict request schema. The response omits direct line and aggregate cost fields; policy, price, tax and category limits are always loaded by the backend.
 - **Files:** Added `frontend/src/features/quotations/QuoteDetail.tsx` and its tests; updated backend `app.ts`/`quotations.ts`, frontend API/App/styles, quotation tests and API documentation.
 - **Validation:** Backend Vitest 33/33 and TypeScript build passed; frontend Vitest 13/13 and TypeScript/Vite production build passed; `git diff --check` passed. Applied the already-present pending `20260905234500_quotation_detail_rbac` local migration so the generated Prisma client and database schema match. Live browser verification changed an unsaved hardware discount from 0% to 20% and observed net, total, margin and risk recalculate while the 15% limit remained visible; reload discarded the unsaved verification change.
+
+### SESSION: Customer detail editing and safe deletion
+
+- **Date:** 2026-09-06.
+- **Objective:** Let organization administrators edit a complete customer profile and delete a customer from each customer-detail view.
+- **Completed behavior:** Added Edit Customer and Delete Customer actions to customer details. Editing reuses the complete prefilled customer form and persists type, region, tier, name, contact, email, phone, GSTIN, addresses, payment terms, and currency through the existing tenant-scoped PATCH endpoint. Delete requires confirmation and archives the customer with `active=false`; inactive customers no longer appear in the customer list or its metrics, while linked quotations, invoices, and audit history remain intact. New customers still cannot select the Enterprise tier; an existing Enterprise customer can retain that historical tier while being edited.
+- **Files modified:** `frontend/src/App.tsx`, `frontend/src/App.test.tsx`, and this memory file. Pre-existing unrelated worktree changes were preserved.
+- **Database/API changes:** No migration or API contract change. The existing documented customer update contract provides archive semantics.
+- **Validation:** Frontend Vitest passed 32/32 tests. Frontend TypeScript/Vite production build passed with the existing chunk-size advisory. `git diff --check` passed after final cleanup.
+- **Next safe task:** Add a dedicated archived-customer management view only if restoration is required; do not hard-delete historical customer relationships.
