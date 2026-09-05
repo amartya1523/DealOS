@@ -93,6 +93,24 @@ describe("DealOS public routes", () => {
     expect((await screen.findAllByText('INV-EMAIL-1')).length).toBeGreaterThan(0);
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/auth/customer/login',expect.objectContaining({method:'POST',body:JSON.stringify({email:'buyer@example.com',password:'CustomerPass12!'})}));
   });
+  it("lets an admin create a customer with optional password portal access", async () => {
+    window.history.replaceState({}, "", "/app");
+    const workspace = { user:{id:'admin',name:'Admin User',email:'admin@example.com',role:'ADMIN',moduleAccess:[],actorType:'USER',platformSuperAdmin:false,viewContext:null}, organization:{id:'org',name:'Acme'}, users:[], customers:[], quotes:[], products:[], policies:[], warehouses:[], subscriptions:[], invoices:[], alerts:[], audits:[] };
+    fetchMock.mockResolvedValue({ok:true,json:async()=>({success:true,data:workspace})});
+    render(<App/>);
+    expect(await screen.findByRole("heading", {name:"Sales dashboard"})).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name:"Customers"}));
+    fireEvent.click(screen.getByRole("button", {name:"Add Customer"}));
+    fireEvent.change(screen.getByLabelText("Company Name *"), {target:{value:"Portal Customer"}});
+    fireEvent.change(screen.getByLabelText(/^Email ID/), {target:{value:"portal@example.com"}});
+    fireEvent.change(screen.getByLabelText(/^Customer portal password/), {target:{value:"CustomerPass12!"}});
+    fireEvent.change(screen.getByPlaceholderText("e.g. 9876543210"), {target:{value:"9876543210"}});
+    fireEvent.click(screen.getAllByRole("button", {name:/Add Customer/}).at(-1)!);
+    await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith('/api/v1/customers',expect.objectContaining({
+      method:'POST',
+      body:expect.stringContaining('"portalPassword":"CustomerPass12!"'),
+    })));
+  });
   it("creates an organization admin and opens the isolated admin dashboard", async () => {
     window.history.replaceState({}, "", "/sign-up");
     fetchMock.mockImplementation((url: string) =>

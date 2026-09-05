@@ -371,8 +371,8 @@ app.post('/api/v1/auth/customer/login', async (req: AuthRequest, res) => {
   }
   const parsed = z.object({ email: z.string().trim().email().toLowerCase(), password: z.string().min(8).max(128) }).strict().safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter a valid customer email and password.');
-  const user = await db.user.findUnique({ where: { email: parsed.data.email } });
-  if (!user || user.role !== 'CUSTOMER' || !user.customerId || !(await bcrypt.compare(parsed.data.password, user.passwordHash))) {
+  const user = await db.user.findUnique({ where: { email: parsed.data.email }, include: { customer: { select: { active: true } } } });
+  if (!user || user.role !== 'CUSTOMER' || !user.customerId || !user.customer?.active || !(await bcrypt.compare(parsed.data.password, user.passwordHash))) {
     loginAttempts.set(key, { count: (attempt?.resetAt ?? 0) > Date.now() ? attempt!.count + 1 : 1, resetAt: Date.now() + 15 * 60_000 });
     return fail(req, res, 401, 'INVALID_CUSTOMER_CREDENTIALS', 'Customer email or password is incorrect. You can also continue with Google.');
   }
@@ -539,17 +539,46 @@ const customerProfileSchema = z.object({
   active: z.boolean().default(true),
 }).strict();
 
+const customerCreateSchema = customerProfileSchema.extend({
+  portalPassword: z.string().min(12).max(128).optional(),
+});
+
+async function setCustomerPortalPassword(tx: Tx, req: AuthRequest, customer: { id: string; name: string; contactPerson: string | null; email: string | null }, password: string) {
+  if (!customer.email) throw new DomainError(422, 'CUSTOMER_EMAIL_REQUIRED', 'Add a customer email before setting a portal password.');
+  const email = customer.email.trim().toLowerCase();
+  const existing = await tx.user.findUnique({ where: { email } });
+  if (existing && (existing.organizationId !== req.user!.organizationId || existing.customerId !== customer.id || existing.role !== 'CUSTOMER')) {
+    throw new DomainError(409, 'EMAIL_EXISTS', 'This email already belongs to another DealOS account. Use a different customer email.');
+  }
+  const passwordHash = await bcrypt.hash(password, 12);
+  const user = existing
+    ? await tx.user.update({ where: { id: existing.id }, data: { name: customer.contactPerson || customer.name, passwordHash, status: 'ACTIVE', moduleAccess: [] } })
+    : await tx.user.create({ data: { organizationId: req.user!.organizationId, customerId: customer.id, name: customer.contactPerson || customer.name, email, passwordHash, status: 'ACTIVE', role: 'CUSTOMER', moduleAccess: [] } });
+  await tx.organizationMembership.upsert({
+    where: { organizationId_userId: { organizationId: req.user!.organizationId, userId: user.id } },
+    update: { accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' },
+    create: { organizationId: req.user!.organizationId, userId: user.id, accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' },
+  });
+  await tx.session.deleteMany({ where: { userId: user.id } });
+  await audit(tx, req, existing ? 'CUSTOMER_PORTAL_PASSWORD_RESET' : 'CUSTOMER_PORTAL_PASSWORD_CREATED', 'Customer', customer.id, email);
+  return user;
+}
+
 app.post('/api/v1/customers', authenticate, requireModule('customers'), requireRole('ADMIN', 'MANAGER'), requireCsrf, async (req: AuthRequest, res) => {
-  const parsed = customerProfileSchema.safeParse(req.body);
+  const parsed = customerCreateSchema.safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter a customer name, tier, and currency.', parsed.error.flatten());
+  if (parsed.data.portalPassword && !parsed.data.email) return fail(req, res, 422, 'CUSTOMER_EMAIL_REQUIRED', 'Add a customer email before setting a portal password.');
   if (parsed.data.email) {
     const duplicate = await db.customer.findFirst({ where: { organizationId: req.user!.organizationId, email: { equals: parsed.data.email, mode: 'insensitive' } } });
     if (duplicate) return fail(req, res, 409, 'CUSTOMER_EMAIL_EXISTS', 'This customer email is already used in this workspace.');
+    if (parsed.data.portalPassword && await db.user.findUnique({ where: { email: parsed.data.email } })) return fail(req, res, 409, 'EMAIL_EXISTS', 'This email already belongs to another DealOS account. Use a different customer email.');
   }
   const customer = await db.$transaction(async (tx) => {
-    const created = await tx.customer.create({ data: { organizationId: req.user!.organizationId, ...parsed.data, currency: parsed.data.currency.toUpperCase() } });
+    const { portalPassword, ...profile } = parsed.data;
+    const created = await tx.customer.create({ data: { organizationId: req.user!.organizationId, ...profile, currency: profile.currency.toUpperCase() } });
     await audit(tx, req, 'CUSTOMER_CREATED', 'Customer', created.id);
-    await ensureCustomerPortalInvite(tx, req, created);
+    if (portalPassword) await setCustomerPortalPassword(tx, req, created, portalPassword);
+    await ensureCustomerPortalInvite(tx, req, created, Boolean(portalPassword));
     return created;
   });
   return ok(req, res, customer, 201);
@@ -588,6 +617,20 @@ app.post('/api/v1/customers/:id/portal-invite', authenticate, requireModule('cus
   if (!customer.email) return fail(req, res, 422, 'CUSTOMER_EMAIL_REQUIRED', 'Add a customer email before sending a portal invitation.');
   const invitation = await db.$transaction((tx) => ensureCustomerPortalInvite(tx, req, customer, true));
   return ok(req, res, { id: invitation!.id, email: invitation!.email, status: invitation!.status, expiresAt: invitation!.expiresAt }, 201);
+});
+
+app.put('/api/v1/customers/:id/portal-password', authenticate, requireModule('customers'), requireRole('ADMIN', 'MANAGER'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = z.object({ password: z.string().min(12).max(128) }).strict().safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Customer portal passwords must be at least 12 characters.', parsed.error.flatten());
+  const customer = await db.customer.findFirst({ where: { id: routeParam(req, 'id'), organizationId: req.user!.organizationId, active: true } });
+  if (!customer) return fail(req, res, 404, 'NOT_FOUND', 'Customer not found.');
+  try {
+    const user = await db.$transaction((tx) => setCustomerPortalPassword(tx, req, customer, parsed.data.password));
+    return ok(req, res, { id: user.id, email: user.email, status: user.status });
+  } catch (error) {
+    if (error instanceof DomainError) return fail(req, res, error.status, error.code, error.message);
+    throw error;
+  }
 });
 
 app.get('/api/v1/customers', authenticate, requireModule('quotations'), requireRole('REP', 'MANAGER', 'FINANCE', 'ADMIN'), async (req: AuthRequest, res) => {
