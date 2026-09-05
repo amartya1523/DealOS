@@ -22,3 +22,11 @@ mobile/release-artifacts/
 *.keystore
 *.p12
 *.mobileprovision
+
+# Flutter artifacts accidentally generated at the monorepo root
+/.dart_tool/
+/.flutter-plugins-dependencies
+/dealos_mobile.iml
+/android/
+/ios/
+/release-artifacts/
