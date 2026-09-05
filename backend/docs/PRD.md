@@ -43,7 +43,7 @@ Confidence means confidence in the interpretation, not implementation status. C 
 | R-003 | Internal signup/login and customer portal authentication | C | A1 | High |
 | R-004 | Five roles with server-enforced access | C | PDF user roles + technical guidelines | High |
 | R-005 | Products, variants, units, descriptions, taxes and tier price lists | C | A2 | High |
-| R-006 | Customer tier and category discount ceilings; configurable sequential approval chain | C | A3 | High |
+| R-006 | Editable customer-tier ceilings and editable Hardware, Services and Subscriptions ceilings; validated, reasoned publication; configurable sequential approval chain | C | A3 | High |
 | R-007 | Mixed-category blended risk; highest required approval; audit user/time/reason | C | A3, section 10 | High |
 | R-008 | Warehouse stock, replenishment rules and shipment cost weighting | C | A4 | High |
 | R-009 | Monthly/quarterly/yearly plans, proration and cancellation credit/refund rules | C | A5 | High |
@@ -55,7 +55,7 @@ Confidence means confidence in the interpretation, not implementation status. C 
 | R-015 | Line and order discounts, quantities, totals and margin | C | B3 | High |
 | R-016 | Approve/reject/return for revision with reason and audit | C | B4 | High |
 | R-017 | Suggested warehouse split, manual override and backorder consolidation | C | B6 | High |
-| R-018 | One-time plus recurring billing on one order | C | B7 | High |
+| R-018 | One-time plus recurring billing on one order; subscription list, detail and lifecycle controls restricted to organization Admin | C | B7 + user direction | High |
 | R-019 | Portal comments, change requests, counter-discount and confirmation; reapproval | C | B8 | High |
 | R-020 | Stalled quotes, unusual discounts, delivery slippage and nudge/escalation | C | B9 | High |
 | R-021 | Invoice listing/detail and payment recording | C | Reference 12/13 and acceptance step 8 | High |
@@ -81,9 +81,9 @@ Confidence means confidence in the interpretation, not implementation status. C 
 
 - Sales Rep: prepare assigned/customer-team quotes, explain discounts, respond to requests, inspect fulfillment. Cannot approve own exceptions or manage stock/payments.
 - Sales Manager: review team quotes, manage discount chains, see team deal health and reports. Cannot masquerade as a customer or record payments unless separately assigned Finance role.
-- Finance/Operations: second-level discount approval, stock allocation, billing changes, payment recording and credit notes.
+- Finance/Operations: second-level discount approval, stock allocation, invoice reconciliation and payment recording. The subscription module is not visible or callable.
 - Customer: only quotations/orders/invoices associated with their linked customer account; see commercial prices but not internal costs, margins, risk or reviewer notes.
-- Admin: activate identities, manage configuration and organization reporting. Admin status alone does not bypass approval segregation; a separately assigned reviewer role is required.
+- Admin: activate identities, manage configuration and organization reporting, and exclusively manage subscription plans, proration previews, lifecycle changes, cancellations and related credits. Admin status alone does not bypass approval segregation; a separately assigned reviewer role is required.
 - Platform Super Admin / Platform Owner: authenticate only at `/login/super-admin` with server environment credentials, administer all organizations from a separate global control plane, and enter explicitly read-only tenant/user contexts. This identity is never an organization user or role.
 
 Multi-role internal users are supported; permissions compose, but self-approval restrictions still apply.
@@ -117,13 +117,15 @@ Future scope: email delivery integration, real payment gateway, multi-company, e
 7. Allocate stock across two warehouses without negative availability; any shortage remains a backorder.
 8. Generate one-time billing and recurring schedule; record payment and verify invoice balance/status.
 
+Fulfillment UI acceptance: the list shows every warehouse/product balance as backend-derived on-hand, reserved and available, and eligible confirmed hardware orders open a detail screen. The detail screen previews the server-calculated warehouse split before committing it, displays product ordered/fulfilled/backordered quantities and configured cost by warehouse, permits Finance/Admin to submit a reasoned manual split, rejects stale preview fingerprints, and exposes remaining shortage as a backorder. A recorded stock receipt activates the transactional consolidation action and completing the remaining demand updates the fulfillment/order state.
+
 ### B: negotiation and operational change
 
 1. Customer submits a larger discount proposal against a sent revision.
 2. Rep adopts the proposal as a new revision; old approvals/acceptance cannot authorize it.
 3. Required reapproval executes; customer accepts final terms.
 4. Partial stock is allocated; new stock receipt prompts consolidation of unshipped remainder only.
-5. Mid-cycle recurring quantity change creates an auditable proration adjustment; eligible cancellation creates a credit note.
+5. Admin performs a mid-cycle recurring quantity change that creates an auditable proration adjustment; an eligible cancellation creates a credit note.
 6. A stale quote alert links to its deal; an in-app nudge is persisted; a filtered report matches source records.
 
 ## Non-functional acceptance

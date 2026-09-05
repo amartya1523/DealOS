@@ -8,12 +8,13 @@ import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { db } from './db.js';
 import { acceptCustomerGoogleInvitation, createGoogleOrganizationAdmin, createOrganizationAdmin, findOrLinkGoogleLoginUser, googleSignupSchema, signupSchema, verifyGoogleSignupCredential } from './identity.js';
-import { allocateStock, billingSchedule, calculateQuote } from './rules.js';
+import { allocateStock, allocationMetrics, billingSchedule, calculateQuote, FulfillmentRuleError, manualAllocation } from './rules.js';
 import { allowedDiscountForCategory, buildQuotationWhere, createQuotationSchema, customerListQuerySchema, primaryQuotationStages, quotationCapabilities, quotationListQuerySchema, quotationOrderBy, quotationRecordScope, quotationStages, quotationSummaryDto, quoteDraftSchema, quotePreviewSchema, revisionHistory } from './quotations.js';
 import { renderQuotationPdf, type CustomerQuotationPreview } from './quotation-pdf.js';
 import { authenticate as authenticatePlatform, csrfCookieName, hashToken as hashPlatformToken, identityDto, platformSessionCookieName } from './authorization.js';
 import { platformRouter } from './platform.js';
 import { clearPlatformLoginFailures, platformLoginAllowed, platformOwnerCredentialsMatch, readPlatformOwnerCredentials, recordPlatformLoginFailure } from './platform-owner.js';
+import { discountPolicyUpdateSchema } from './policy.js';
 
 type Actor = { id: string; name: string; email: string; loginId: string | null; role: string; customerId: string | null; organizationId: string; moduleAccess: string[]; csrfToken: string; actorType: 'USER' | 'PLATFORM_OWNER'; platformSuperAdmin: boolean; readOnlyView: boolean; organization: { id: string; name: string; status: string } | null; viewContext: { readOnly: true; organizationId: string; organizationName: string; simulatedUserId: string | null; realActor: { id: string; name: string } } | null };
 type AuthRequest = Request & { user?: Actor; requestId?: string };
@@ -31,7 +32,7 @@ const provisionableRoles = ['REP','MANAGER','FINANCE'] as const;
 const roleModulePresets: Record<typeof provisionableRoles[number], Array<typeof modules[number]>> = {
   REP: ['dashboard', 'quotations', 'health'],
   MANAGER: ['dashboard', 'quotations', 'approvals', 'health', 'reports', 'customers', 'policies'],
-  FINANCE: ['dashboard', 'approvals', 'fulfillment', 'subscriptions', 'invoices', 'reports'],
+  FINANCE: ['dashboard', 'approvals', 'fulfillment', 'invoices', 'reports'],
 };
 const ok = (req: AuthRequest, res: Response, data: unknown, status = 200) => res.status(status).json({ success: true, data, meta: { requestId: req.requestId } });
 const fail = (req: AuthRequest, res: Response, status: number, code: string, message: string, details?: unknown) => res.status(status).json({ success: false, error: { code, message, details }, meta: { requestId: req.requestId } });
@@ -124,6 +125,30 @@ function approvalRiskBreakdown(quote: any) {
     ],
   };
 }
+
+const fulfillmentSplitSchema = z.object({
+  split: z.array(z.object({ productId: z.string(), warehouseId: z.string(), warehouseName: z.string(), quantity: z.number().int().positive() })),
+  backorders: z.array(z.object({ productId: z.string(), quantity: z.number().int().positive() })),
+});
+const parseFulfillmentSplit = (value: unknown) => {
+  const parsed = fulfillmentSplitSchema.safeParse(value);
+  return parsed.success ? parsed.data : { split: [], backorders: [] };
+};
+const stockFingerprint = (balances: Array<{ productId: string; warehouseId: string; onHand: number; reserved: number; warehouse?: { priority: number; shippingCost: unknown } }>) => termsHash(balances.map((balance) => ({ productId: balance.productId, warehouseId: balance.warehouseId, onHand: balance.onHand, reserved: balance.reserved, priority: balance.warehouse?.priority, shippingCost: balance.warehouse ? decimal(balance.warehouse.shippingCost) : undefined })).sort((a, b) => `${a.productId}:${a.warehouseId}`.localeCompare(`${b.productId}:${b.warehouseId}`)));
+const fulfillmentView = (quote: any, fulfillment: any, balances: Array<{ productId: string; onHand: number; reserved: number }>) => {
+  const split = parseFulfillmentSplit(fulfillment.split);
+  const allocated = new Map<string, number>();
+  for (const row of split.split) allocated.set(row.productId, (allocated.get(row.productId) ?? 0) + row.quantity);
+  const shortages = new Map(split.backorders.map((row) => [row.productId, row.quantity]));
+  const demand = new Map<string, { productName: string; orderedQuantity: number }>();
+  for (const line of quote.lines.filter((item: any) => !item.product.recurring && item.product.category === 'Hardware')) {
+    const current = demand.get(line.productId);
+    demand.set(line.productId, { productName: line.product.name, orderedQuantity: (current?.orderedQuantity ?? 0) + line.quantity });
+  }
+  const items = [...demand.entries()].map(([productId, item]) => ({ orderLineId: quote.order?.lines?.find((line: any) => line.productId === productId)?.id ?? null, productId, productName: item.productName, orderedQuantity: item.orderedQuantity, fulfilledQuantity: allocated.get(productId) ?? 0, backorderedQuantity: shortages.get(productId) ?? 0 }));
+  const consolidationAvailable = split.backorders.some((shortage) => balances.some((balance) => balance.productId === shortage.productId && balance.onHand - balance.reserved > 0));
+  return { ...fulfillment, split, items, consolidationAvailable };
+};
 
 async function startSession(user: { id: string }, res: Response) {
   const token = crypto.randomBytes(32).toString('hex');
@@ -395,11 +420,26 @@ app.post('/api/v1/auth/logout', authenticate, requireCsrf, async (req: AuthReque
 app.get('/api/v1/auth/me', authenticate, (req: AuthRequest, res) => ok(req, res, req.user));
 
 app.get('/api/v1/admin/users', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res) => {
-  const users = await db.user.findMany({ where: { organizationId: req.user!.organizationId }, select: { id: true, name: true, email: true, loginId: true, role: true, status: true, moduleAccess: true, customerId: true, createdAt: true }, orderBy: { createdAt: 'desc' } });
+  const memberships = await db.organizationMembership.findMany({ where: { organizationId: req.user!.organizationId }, select: { accessRole: true, businessRole: true, status: true, createdAt: true, user: { select: { id: true, name: true, email: true, loginId: true, status: true, moduleAccess: true, customerId: true, createdAt: true } } }, orderBy: { createdAt: 'desc' } });
+  const users = memberships.map(({ user, ...membership }) => ({ ...user, role: membership.businessRole, membershipStatus: membership.status, accessRole: membership.accessRole, joinedAt: membership.createdAt }));
   return ok(req, res, users);
 });
+app.get('/api/v1/admin/users/:id', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res) => {
+  const membership = await db.organizationMembership.findFirst({
+    where: { organizationId: req.user!.organizationId, userId: routeParam(req, 'id') },
+    select: {
+      accessRole: true,
+      businessRole: true,
+      status: true,
+      createdAt: true,
+      user: { select: { id: true, name: true, email: true, loginId: true, status: true, moduleAccess: true, createdAt: true } },
+    },
+  });
+  if (!membership) return fail(req, res, 404, 'NOT_FOUND', 'Organization member not found.');
+  return ok(req, res, { ...membership.user, role: membership.businessRole, accessRole: membership.accessRole, membershipStatus: membership.status, joinedAt: membership.createdAt });
+});
 app.patch('/api/v1/admin/users/:id', authenticate, requireRole('ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
-  const parsed = z.object({ status: z.enum(['PENDING', 'ACTIVE', 'DISABLED']).optional(), role: z.enum(['REP', 'MANAGER', 'FINANCE', 'ADMIN', 'CUSTOMER']).optional(), customerId: z.string().uuid().nullable().optional(), moduleAccess: z.array(z.enum(modules)).max(modules.length).optional() }).strict().safeParse(req.body);
+  const parsed = z.object({ status: z.enum(['PENDING', 'ACTIVE', 'DISABLED']).optional(), role: z.enum(['REP', 'MANAGER', 'FINANCE', 'ADMIN', 'CUSTOMER']).optional(), customerId: z.string().uuid().nullable().optional(), moduleAccess: z.array(z.enum(modules)).max(modules.length).refine((values) => !values.includes('subscriptions'), 'Subscriptions are restricted to organization admins.').optional() }).strict().safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter valid account changes.', parsed.error.flatten());
   const target = await db.user.findFirst({ where: { id: routeParam(req, 'id'), organizationId: req.user!.organizationId } });
   if (!target) return fail(req, res, 404, 'NOT_FOUND', 'Account not found.');
@@ -418,7 +458,7 @@ app.patch('/api/v1/admin/users/:id', authenticate, requireRole('ADMIN'), require
 });
 
 app.post('/api/v1/admin/users', authenticate, requireRole('ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
-  const parsed = z.object({ name: z.string().trim().min(1).max(120), email: z.string().trim().email().toLowerCase(), password: z.string().min(12).max(128), role: z.enum(provisionableRoles), moduleAccess: z.array(z.enum(modules)).min(1).max(modules.length).optional() }).strict().safeParse(req.body);
+  const parsed = z.object({ name: z.string().trim().min(1).max(120), email: z.string().trim().email().toLowerCase(), password: z.string().min(12).max(128), role: z.enum(provisionableRoles), moduleAccess: z.array(z.enum(modules)).min(1).max(modules.length).refine((values) => !values.includes('subscriptions'), 'Subscriptions are restricted to organization admins.').optional() }).strict().safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter a user name, email, password, and valid role.');
   const existing = await db.user.findUnique({ where: { email: parsed.data.email } });
   if (existing) return fail(req, res, 409, 'EMAIL_EXISTS', 'An account already exists for this email.');
@@ -443,13 +483,13 @@ app.get('/api/v1/workspace', authenticate, async (req: AuthRequest, res) => {
   const quoteWhere = portal ? { organizationId: req.user!.organizationId, customerId: req.user!.customerId!, sentAt: { not: null } } : internalQuoteWhere(req.user!);
   const [organization, users, customers, rawQuotes, products, policies, warehouses, rawSubscriptions, rawInvoices, alerts, audits] = await Promise.all([
     db.organization.findUnique({ where: { id: req.user!.organizationId }, select: { id: true, name: true } }),
-    req.user!.role === 'ADMIN' ? db.user.findMany({ where: { organizationId: req.user!.organizationId }, select: { id: true, name: true, email: true, loginId: true, role: true, status: true, moduleAccess: true, createdAt: true }, orderBy: { createdAt: 'desc' } }) : [],
+    req.user!.role === 'ADMIN' ? db.organizationMembership.findMany({ where: { organizationId: req.user!.organizationId }, select: { accessRole: true, businessRole: true, status: true, createdAt: true, user: { select: { id: true, name: true, email: true, loginId: true, status: true, moduleAccess: true, createdAt: true } } }, orderBy: { createdAt: 'desc' } }).then((memberships) => memberships.map(({ user, ...membership }) => ({ ...user, role: membership.businessRole, membershipStatus: membership.status, accessRole: membership.accessRole, joinedAt: membership.createdAt }))) : [],
     !portal && (hasModule(req.user, 'customers') || hasModule(req.user, 'invoices')) ? db.customer.findMany({ where: { organizationId: req.user!.organizationId }, include: { quotes: { select: { id: true, number: true, stage: true, total: true, updatedAt: true }, orderBy: { updatedAt: 'desc' }, take: 5 }, invoices: { select: { id: true, number: true, state: true, amount: true, paidAmount: true, dueAt: true }, orderBy: { createdAt: 'desc' }, take: 5 }, users: { where: { role: 'CUSTOMER' }, select: { id: true, email: true, status: true, googleSubject: true } }, invitations: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true, email: true, status: true, expiresAt: true, createdAt: true } } }, orderBy: { updatedAt: 'desc' } }) : [],
-    db.quote.findMany({ where: quoteWhere, include: { currentRevision: true, lines: { include: { product: true } }, approvals: { orderBy: [{ cycle: 'desc' }, { sequence: 'asc' }] }, fulfillment: true, negotiation: { orderBy: { createdAt: 'desc' } }, invoices: true }, orderBy: { updatedAt: 'desc' } }),
+    db.quote.findMany({ where: quoteWhere, include: { currentRevision: true, lines: { include: { product: true } }, approvals: { orderBy: [{ cycle: 'desc' }, { sequence: 'asc' }] }, fulfillment: true, order: true, negotiation: { orderBy: { createdAt: 'desc' } }, invoices: true }, orderBy: { updatedAt: 'desc' } }),
     !portal && (hasModule(req.user, 'products') || hasModule(req.user, 'invoices')) ? db.product.findMany({ where: { organizationId: req.user!.organizationId }, include: { stocks: { include: { warehouse: true } } }, orderBy: { name: 'asc' } }) : [],
     !portal && hasModule(req.user, 'policies') ? db.discountPolicy.findMany({ where: { organizationId: req.user!.organizationId }, orderBy: { tier: 'asc' } }) : [],
     !portal && hasModule(req.user, 'fulfillment') ? db.warehouse.findMany({ where: { organizationId: req.user!.organizationId }, include: { stocks: { include: { product: true } } }, orderBy: { priority: 'asc' } }) : [],
-    !portal && hasModule(req.user, 'subscriptions') ? db.subscription.findMany({ where: { organizationId: req.user!.organizationId, ...(req.user!.role === 'REP' ? { order: { quote: { ownerId: req.user!.id } } } : {}) }, orderBy: { nextBillAt: 'asc' } }) : [],
+    !portal && req.user!.role === 'ADMIN' ? db.subscription.findMany({ where: { organizationId: req.user!.organizationId }, orderBy: { nextBillAt: 'asc' } }) : [],
     (portal || hasModule(req.user, 'invoices')) ? db.invoice.findMany({ where: { organizationId: req.user!.organizationId, ...(portal ? { customerId: req.user!.customerId! } : req.user!.role === 'REP' ? { quote: { ownerId: req.user!.id } } : {}) }, include: { payments: true, customerRecord: { select: { id: true, email: true, phone: true, countryCode: true, contactPerson: true } } }, orderBy: { createdAt: 'desc' } }) : [],
     !portal && hasModule(req.user, 'health') ? db.alert.findMany({ where: { organizationId: req.user!.organizationId }, orderBy: { createdAt: 'desc' } }) : [],
     !portal && hasModule(req.user, 'reports') ? db.auditEvent.findMany({ where: { organizationId: req.user!.organizationId, ...(req.user!.role === 'REP' ? { actorId: req.user!.id } : {}) }, orderBy: { createdAt: 'desc' }, take: 30 }) : [],
@@ -457,7 +497,8 @@ app.get('/api/v1/workspace', authenticate, async (req: AuthRequest, res) => {
   const quotes = portal ? rawQuotes.map(portalQuoteDto) : rawQuotes.map((quote) => ({ ...quote, riskBreakdown: approvalRiskBreakdown(quote) }));
   const invoices = portal ? rawInvoices.map(portalInvoiceDto) : rawInvoices;
   const subscriptions = rawSubscriptions.map((subscription) => ({ ...subscription, schedule: billingSchedule(subscription.nextBillAt, subscription.cadence) }));
-  return ok(req, res, { user: req.user, organization, users, customers, quotes, products, policies, warehouses, subscriptions, invoices, alerts, audits });
+  const warehouseDtos = warehouses.map((warehouse) => ({ ...warehouse, stocks: warehouse.stocks.map((stock) => ({ ...stock, available: stock.onHand - stock.reserved })) }));
+  return ok(req, res, { user: req.user, organization, users, customers, quotes, products, policies, warehouses: warehouseDtos, subscriptions, invoices, alerts, audits });
 });
 
 const customerProfileSchema = z.object({
@@ -930,6 +971,46 @@ app.post('/api/v1/portal/quotations/:id/confirm', authenticate, requireRole('CUS
   return ok(req, res, result);
 });
 
+app.get('/api/v1/warehouses/stock', authenticate, requireModule('fulfillment'), requireRole('REP', 'MANAGER', 'FINANCE', 'ADMIN'), async (req: AuthRequest, res) => {
+  const warehouses = await db.warehouse.findMany({ where: { organizationId: req.user!.organizationId, active: true }, include: { stocks: { include: { product: true } } }, orderBy: [{ priority: 'asc' }, { id: 'asc' }] });
+  return ok(req, res, warehouses.map((warehouse) => ({ ...warehouse, stocks: warehouse.stocks.map((stock) => ({ ...stock, available: stock.onHand - stock.reserved })) })));
+});
+
+app.patch('/api/v1/warehouses/:id', authenticate, requireModule('fulfillment'), requireRole('ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = z.object({ name: z.string().trim().min(2).max(120).optional(), priority: z.number().int().min(1).max(10_000).optional(), shippingCost: z.number().nonnegative().max(1_000_000).optional(), active: z.boolean().optional(), reason: z.string().trim().min(5).max(240) }).strict().refine((value) => value.name !== undefined || value.priority !== undefined || value.shippingCost !== undefined || value.active !== undefined, 'Choose a warehouse field to update.').safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter valid warehouse settings and a reason.', parsed.error.flatten());
+  const warehouse = await db.warehouse.findFirst({ where: { id: routeParam(req, 'id'), organizationId: req.user!.organizationId } });
+  if (!warehouse) return fail(req, res, 404, 'NOT_FOUND', 'Warehouse not found.');
+  const { reason, ...changes } = parsed.data;
+  const updated = await db.$transaction(async (tx) => { const result = await tx.warehouse.update({ where: { id: warehouse.id }, data: changes }); await audit(tx, req, 'WAREHOUSE_UPDATED', 'Warehouse', result.id, reason); return result; });
+  return ok(req, res, updated);
+});
+
+app.post('/api/v1/warehouses/:id/restock', authenticate, requireModule('fulfillment'), requireRole('FINANCE', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = z.object({ productId: z.string().uuid(), quantity: z.number().int().positive().max(1_000_000), reason: z.string().trim().min(5).max(240) }).strict().safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Choose a product, enter a positive receipt quantity, and provide a reason.', parsed.error.flatten());
+  const warehouse = await db.warehouse.findFirst({ where: { id: routeParam(req, 'id'), organizationId: req.user!.organizationId, active: true } });
+  const product = await db.product.findFirst({ where: { id: parsed.data.productId, organizationId: req.user!.organizationId, category: 'Hardware', active: true } });
+  if (!warehouse || !product) return fail(req, res, 404, 'NOT_FOUND', 'Active warehouse or hardware product not found.');
+  const result = await db.$transaction(async (tx) => {
+    const current = await tx.stockBalance.findUnique({ where: { warehouseId_productId: { warehouseId: warehouse.id, productId: product.id } } });
+    if (current) await tx.$queryRaw`SELECT "id" FROM "StockBalance" WHERE "id" = ${current.id} FOR UPDATE`;
+    const balance = current
+      ? await tx.stockBalance.update({ where: { id: current.id }, data: { onHand: { increment: parsed.data.quantity } } })
+      : await tx.stockBalance.create({ data: { warehouseId: warehouse.id, productId: product.id, onHand: parsed.data.quantity, reserved: 0 } });
+    await audit(tx, req, 'STOCK_RECEIVED', 'StockBalance', balance.id, `${parsed.data.reason} (+${parsed.data.quantity})`);
+    const possible = await tx.fulfillment.findMany({ where: { state: 'BACKORDER', quote: { organizationId: req.user!.organizationId } }, select: { quoteId: true, split: true } });
+    const consolidationCandidates = possible.filter((item) => parseFulfillmentSplit(item.split).backorders.some((row) => row.productId === product.id)).map((item) => item.quoteId);
+    return { ...balance, available: balance.onHand - balance.reserved, consolidationCandidates };
+  });
+  return ok(req, res, result, 201);
+});
+
+app.get('/api/v1/fulfillment', authenticate, requireModule('fulfillment'), requireRole('REP', 'MANAGER', 'FINANCE', 'ADMIN'), async (req: AuthRequest, res) => {
+  const quotes = await db.quote.findMany({ where: { ...internalQuoteWhere(req.user!), stage: 'CONFIRMED', order: { is: { state: { notIn: ['FULFILLED', 'CANCELLED'] } } }, lines: { some: { product: { category: 'Hardware', recurring: false } } } }, include: { order: true, fulfillment: true }, orderBy: { updatedAt: 'desc' } });
+  return ok(req, res, quotes.map((quote) => { const split = quote.fulfillment ? parseFulfillmentSplit(quote.fulfillment.split) : { split: [], backorders: [] }; return { quoteId: quote.id, orderId: quote.order?.id, orderNumber: quote.order?.number ?? quote.number, quoteNumber: quote.number, customer: quote.customer, status: quote.fulfillment?.state ?? 'SPLIT_PENDING', warehouses: [...new Set(split.split.map((row) => row.warehouseName))] }; }));
+});
+
 app.get('/api/v1/invoices/:id/pdf', authenticate, async (req: AuthRequest, res) => {
   const portal = req.user!.role === 'CUSTOMER';
   if (!portal && !hasModule(req.user, 'invoices')) return fail(req, res, 403, 'FORBIDDEN', 'The invoices module is not enabled for your account.');
@@ -974,6 +1055,8 @@ app.post('/api/v1/portal/invoices/:id/request-change', authenticate, requireRole
 });
 
 app.post('/api/v1/fulfillment/:quoteId/allocate', authenticate, requireModule('fulfillment'), requireRole('FINANCE', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = z.object({ stockFingerprint: z.string().length(64).optional() }).strict().safeParse(req.body ?? {});
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Refresh the allocation preview and try again.');
   const quoteId = routeParam(req, 'quoteId');
   const fulfillment = await db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "Quote" WHERE "id" = ${quoteId} FOR UPDATE`;
@@ -981,27 +1064,129 @@ app.post('/api/v1/fulfillment/:quoteId/allocate', authenticate, requireModule('f
     if (!quote || quote.organizationId !== req.user!.organizationId || quote.stage !== 'CONFIRMED' || !quote.order) throw new DomainError(409, 'INVALID_STATE', 'Confirm the quotation before reserving stock.');
     if (quote.fulfillment) return quote.fulfillment;
     const tracked = quote.lines.filter((line) => !line.product.recurring && line.product.category === 'Hardware');
-    const ids = await tx.stockBalance.findMany({ where: { productId: { in: tracked.map((line) => line.productId) }, warehouse: { organizationId: req.user!.organizationId } }, select: { id: true }, orderBy: { id: 'asc' } });
+    const ids = await tx.stockBalance.findMany({ where: { productId: { in: tracked.map((line) => line.productId) }, warehouse: { organizationId: req.user!.organizationId, active: true } }, select: { id: true }, orderBy: { id: 'asc' } });
     if (ids.length) await tx.$queryRaw`SELECT "id" FROM "StockBalance" WHERE "id" IN (${Prisma.join(ids.map((item) => item.id))}) ORDER BY "id" FOR UPDATE`;
-    const balances = await tx.stockBalance.findMany({ where: { id: { in: ids.map((item) => item.id) } }, include: { warehouse: true } });
+    const balances = await tx.stockBalance.findMany({ where: { id: { in: ids.map((item) => item.id) }, warehouse: { active: true } }, include: { warehouse: true } });
+    if (parsed.data.stockFingerprint && parsed.data.stockFingerprint !== stockFingerprint(balances)) throw new DomainError(409, 'STOCK_CHANGED', 'Warehouse stock changed after this recommendation. Refresh before accepting it.');
     const allocation = allocateStock(tracked.map((line) => ({ productId: line.productId, quantity: line.quantity })), balances.map((balance) => ({ productId: balance.productId, warehouseId: balance.warehouseId, warehouseName: balance.warehouse.name, priority: balance.warehouse.priority, shippingCost: decimal(balance.warehouse.shippingCost), onHand: balance.onHand, reserved: balance.reserved })));
     for (const row of allocation.split) { const changed = await tx.stockBalance.updateMany({ where: { warehouseId: row.warehouseId, productId: row.productId, reserved: { lte: balances.find((balance) => balance.warehouseId === row.warehouseId && balance.productId === row.productId)!.onHand - row.quantity } }, data: { reserved: { increment: row.quantity } } }); if (changed.count !== 1) throw new DomainError(409, 'STOCK_CHANGED', 'Stock changed. Refresh the allocation.'); }
-    const warehouseIds = [...new Set(allocation.split.map((row) => row.warehouseId))];
-    const cost = warehouseIds.reduce((sum, id) => sum + decimal(balances.find((row) => row.warehouseId === id)!.warehouse.shippingCost), 0);
-    const result = await tx.fulfillment.create({ data: { quoteId: quote.id, orderId: quote.order.id, split: asJson(allocation), state: allocation.backorders.length ? 'BACKORDER' : 'RESERVED', estimatedCost: cost, shipmentCount: warehouseIds.length } });
+    const metrics = allocationMetrics(allocation.split, balances.map((balance) => ({ warehouseId: balance.warehouseId, shippingCost: decimal(balance.warehouse.shippingCost) })));
+    const fulfilled = allocation.backorders.length === 0;
+    const result = await tx.fulfillment.create({ data: { quoteId: quote.id, orderId: quote.order.id, split: asJson(allocation), state: fulfilled ? 'FULFILLED' : 'BACKORDER', estimatedCost: metrics.estimatedCost, shipmentCount: metrics.shipmentCount } });
+    await tx.order.update({ where: { id: quote.order.id }, data: { state: fulfilled ? 'FULFILLED' : 'PARTIALLY_FULFILLED' } });
     await audit(tx, req, 'STOCK_ALLOCATED', 'Order', quote.order.id, undefined, quote.currentRevisionId ?? undefined);
     return result;
   });
   return ok(req, res, fulfillment);
 });
 
-app.post('/api/v1/subscriptions/:id/change', authenticate, requireModule('subscriptions'), requireRole('FINANCE', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
-  const parsed = z.object({ amount: z.number().positive().optional(), cancel: z.boolean().optional() }).strict().safeParse(req.body);
-  if (!parsed.success || (parsed.data.amount === undefined && !parsed.data.cancel)) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter a valid subscription change.');
+app.get('/api/v1/fulfillment/:quoteId/preview', authenticate, requireModule('fulfillment'), requireRole('REP', 'MANAGER', 'FINANCE', 'ADMIN'), async (req: AuthRequest, res) => {
+  const quote = await db.quote.findFirst({ where: { id: routeParam(req, 'quoteId'), organizationId: req.user!.organizationId }, include: { lines: { include: { product: true } }, order: { include: { lines: true } }, fulfillment: true } });
+  if (!quote || quote.stage !== 'CONFIRMED' || !quote.order) return fail(req, res, 409, 'INVALID_STATE', 'Confirm the quotation before previewing stock allocation.');
+  if (quote.fulfillment) {
+    const split = parseFulfillmentSplit(quote.fulfillment.split);
+    const balances = await db.stockBalance.findMany({ where: { productId: { in: split.backorders.map((row) => row.productId) }, warehouse: { organizationId: req.user!.organizationId, active: true } } });
+    return ok(req, res, fulfillmentView(quote, quote.fulfillment, balances));
+  }
+  const tracked = quote.lines.filter((line) => !line.product.recurring && line.product.category === 'Hardware');
+  const balances = await db.stockBalance.findMany({ where: { productId: { in: tracked.map((line) => line.productId) }, warehouse: { organizationId: req.user!.organizationId, active: true } }, include: { warehouse: true } });
+  const allocation = allocateStock(tracked.map((line) => ({ productId: line.productId, quantity: line.quantity })), balances.map((balance) => ({ productId: balance.productId, warehouseId: balance.warehouseId, warehouseName: balance.warehouse.name, priority: balance.warehouse.priority, shippingCost: decimal(balance.warehouse.shippingCost), onHand: balance.onHand, reserved: balance.reserved })));
+  const metrics = allocationMetrics(allocation.split, balances.map((balance) => ({ warehouseId: balance.warehouseId, shippingCost: decimal(balance.warehouse.shippingCost) })));
+  return ok(req, res, fulfillmentView(quote, { state: allocation.backorders.length ? 'BACKORDER' : 'SPLIT_PENDING', split: allocation, estimatedCost: metrics.estimatedCost, shipmentCount: metrics.shipmentCount, stockFingerprint: stockFingerprint(balances), preview: true }, balances));
+});
+
+const manualAllocationSchema = z.object({
+  allocations: z.array(z.object({ productId: z.string().uuid(), warehouseId: z.string().uuid(), quantity: z.number().int().positive() }).strict()).min(1).max(200),
+  reason: z.string().trim().min(5).max(240),
+}).strict().superRefine((value, ctx) => {
+  const keys = value.allocations.map((row) => `${row.productId}:${row.warehouseId}`);
+  if (new Set(keys).size !== keys.length) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['allocations'], message: 'Combine duplicate product and warehouse rows.' });
+});
+
+app.post('/api/v1/fulfillment/:quoteId/allocate-manual', authenticate, requireModule('fulfillment'), requireRole('FINANCE', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = manualAllocationSchema.safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter valid warehouse quantities and an override reason.', parsed.error.flatten());
+  const quoteId = routeParam(req, 'quoteId');
+  const fulfillment = await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Quote" WHERE "id" = ${quoteId} FOR UPDATE`;
+    const quote = await tx.quote.findUnique({ where: { id: quoteId }, include: { lines: { include: { product: true } }, order: true, fulfillment: true } });
+    if (!quote || quote.organizationId !== req.user!.organizationId || quote.stage !== 'CONFIRMED' || !quote.order) throw new DomainError(409, 'INVALID_STATE', 'Confirm the quotation before reserving stock.');
+    if (quote.fulfillment) return quote.fulfillment;
+    const required = quote.lines.filter((item) => !item.product.recurring && item.product.category === 'Hardware').map((line) => ({ productId: line.productId, quantity: line.quantity }));
+    const balanceIds = await tx.stockBalance.findMany({ where: { OR: parsed.data.allocations.map((row) => ({ productId: row.productId, warehouseId: row.warehouseId })), warehouse: { organizationId: req.user!.organizationId } }, select: { id: true }, orderBy: { id: 'asc' } });
+    if (balanceIds.length !== parsed.data.allocations.length) throw new DomainError(422, 'INVALID_ALLOCATION', 'One or more warehouse stock rows do not exist.');
+    await tx.$queryRaw`SELECT "id" FROM "StockBalance" WHERE "id" IN (${Prisma.join(balanceIds.map((item) => item.id))}) ORDER BY "id" FOR UPDATE`;
+    const balances = await tx.stockBalance.findMany({ where: { id: { in: balanceIds.map((item) => item.id) }, warehouse: { active: true } }, include: { warehouse: true } });
+    let allocation;
+    try { allocation = manualAllocation(required, parsed.data.allocations, balances.map((balance) => ({ productId: balance.productId, warehouseId: balance.warehouseId, warehouseName: balance.warehouse.name, priority: balance.warehouse.priority, shippingCost: decimal(balance.warehouse.shippingCost), onHand: balance.onHand, reserved: balance.reserved }))); }
+    catch (error) { if (error instanceof FulfillmentRuleError) throw new DomainError(error.code === 'INSUFFICIENT_STOCK' ? 409 : 422, error.code === 'INSUFFICIENT_STOCK' ? 'STOCK_CHANGED' : error.code, error.message); throw error; }
+    for (const row of allocation.split) await tx.stockBalance.update({ where: { warehouseId_productId: { warehouseId: row.warehouseId, productId: row.productId } }, data: { reserved: { increment: row.quantity } } });
+    const metrics = allocationMetrics(allocation.split, balances.map((balance) => ({ warehouseId: balance.warehouseId, shippingCost: decimal(balance.warehouse.shippingCost) })));
+    const fulfilled = allocation.backorders.length === 0;
+    const result = await tx.fulfillment.create({ data: { quoteId: quote.id, orderId: quote.order.id, split: asJson(allocation), state: fulfilled ? 'FULFILLED' : 'BACKORDER', estimatedCost: metrics.estimatedCost, shipmentCount: metrics.shipmentCount } });
+    await tx.order.update({ where: { id: quote.order.id }, data: { state: fulfilled ? 'FULFILLED' : 'PARTIALLY_FULFILLED' } });
+    await audit(tx, req, 'STOCK_ALLOCATION_OVERRIDDEN', 'Order', quote.order.id, parsed.data.reason, quote.currentRevisionId ?? undefined);
+    return result;
+  });
+  return ok(req, res, fulfillment);
+});
+
+app.get('/api/v1/fulfillment/:quoteId', authenticate, requireModule('fulfillment'), requireRole('REP', 'MANAGER', 'FINANCE', 'ADMIN'), async (req: AuthRequest, res) => {
+  const quote = await db.quote.findUnique({ where: { id: routeParam(req, 'quoteId') }, include: { lines: { include: { product: true } }, order: { include: { lines: true } }, fulfillment: true } });
+  if (!quote || !canAccessInternalQuote(req.user!, quote) || !quote.order) return fail(req, res, 404, 'NOT_FOUND', 'Fulfillment order not found.');
+  if (!quote.fulfillment) return fail(req, res, 409, 'SPLIT_PENDING', 'Generate and accept a warehouse split first.');
+  const split = parseFulfillmentSplit(quote.fulfillment.split);
+  const balances = await db.stockBalance.findMany({ where: { productId: { in: split.backorders.map((row) => row.productId) }, warehouse: { organizationId: req.user!.organizationId, active: true } } });
+  return ok(req, res, fulfillmentView(quote, quote.fulfillment, balances));
+});
+
+app.post('/api/v1/fulfillment/:quoteId/consolidate-backorder', authenticate, requireModule('fulfillment'), requireRole('FINANCE', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = z.object({ reason: z.string().trim().min(5).max(240) }).strict().safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Provide a reason for consolidating the backorder.', parsed.error.flatten());
+  const quoteId = routeParam(req, 'quoteId');
+  const updated = await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Quote" WHERE "id" = ${quoteId} FOR UPDATE`;
+    const quote = await tx.quote.findUnique({ where: { id: quoteId }, include: { order: true, fulfillment: true } });
+    if (!quote || quote.organizationId !== req.user!.organizationId || !quote.order || !quote.fulfillment) throw new DomainError(404, 'NOT_FOUND', 'Fulfillment order not found.');
+    const current = parseFulfillmentSplit(quote.fulfillment.split);
+    if (!current.backorders.length) throw new DomainError(409, 'ALREADY_FULFILLED', 'This order has no remaining backorder.');
+    const ids = await tx.stockBalance.findMany({ where: { productId: { in: current.backorders.map((row) => row.productId) }, warehouse: { organizationId: req.user!.organizationId, active: true } }, select: { id: true }, orderBy: { id: 'asc' } });
+    if (ids.length) await tx.$queryRaw`SELECT "id" FROM "StockBalance" WHERE "id" IN (${Prisma.join(ids.map((item) => item.id))}) ORDER BY "id" FOR UPDATE`;
+    const balances = await tx.stockBalance.findMany({ where: { id: { in: ids.map((item) => item.id) } }, include: { warehouse: true } });
+    const addition = allocateStock(current.backorders, balances.map((balance) => ({ productId: balance.productId, warehouseId: balance.warehouseId, warehouseName: balance.warehouse.name, priority: balance.warehouse.priority, shippingCost: decimal(balance.warehouse.shippingCost), onHand: balance.onHand, reserved: balance.reserved })));
+    if (!addition.split.length) throw new DomainError(409, 'INSUFFICIENT_STOCK', 'No new stock is available for this backorder.');
+    for (const row of addition.split) { const balance = balances.find((item) => item.warehouseId === row.warehouseId && item.productId === row.productId)!; const changed = await tx.stockBalance.updateMany({ where: { id: balance.id, reserved: { lte: balance.onHand - row.quantity } }, data: { reserved: { increment: row.quantity } } }); if (changed.count !== 1) throw new DomainError(409, 'STOCK_CHANGED', 'Stock changed. Refresh the fulfillment detail.'); }
+    const combined = { split: [...current.split, ...addition.split], backorders: addition.backorders };
+    const warehouseIds = [...new Set(combined.split.map((row) => row.warehouseId))];
+    const warehouses = await tx.warehouse.findMany({ where: { id: { in: warehouseIds }, organizationId: req.user!.organizationId } });
+    const metrics = allocationMetrics(combined.split, warehouses.map((warehouse) => ({ warehouseId: warehouse.id, shippingCost: decimal(warehouse.shippingCost) })));
+    const fulfilled = combined.backorders.length === 0;
+    const fulfillment = await tx.fulfillment.update({ where: { id: quote.fulfillment.id }, data: { split: asJson(combined), state: fulfilled ? 'FULFILLED' : 'BACKORDER', estimatedCost: metrics.estimatedCost, shipmentCount: metrics.shipmentCount } });
+    await tx.order.update({ where: { id: quote.order.id }, data: { state: fulfilled ? 'FULFILLED' : 'PARTIALLY_FULFILLED' } });
+    await audit(tx, req, 'BACKORDER_CONSOLIDATED', 'Order', quote.order.id, parsed.data.reason, quote.currentRevisionId ?? undefined);
+    return fulfillment;
+  });
+  return ok(req, res, updated);
+});
+
+app.post('/api/v1/subscriptions/:id/change', authenticate, requireModule('subscriptions'), requireRole('ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = z.object({ amount: z.number().positive().optional(), action: z.enum(['PAUSE', 'RESUME', 'CANCEL']).optional(), reason: z.string().trim().min(5).max(240) }).strict().refine((value) => value.amount !== undefined || value.action !== undefined, 'Choose an amount or lifecycle action.').safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter a valid subscription change and reason.', parsed.error.flatten());
   const id = routeParam(req, 'id');
   const existing = await db.subscription.findFirst({ where: { id, organizationId: req.user!.organizationId } });
   if (!existing) return fail(req, res, 404, 'NOT_FOUND', 'Subscription not found.');
-  const subscription = await db.$transaction(async (tx) => { await tx.$queryRaw`SELECT "id" FROM "Subscription" WHERE "id" = ${id} FOR UPDATE`; const updated = await tx.subscription.update({ where: { id }, data: { ...(parsed.data.amount !== undefined ? { amount: parsed.data.amount } : {}), ...(parsed.data.cancel ? { state: 'CANCELLED' as const } : {}) } }); await audit(tx, req, parsed.data.cancel ? 'SUBSCRIPTION_CANCELLED' : 'SUBSCRIPTION_CHANGED', 'Subscription', updated.id); return updated; });
+  if (parsed.data.action === 'PAUSE' && existing.state !== 'ACTIVE') return fail(req, res, 409, 'INVALID_STATE', 'Only an active subscription can be paused.');
+  if (parsed.data.action === 'RESUME' && existing.state !== 'PAUSED') return fail(req, res, 409, 'INVALID_STATE', 'Only a paused subscription can be resumed.');
+  if (parsed.data.action === 'CANCEL' && existing.state === 'CANCELLED') return fail(req, res, 409, 'INVALID_STATE', 'This subscription is already cancelled.');
+  const nextState = parsed.data.action === 'PAUSE'
+    ? 'PAUSED' as const
+    : parsed.data.action === 'RESUME'
+      ? 'ACTIVE' as const
+      : parsed.data.action === 'CANCEL'
+        ? 'CANCELLED' as const
+        : undefined;
+  const action = parsed.data.action === 'PAUSE' ? 'SUBSCRIPTION_PAUSED' : parsed.data.action === 'RESUME' ? 'SUBSCRIPTION_RESUMED' : parsed.data.action === 'CANCEL' ? 'SUBSCRIPTION_CANCELLED' : 'SUBSCRIPTION_CHANGED';
+  const subscription = await db.$transaction(async (tx) => { await tx.$queryRaw`SELECT "id" FROM "Subscription" WHERE "id" = ${id} FOR UPDATE`; const updated = await tx.subscription.update({ where: { id }, data: { ...(parsed.data.amount !== undefined ? { amount: parsed.data.amount } : {}), ...(nextState ? { state: nextState } : {}) } }); await audit(tx, req, action, 'Subscription', updated.id, parsed.data.reason); return updated; });
   return ok(req, res, { ...subscription, schedule: billingSchedule(subscription.nextBillAt, subscription.cadence) });
 });
 
@@ -1138,11 +1323,12 @@ app.patch('/api/v1/products/:id', authenticate, requireModule('products'), requi
 });
 
 app.patch('/api/v1/policies/:id', authenticate, requireModule('policies'), requireRole('ADMIN', 'MANAGER'), requireCsrf, async (req: AuthRequest, res) => {
-  const parsed = z.object({ maxDiscount: z.number().min(0).max(100), financeThreshold: z.number().min(0).max(100) }).strict().safeParse(req.body);
-  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter valid policy values.');
+  const parsed = discountPolicyUpdateSchema.safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter valid policy values and a change reason.', parsed.error.flatten());
   const existing = await db.discountPolicy.findFirst({ where: { id: routeParam(req, 'id'), organizationId: req.user!.organizationId } });
   if (!existing) return fail(req, res, 404, 'NOT_FOUND', 'Policy not found.');
-  const policy = await db.$transaction(async (tx) => { const updated = await tx.discountPolicy.update({ where: { id: existing.id }, data: { ...parsed.data, version: { increment: 1 }, publishedAt: new Date() } }); await audit(tx, req, 'POLICY_UPDATED', 'DiscountPolicy', updated.id); return updated; });
+  const { reason, ...changes } = parsed.data;
+  const policy = await db.$transaction(async (tx) => { const updated = await tx.discountPolicy.update({ where: { id: existing.id }, data: { ...changes, version: { increment: 1 }, publishedAt: new Date() } }); await audit(tx, req, 'POLICY_UPDATED', 'DiscountPolicy', updated.id, reason); return updated; });
   return ok(req, res, policy);
 });
 

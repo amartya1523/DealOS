@@ -85,8 +85,9 @@ async function main() {
   ]);
   await db.organizationInvitation.create({ data: { organizationId: northstarOrganization.id, email: 'analyst@northstar.demo', accessRole: 'ORGANIZATION_MEMBER', businessRole: Role.FINANCE, tokenHash: 'demo-invitation-token-hash-not-a-credential', invitedById: organizationAdmin.id, expiresAt: new Date('2026-12-31') } });
 
-  const [laptop, setup, care] = await Promise.all([
+  const [laptop, docking, setup, care] = await Promise.all([
     db.product.create({ data: { organizationId, name: 'Latitude Pro 14', sku: 'HW-LP14', category: 'Hardware', description: 'Business laptop, 16 GB RAM and three-year support.', unit: 'Unit', price: 1200, cost: 820, taxRate: 18 } }),
+    db.product.create({ data: { organizationId, name: 'Docking Station', sku: 'HW-DOCK', category: 'Hardware', description: 'USB-C business docking station with dual-display support.', unit: 'Unit', price: 280, cost: 175, taxRate: 18 } }),
     db.product.create({ data: { organizationId, name: 'Onsite Setup Service', sku: 'SV-SETUP', category: 'Services', description: 'Deployment, migration and team onboarding.', unit: 'Engagement', price: 400, cost: 250, taxRate: 18 } }),
     db.product.create({ data: { organizationId, name: 'Care Plan', sku: 'SUB-CARE', category: 'Subscriptions', description: 'Priority help desk and device monitoring.', unit: 'Seat', price: 40, cost: 12, taxRate: 18, recurring: true, cadence: 'Monthly' } }),
   ]);
@@ -104,6 +105,7 @@ async function main() {
   await Promise.all([
     db.stockBalance.create({ data: { warehouseId: mainWarehouse.id, productId: laptop.id, onHand: 4, reserved: 0 } }),
     db.stockBalance.create({ data: { warehouseId: eastDepot.id, productId: laptop.id, onHand: 8, reserved: 0 } }),
+    db.stockBalance.create({ data: { warehouseId: mainWarehouse.id, productId: docking.id, onHand: 65, reserved: 0 } }),
   ]);
 
   const q102Lines = [
@@ -125,6 +127,20 @@ async function main() {
     const revision = await db.quoteRevision.create({ data: { quoteId: quote.id, revisionNumber: 1, state: 'DRAFT', orderDiscount: 0, subtotal: 0, taxTotal: 0, total: 0, margin: 0, riskScore: 0, totalsByCadence: {}, linesSnapshot: [], policySnapshot: {}, termsHash: hash({ quote: quote.id, nonce: number }) } });
     await db.quote.update({ where: { id: quote.id }, data: { currentRevisionId: revision.id } });
   }
+
+  async function createConfirmedHardwareOrder(number: string, customer: typeof acme, product: typeof laptop, quantity: number) {
+    const subtotal = Number(product.price) * quantity;
+    const taxTotal = subtotal * Number(product.taxRate) / 100;
+    const quote = await db.quote.create({ data: { organizationId, number, customer: customer.name, customerId: customer.id, customerTier: customer.tier, ownerId: rep.id, stage: 'CONFIRMED', total: subtotal + taxTotal, taxTotal, margin: (Number(product.price) - Number(product.cost)) * quantity, sentAt: new Date('2026-09-05'), lines: { create: [{ productId: product.id, quantity, unitPrice: product.price, unitCost: product.cost, discount: 0, allowedDiscount: 15 }] } } });
+    const terms = hash({ quoteId: quote.id, number, productId: product.id, quantity });
+    const revision = await db.quoteRevision.create({ data: { quoteId: quote.id, revisionNumber: 1, state: 'SENT', sentAt: new Date('2026-09-05'), orderDiscount: 0, subtotal, taxTotal, total: subtotal + taxTotal, margin: (Number(product.price) - Number(product.cost)) * quantity, riskScore: 0, totalsByCadence: { 'One-time': { subtotal, tax: taxTotal, total: subtotal + taxTotal } }, linesSnapshot: [{ productId: product.id, quantity, unitPrice: product.price.toString() }], policySnapshot: { tier: customer.tier }, termsHash: terms, submittedById: rep.id } });
+    await db.quote.update({ where: { id: quote.id }, data: { currentRevisionId: revision.id } });
+    const acceptance = await db.customerAcceptance.create({ data: { quoteId: quote.id, revisionId: revision.id, customerId: customer.id, acceptedById: users[4]!.id, termsHash: terms } });
+    const order = await db.order.create({ data: { number: `SO-${number.replace(/^Q-/, '')}`, quoteId: quote.id, revisionId: revision.id, acceptanceId: acceptance.id, customerId: customer.id, currency: 'INR' } });
+    await db.orderLine.create({ data: { orderId: order.id, quoteLineId: (await db.quoteLine.findFirstOrThrow({ where: { quoteId: quote.id } })).id, productId: product.id, quantity, recurring: false, snapshot: { name: product.name, sku: product.sku, unitPrice: product.price.toString() } } });
+  }
+  await createConfirmedHardwareOrder('Q-1042', acme, laptop, 10);
+  await createConfirmedHardwareOrder('Q-1030', acme, docking, 12);
 
   const northstarQuote = await db.quote.create({ data: { organizationId: northstarOrganization.id, number: 'NS-Q-0001', customer: orion.name, customerId: orion.id, customerTier: orion.tier, ownerId: northstarRep.id, teamId: northstarTeam.id, stage: 'PENDING_APPROVAL', total: 5400, margin: 2040, riskScore: 6, lines: { create: [{ productId: northstarProduct.id, quantity: 3, unitPrice: 1800, unitCost: 1120, discount: 0, allowedDiscount: 12 }] } } });
   const northstarRevision = await db.quoteRevision.create({ data: { quoteId: northstarQuote.id, revisionNumber: 1, state: 'SUBMITTED', orderDiscount: 0, subtotal: 5400, taxTotal: 972, total: 6372, margin: 2040, riskScore: 6, totalsByCadence: { 'One-time': { subtotal: 5400, tax: 972, total: 6372 } }, linesSnapshot: [{ productId: northstarProduct.id, quantity: 3, unitPrice: 1800 }], policySnapshot: { tier: 'Enterprise' }, termsHash: hash({ quote: northstarQuote.id, revision: 1 }), submittedById: northstarRep.id } });

@@ -112,20 +112,74 @@ export function allocateStock(
   for (const item of required) demand.set(item.productId, (demand.get(item.productId) ?? 0) + item.quantity);
   const split: Array<{ productId: string; warehouseId: string; warehouseName: string; quantity: number }> = [];
   const backorders: Array<{ productId: string; quantity: number }> = [];
+  const usedWarehouses = new Set<string>();
   for (const [productId, quantityRequired] of demand) {
     let remaining = quantityRequired;
     const candidates = balances
       .filter((balance) => balance.productId === productId && balance.onHand - balance.reserved > 0)
-      .sort((a, b) => a.priority - b.priority || a.shippingCost - b.shippingCost || a.warehouseId.localeCompare(b.warehouseId));
+      .sort((a, b) => {
+        const aUsed = usedWarehouses.has(a.warehouseId) ? 0 : 1;
+        const bUsed = usedWarehouses.has(b.warehouseId) ? 0 : 1;
+        if (aUsed !== bUsed) return aUsed - bUsed;
+        const aAvailable = a.onHand - a.reserved;
+        const bAvailable = b.onHand - b.reserved;
+        const aCovers = aAvailable >= quantityRequired ? 0 : 1;
+        const bCovers = bAvailable >= quantityRequired ? 0 : 1;
+        if (aCovers !== bCovers) return aCovers - bCovers;
+        if (aCovers === 0) return a.shippingCost - b.shippingCost || a.priority - b.priority || a.warehouseId.localeCompare(b.warehouseId);
+        return bAvailable - aAvailable || a.shippingCost - b.shippingCost || a.priority - b.priority || a.warehouseId.localeCompare(b.warehouseId);
+      });
     for (const balance of candidates) {
       if (!remaining) break;
       const quantity = Math.min(remaining, balance.onHand - balance.reserved);
       split.push({ productId, warehouseId: balance.warehouseId, warehouseName: balance.warehouseName, quantity });
+      usedWarehouses.add(balance.warehouseId);
       remaining -= quantity;
     }
     if (remaining > 0) backorders.push({ productId, quantity: remaining });
   }
   return { split, backorders };
+}
+
+export class FulfillmentRuleError extends Error {
+  constructor(readonly code: 'INVALID_ALLOCATION' | 'INSUFFICIENT_STOCK', message: string) { super(message); }
+}
+
+export function manualAllocation(
+  required: Array<{ productId: string; quantity: number }>,
+  requested: Array<{ productId: string; warehouseId: string; quantity: number }>,
+  balances: Array<{ productId: string; warehouseId: string; warehouseName: string; priority: number; shippingCost: number; onHand: number; reserved: number }>,
+) {
+  const demand = new Map<string, number>();
+  for (const item of required) demand.set(item.productId, (demand.get(item.productId) ?? 0) + item.quantity);
+  const keys = new Set<string>();
+  const allocated = new Map<string, number>();
+  const split = requested.map((row) => {
+    const key = `${row.productId}:${row.warehouseId}`;
+    if (keys.has(key)) throw new FulfillmentRuleError('INVALID_ALLOCATION', 'Combine duplicate product and warehouse rows.');
+    keys.add(key);
+    if (!Number.isInteger(row.quantity) || row.quantity <= 0 || !demand.has(row.productId)) throw new FulfillmentRuleError('INVALID_ALLOCATION', 'Manual allocation contains an invalid order item or quantity.');
+    const balance = balances.find((item) => item.productId === row.productId && item.warehouseId === row.warehouseId);
+    if (!balance) throw new FulfillmentRuleError('INVALID_ALLOCATION', 'One or more warehouse stock rows do not exist.');
+    if (row.quantity > balance.onHand - balance.reserved) throw new FulfillmentRuleError('INSUFFICIENT_STOCK', `${balance.warehouseName} no longer has enough available stock.`);
+    const next = (allocated.get(row.productId) ?? 0) + row.quantity;
+    if (next > (demand.get(row.productId) ?? 0)) throw new FulfillmentRuleError('INVALID_ALLOCATION', 'Manual allocation exceeds ordered quantity.');
+    allocated.set(row.productId, next);
+    return { ...row, warehouseName: balance.warehouseName };
+  });
+  const backorders = [...demand.entries()].map(([productId, quantity]) => ({ productId, quantity: quantity - (allocated.get(productId) ?? 0) })).filter((row) => row.quantity > 0);
+  return { split, backorders };
+}
+
+export function allocationMetrics(
+  split: Array<{ warehouseId: string }>,
+  balances: Array<{ warehouseId: string; shippingCost: number }>,
+) {
+  const warehouseIds = [...new Set(split.map((row) => row.warehouseId))];
+  return {
+    shipmentCount: warehouseIds.length,
+    estimatedCost: warehouseIds.reduce((sum, warehouseId) => sum + (balances.find((row) => row.warehouseId === warehouseId)?.shippingCost ?? 0), 0),
+  };
 }
 
 export function billingSchedule(firstBillAt: Date, cadence: string, count = 3) {

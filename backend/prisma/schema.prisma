@@ -74,6 +74,7 @@ enum FulfillmentState {
 
 enum SubscriptionState {
   ACTIVE
+  PAUSED
   CANCELLED
 }
 
@@ -446,6 +447,7 @@ model Warehouse {
   name           String
   priority       Int
   shippingCost   Decimal        @db.Decimal(12, 2)
+  active         Boolean        @default(true)
   stocks         StockBalance[]
   createdAt      DateTime       @default(now())
 
