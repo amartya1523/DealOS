@@ -37,9 +37,11 @@ describe("Deal Health intervention center", () => {
     fireEvent.click(screen.getByRole("button", { name: /Review deal/ }));
     expect(open).toHaveBeenCalledWith("approval", "quote-1");
     fireEvent.click(screen.getByRole("button", { name: /Nudge rep/ }));
-    expect(mutate).toHaveBeenCalledWith("/alerts/alert-1/nudge", {}, "POST", "Representative nudged");
-    fireEvent.click(screen.getByRole("button", { name: /Dismiss/ }));
-    expect(mutate).toHaveBeenCalledWith("/alerts/alert-1/resolve", {}, "POST", "Alert dismissed");
+    expect(mutate).toHaveBeenCalledWith("/deal-health/alert-1/actions", { action: "NUDGE", reason: "Representative follow-up requested from deal health." }, "POST", "Representative nudged");
+    fireEvent.click(screen.getByRole("button", { name: /Acknowledge/ }));
+    expect(mutate).toHaveBeenCalledWith("/deal-health/alert-1/actions", { action: "ACKNOWLEDGE", reason: "Alert reviewed from deal health." }, "POST", "Alert acknowledged");
+    fireEvent.click(screen.getByRole("button", { name: /Resolve/ }));
+    expect(mutate).toHaveBeenCalledWith("/deal-health/alert-1/actions", { action: "RESOLVE", reason: "Risk signal resolved from deal health." }, "POST", "Alert resolved");
     fireEvent.click(screen.getByRole("button", { name: /Delivery/ }));
     expect(screen.getByRole("heading", { name: "No alerts match these filters" })).toBeInTheDocument();
   });

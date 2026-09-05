@@ -8,6 +8,8 @@ export const discountPolicyUpdateSchema = z.object({
   servicesLimit: percentage,
   subscriptionLimit: percentage,
   financeThreshold: percentage,
+  aggregateDiscountLimit: percentage,
+  minimumMarginPercent: z.number().min(-100).max(100),
   reason: z.string().trim().min(5).max(240),
 }).strict().superRefine((values, context) => {
   for (const [field, value] of [

@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 type DecimalValue = Prisma.Decimal | string | number;
 
 export type QuoteLineInput = {
+  productId?: string;
   quantity: number;
   unitPrice: DecimalValue;
   unitCost: DecimalValue;
@@ -15,6 +16,7 @@ export type QuoteLineInput = {
 export type ReviewPolicy = {
   financeThreshold?: DecimalValue;
   minimumMarginPercent?: DecimalValue;
+  aggregateDiscountLimit?: DecimalValue;
 };
 
 const money = (value: Prisma.Decimal) => value.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
@@ -32,7 +34,7 @@ export function calculateQuote(lines: QuoteLineInput[], orderDiscount: DecimalVa
   let weightedExcessValue = decimal(0);
   let grossValue = decimal(0);
   let worstExcess = decimal(0);
-  const cadenceBuckets = new Map<string, { subtotal: Prisma.Decimal; tax: Prisma.Decimal; cost: Prisma.Decimal }>();
+  const cadenceBuckets = new Map<string, { subtotal: Prisma.Decimal; tax: Prisma.Decimal; cost: Prisma.Decimal; gross: Prisma.Decimal; weightedExcessValue: Prisma.Decimal; worstExcess: Prisma.Decimal }>();
 
   const calculatedLines = lines.map((line) => {
     const quantity = decimal(line.quantity);
@@ -48,10 +50,13 @@ export function calculateQuote(lines: QuoteLineInput[], orderDiscount: DecimalVa
     const lineCost = money(quantity.mul(unitCost));
     const excess = Prisma.Decimal.max(0, effectiveDiscount.sub(allowedDiscount));
     const cadence = line.cadence?.trim() || 'One-time';
-    const bucket = cadenceBuckets.get(cadence) ?? { subtotal: decimal(0), tax: decimal(0), cost: decimal(0) };
+    const bucket = cadenceBuckets.get(cadence) ?? { subtotal: decimal(0), tax: decimal(0), cost: decimal(0), gross: decimal(0), weightedExcessValue: decimal(0), worstExcess: decimal(0) };
     bucket.subtotal = bucket.subtotal.add(net);
     bucket.tax = bucket.tax.add(tax);
     bucket.cost = bucket.cost.add(lineCost);
+    bucket.gross = bucket.gross.add(gross);
+    bucket.weightedExcessValue = bucket.weightedExcessValue.add(gross.mul(excess));
+    bucket.worstExcess = Prisma.Decimal.max(bucket.worstExcess, excess);
     cadenceBuckets.set(cadence, bucket);
     subtotal = subtotal.add(net);
     taxTotal = taxTotal.add(tax);
@@ -73,11 +78,29 @@ export function calculateQuote(lines: QuoteLineInput[], orderDiscount: DecimalVa
 
   const weightedExcess = grossValue.isZero() ? decimal(0) : weightedExcessValue.div(grossValue);
   const margin = subtotal.sub(cost);
-  const marginPercent = subtotal.isZero() ? decimal(0) : margin.div(subtotal).mul(hundred);
+  const overallMarginPercent = subtotal.isZero() ? decimal(0) : margin.div(subtotal).mul(hundred);
   const financeThreshold = decimal(policy.financeThreshold ?? 5);
   const minimumMarginPercent = decimal(policy.minimumMarginPercent ?? 12);
-  const needsManager = worstExcess.gt(0) || weightedExcess.gt(0);
-  const needsFinance = worstExcess.gt(financeThreshold) || weightedExcess.gt(financeThreshold) || marginPercent.lt(minimumMarginPercent);
+  const aggregateDiscountLimit = decimal(policy.aggregateDiscountLimit ?? 20);
+  const riskByCadence = Object.fromEntries([...cadenceBuckets.entries()].map(([cadence, bucket]) => {
+    const bucketWeightedExcess = bucket.gross.isZero() ? decimal(0) : bucket.weightedExcessValue.div(bucket.gross);
+    const aggregateDiscount = bucket.gross.isZero() ? decimal(0) : hundred.sub(bucket.subtotal.div(bucket.gross).mul(hundred));
+    const bucketMargin = bucket.subtotal.sub(bucket.cost);
+    const bucketMarginPercent = bucket.subtotal.isZero() ? decimal(0) : bucketMargin.div(bucket.subtotal).mul(hundred);
+    return [cadence, {
+      worstExcess: asNumber(rate(bucket.worstExcess)),
+      weightedExcess: asNumber(rate(bucketWeightedExcess)),
+      aggregateDiscount: asNumber(rate(aggregateDiscount)),
+      marginPercent: asNumber(rate(bucketMarginPercent)),
+    }];
+  }));
+  const comparableBuckets = Object.values(riskByCadence);
+  const cadenceWeightedExcess = comparableBuckets.length ? Math.max(...comparableBuckets.map((bucket) => bucket.weightedExcess)) : 0;
+  const aggregateDiscount = comparableBuckets.length ? Math.max(...comparableBuckets.map((bucket) => bucket.aggregateDiscount)) : 0;
+  const marginPercent = comparableBuckets.length ? Math.min(...comparableBuckets.map((bucket) => bucket.marginPercent)) : asNumber(rate(overallMarginPercent));
+  const hasDiscount = calculatedLines.some((line) => decimal(line.effectiveDiscount).gt(0));
+  const needsFinance = worstExcess.gt(financeThreshold) || decimal(cadenceWeightedExcess).gt(financeThreshold) || decimal(aggregateDiscount).gt(aggregateDiscountLimit) || decimal(marginPercent).lt(minimumMarginPercent);
+  const needsManager = hasDiscount || needsFinance;
   const totalsByCadence = Object.fromEntries([...cadenceBuckets.entries()].map(([cadence, bucket]) => [cadence, {
     subtotal: asMoney(bucket.subtotal),
     tax: asMoney(bucket.tax),
@@ -94,14 +117,21 @@ export function calculateQuote(lines: QuoteLineInput[], orderDiscount: DecimalVa
     total: asMoney(subtotal.add(taxTotal)),
     cost: asMoney(cost),
     margin: asMoney(margin),
-    marginPercent: asNumber(rate(marginPercent)),
+    marginPercent,
     worstExcess: asNumber(rate(worstExcess)),
-    weightedExcess: asNumber(rate(weightedExcess)),
-    riskScore: asNumber(rate(Prisma.Decimal.max(worstExcess, weightedExcess))),
+    weightedExcess: cadenceWeightedExcess,
+    aggregateDiscount,
+    riskByCadence,
+    riskScore: Math.max(asNumber(rate(worstExcess)), cadenceWeightedExcess),
     needsManager,
     needsFinance,
     totalsByCadence,
   };
+}
+
+export function calculateAddOnContribution(line:QuoteLineInput,orderDiscount:DecimalValue=0,policy:ReviewPolicy={}) {
+  const calculation=calculateQuote([line],orderDiscount,policy);
+  return {netContribution:calculation.subtotal,marginContribution:calculation.margin,cadence:calculation.lines[0]?.cadence??'One-time'};
 }
 
 export function allocateStock(

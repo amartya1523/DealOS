@@ -21,11 +21,13 @@ export const quotationListQuerySchema = z.object({
 
 export const customerListQuerySchema = z.object({
   search: z.string().trim().min(1).max(100).optional(),
+  assignment: z.enum(['all', 'assigned', 'unassigned']).default('all'),
   limit: z.coerce.number().int().min(1).max(200).default(100),
 }).strict();
 
 export const createQuotationSchema = z.object({
   customerId: z.string().uuid(),
+  ownerId: z.string().uuid().optional(),
   validUntil: z.string().datetime().optional(),
   promisedDeliveryAt: z.string().datetime().optional(),
   terms: z.string().trim().max(5000).optional(),
@@ -35,6 +37,32 @@ export const createQuotationSchema = z.object({
   }
 });
 
+export class QuotationCreationError extends Error {
+  constructor(readonly status: number, readonly code: string, message: string) { super(message); }
+}
+
+type QuotationCreationCustomer = {
+  primarySalesTeamId: string | null;
+  primarySalesTeam: { managerId: string | null; members: Array<{ userId: string }> } | null;
+  assignments: Array<{ userId: string; user: { role: string; status: string } }>;
+};
+
+export function quotationCreationOwnership(
+  actor: Pick<QuotationActor, 'id' | 'role'>,
+  customer: QuotationCreationCustomer,
+  requestedOwnerId?: string,
+) {
+  if (actor.role === 'REP' && requestedOwnerId) throw new QuotationCreationError(422, 'VALIDATION_ERROR', 'Representatives cannot choose a quotation owner.');
+  if (actor.role !== 'REP' && !requestedOwnerId) throw new QuotationCreationError(422, 'OWNER_REQUIRED', 'Select an assigned representative to own this quotation.');
+  if (!customer.primarySalesTeamId || !customer.primarySalesTeam) throw new QuotationCreationError(422, 'ASSIGNMENT_REQUIRED', 'Assign this customer to a sales team before creating a quotation.');
+  if (actor.role === 'MANAGER' && customer.primarySalesTeam.managerId !== actor.id) throw new QuotationCreationError(403, 'FORBIDDEN', 'Managers can create quotations only for customers assigned to their team.');
+  const ownerId = actor.role === 'REP' ? actor.id : requestedOwnerId!;
+  const ownerAssignment = customer.assignments.find((assignment) => assignment.userId === ownerId && assignment.user.role === 'REP' && assignment.user.status === 'ACTIVE');
+  if (!ownerAssignment) throw new QuotationCreationError(403, 'CUSTOMER_ASSIGNMENT_REQUIRED', 'The quotation owner must be an active representative assigned to this customer.');
+  if (!customer.primarySalesTeam.members.some((member) => member.userId === ownerId)) throw new QuotationCreationError(403, 'TEAM_MEMBERSHIP_REQUIRED', 'The quotation owner must belong to the customer sales team.');
+  return { ownerId, teamId: customer.primarySalesTeamId };
+}
+
 export const quotationLineInputSchema = z.object({
   productId: z.string().uuid(),
   quantity: z.number().int().positive(),
@@ -42,9 +70,21 @@ export const quotationLineInputSchema = z.object({
 }).strict();
 
 export const quoteDraftSchema = z.object({
-  version: z.number().int().nonnegative(),
+  revisionId: z.string().uuid(),
+  expectedVersion: z.number().int().nonnegative(),
   orderDiscount: z.number().min(0).max(100),
   lines: z.array(quotationLineInputSchema).min(1).max(200),
+  validUntil: z.string().datetime().nullable().optional(),
+  promisedDeliveryAt: z.string().datetime().nullable().optional(),
+  terms: z.string().trim().max(5000).nullable().optional(),
+}).strict().superRefine((value, context) => {
+  if (value.validUntil && new Date(value.validUntil) <= new Date()) context.addIssue({ code: z.ZodIssueCode.custom, path: ['validUntil'], message: 'Validity date must be in the future.' });
+});
+
+export const quoteSubmitSchema = z.object({
+  revisionId: z.string().uuid(),
+  expectedVersion: z.number().int().nonnegative(),
+  reason: z.string().trim().min(2).max(2000),
 }).strict();
 
 export const quotePreviewSchema = z.object({
@@ -121,13 +161,11 @@ export function quotationStageWhere(stage: QuotationStage): Prisma.QuoteWhereInp
 }
 
 export function quotationRecordScope(actor: QuotationActor): Prisma.QuoteWhereInput {
-  if (actor.role === 'REP') return { ownerId: actor.id };
-  if (actor.role === 'MANAGER') return { OR: [
+  if (actor.role === 'REP') return { OR: [
     { ownerId: actor.id },
-    { teamId: null },
-    { team: { is: { managerId: actor.id } } },
     { team: { is: { members: { some: { userId: actor.id } } } } },
   ] };
+  if (actor.role === 'MANAGER') return { team: { is: { managerId: actor.id } } };
   return {};
 }
 
@@ -163,7 +201,7 @@ type CapabilitySource = StageSource & {
 export function quotationCapabilities(actor: QuotationActor, quote: CapabilitySource) {
   const stage = deriveQuotationStage(quote);
   const readOnly = Boolean(actor.readOnlyView);
-  const seller = actor.role === 'ADMIN' || (actor.role === 'REP' && quote.ownerId === actor.id);
+  const seller = actor.role === 'REP' && quote.ownerId === actor.id;
   const currentApproval = quote.approvals
     ?.filter((approval) => approval.revisionId === quote.currentRevisionId && approval.state === 'PENDING')
     .sort((left, right) => (right.cycle ?? 0) - (left.cycle ?? 0) || (left.sequence ?? 0) - (right.sequence ?? 0))[0];
@@ -187,7 +225,7 @@ export function quotationCapabilities(actor: QuotationActor, quote: CapabilitySo
   const reasons:Partial<Record<QuotationCapability,string>> = {};
   if (readOnly) for (const action of ['editDraft','saveDraft','submit','assign','approve','send'] as QuotationCapability[]) reasons[action] = 'View As mode is read-only.';
   if (!readOnly && stage !== 'DRAFT') reasons.editDraft = reasons.saveDraft = reasons.submit = 'Submitted revisions are immutable. Create or return a revision to Draft before editing.';
-  if (!readOnly && !seller) reasons.editDraft = reasons.saveDraft = reasons.submit = reasons.send = 'Only the quotation owner or an administrator can perform this action.';
+  if (!readOnly && !seller) reasons.editDraft = reasons.saveDraft = reasons.submit = reasons.send = 'Only the quotation owner can perform this action.';
   if (!currentApproval) reasons.approve = 'There is no active approval step.';
   else if (selfApproval) reasons.approve = 'Quotation owners and submitters cannot approve their own submission.';
   else if (!approvalRoleMatches) reasons.approve = `This step requires the ${currentApproval.step} role.`;

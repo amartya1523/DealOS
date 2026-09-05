@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allowedDiscountForCategory, buildQuotationWhere, createQuotationSchema, deriveQuotationStage, quotationCapabilities, quotationListQuerySchema, quotationSummaryDto, quotePreviewSchema, revisionHistory } from '../src/quotations.js';
+import { allowedDiscountForCategory, buildQuotationWhere, createQuotationSchema, deriveQuotationStage, quotationCapabilities, quotationCreationOwnership, quotationListQuerySchema, quotationSummaryDto, quotePreviewSchema, revisionHistory } from '../src/quotations.js';
 
 const base = {
   stage: 'APPROVED', currentRevisionId: 'revision-1', currentRevision: { id: 'revision-1', state: 'SENT' },
@@ -20,8 +20,8 @@ describe('quotation list read model', () => {
     expect(deriveQuotationStage({ ...base, stage: 'REJECTED', currentRevision: { id: 'revision-1', state: 'DRAFT' } })).toBe('DRAFT');
   });
 
-  it('always applies organization scope and limits representatives to their own quotations', () => {
-    expect(buildQuotationWhere({ id: 'rep-1', role: 'REP', organizationId: 'org-1' }, { ownerId: 'other-user' })).toMatchObject({ organizationId: 'org-1', AND: [{ ownerId: 'rep-1' }] });
+  it('always applies organization scope and gives representatives view-only team visibility', () => {
+    expect(buildQuotationWhere({ id: 'rep-1', role: 'REP', organizationId: 'org-1' }, { ownerId: 'other-user' })).toMatchObject({ organizationId: 'org-1', AND: [{ OR: [{ ownerId: 'rep-1' }, { team: { is: { members: { some: { userId: 'rep-1' } } } } }] }] });
     expect(buildQuotationWhere({ id: 'manager-1', role: 'MANAGER', organizationId: 'org-1' }, { ownerId: 'rep-2' })).toMatchObject({ organizationId: 'org-1', AND: [expect.any(Object), { ownerId: 'rep-2' }] });
   });
 
@@ -49,6 +49,26 @@ describe('quotation list read model', () => {
     expect(quotationListQuerySchema.safeParse({ limit: 500 }).success).toBe(false);
     expect(createQuotationSchema.safeParse({ customer: 'Unconfigured customer', customerTier: 'Gold' }).success).toBe(false);
     expect(createQuotationSchema.safeParse({ customerId: '7ff1b0c6-bb15-4d02-8f23-14914fcbbc4b' }).success).toBe(true);
+    expect(createQuotationSchema.safeParse({ customerId: '7ff1b0c6-bb15-4d02-8f23-14914fcbbc4b', teamId: '7ff1b0c6-bb15-4d02-8f23-14914fcbbc4b' }).success).toBe(false);
+    expect(createQuotationSchema.safeParse({ customerId: '7ff1b0c6-bb15-4d02-8f23-14914fcbbc4b', tier: 'Gold' }).success).toBe(false);
+    expect(createQuotationSchema.safeParse({ customerId: '7ff1b0c6-bb15-4d02-8f23-14914fcbbc4b', currency: 'INR' }).success).toBe(false);
+  });
+
+  it('derives quotation owner and team only from an active account assignment', () => {
+    const configured={primarySalesTeamId:'team-1',primarySalesTeam:{managerId:'manager-1',members:[{userId:'rep-1'},{userId:'rep-2'}]},assignments:[{userId:'rep-1',user:{role:'REP',status:'ACTIVE'}},{userId:'rep-2',user:{role:'REP',status:'ACTIVE'}}]};
+    expect(quotationCreationOwnership({id:'rep-1',role:'REP'},configured)).toEqual({ownerId:'rep-1',teamId:'team-1'});
+    expect(quotationCreationOwnership({id:'manager-1',role:'MANAGER'},configured,'rep-2')).toEqual({ownerId:'rep-2',teamId:'team-1'});
+  });
+
+  it('rejects unassigned reps and client-selected owners for rep-created quotations', () => {
+    const unassigned={primarySalesTeamId:'team-1',primarySalesTeam:{managerId:'manager-1',members:[{userId:'rep-2'}]},assignments:[{userId:'rep-2',user:{role:'REP',status:'ACTIVE'}}]};
+    expect(()=>quotationCreationOwnership({id:'rep-1',role:'REP'},unassigned)).toThrowError(expect.objectContaining({code:'CUSTOMER_ASSIGNMENT_REQUIRED'}));
+    expect(()=>quotationCreationOwnership({id:'rep-1',role:'REP'},unassigned,'rep-2')).toThrowError(expect.objectContaining({code:'VALIDATION_ERROR'}));
+  });
+
+  it('rejects a quotation draft for a brand-new customer with no primary assignment', () => {
+    const newCustomer={primarySalesTeamId:null,primarySalesTeam:null,assignments:[]};
+    expect(()=>quotationCreationOwnership({id:'rep-1',role:'REP'},newCustomer)).toThrowError(expect.objectContaining({code:'ASSIGNMENT_REQUIRED',status:422}));
   });
 
   it('validates authoritative preview input and rejects client-supplied prices', () => {
@@ -79,5 +99,10 @@ describe('quotation list read model', () => {
     expect(dto).toMatchObject({ number: 'Q-1001', total: '1200.00', currency: 'INR', stage: 'APPROVED', owner: { name: 'Priya' } });
     expect(dto).not.toHaveProperty('margin');
     expect(dto).not.toHaveProperty('cost');
+  });
+
+  it('keeps a teammate read-only while preserving owner actions', () => {
+    const draft={...base,stage:'DRAFT',ownerId:'rep-1',currentRevision:{id:'revision-1',state:'DRAFT',submittedById:null}};
+    expect(quotationCapabilities({id:'rep-2',role:'REP',organizationId:'org-1'},draft)).toMatchObject({editDraft:false,saveDraft:false,submit:false,send:false});
   });
 });

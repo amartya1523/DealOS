@@ -136,28 +136,28 @@ describe("DealOS public routes", () => {
   });
   it("filters the approval queue by pending, returned, and approved state", async () => {
     window.history.replaceState({}, "", "/app");
-    const quote = (id:string, stage:string, state:string) => ({ id, number:`Q-${id}`, customer:`${id} Customer`, customerTier:'Gold', stage, version:1, orderDiscount:0, total:100, margin:20, riskScore:1, updatedAt:'2026-09-05T00:00:00.000Z', lines:[], approvals:[{id:`approval-${id}`,step:'Sales Manager',sequence:1,state}], negotiation:[], invoices:[] });
-    const workspace = { user:{id:'admin',name:'Admin User',email:'admin@example.com',role:'ADMIN',moduleAccess:[],actorType:'USER',platformSuperAdmin:false,viewContext:null}, organization:{id:'org',name:'Acme'}, users:[], quotes:[quote('PENDING','PENDING_APPROVAL','PENDING'),quote('RETURNED','DRAFT','RETURNED'),quote('APPROVED','APPROVED','APPROVED'),quote('REJECTED','REJECTED','REJECTED')], products:[], policies:[], warehouses:[], subscriptions:[], invoices:[], alerts:[], audits:[] };
-    fetchMock.mockImplementation((url:string) => Promise.resolve({ok:true,json:async()=>({success:true,data:url.endsWith('/workspace')?workspace:{}})}));
+    const approvalCase = (state:string) => ({id:`case-${state}`,version:1,state,route:'MANAGER',revisionId:`revision-${state}`,policyId:'policy-1',createdAt:'2026-09-05T00:00:00.000Z',completedAt:null,quotation:{id:`quote-${state}`,number:`Q-${state}`,customer:`${state} Customer`,customerTier:'Gold',total:'100',currency:'INR',owner:{id:'rep',name:'Rep'},team:{id:'team',name:'Sales'}},submittedBy:{id:'rep',name:'Rep'},currentStep:null,managerStep:null,risk:{components:{},flags:[],reasons:[],policy:{}},lines:[],steps:[],audit:[]});
+    const workspace = { user:{id:'manager',name:'Manager User',email:'manager@example.com',role:'MANAGER',moduleAccess:['dashboard','approvals'],actorType:'USER',platformSuperAdmin:false,viewContext:null}, organization:{id:'org',name:'Acme'}, users:[], quotes:[], products:[], policies:[], warehouses:[], subscriptions:[], invoices:[], alerts:[], audits:[] };
+    fetchMock.mockImplementation((url:string) => Promise.resolve({ok:true,json:async()=>({success:true,data:url.endsWith('/workspace')?workspace:url.includes('/approvals?state=')?{items:[approvalCase(new URL(url,'http://local').searchParams.get('state')!)]}:{}})}));
     render(<App/>);
     expect(await screen.findByRole("heading", {name:"Sales dashboard"})).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", {name:"Approvals"}));
-    expect(screen.getByText("Q-PENDING")).toBeInTheDocument();
+    expect(await screen.findByText("Q-PENDING")).toBeInTheDocument();
     expect(screen.queryByText("Q-RETURNED")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", {name:"Pending"})).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", {name:"Pending"})).toHaveAttribute("aria-current", "page");
     fireEvent.click(screen.getByRole("button", {name:"Returned"}));
-    expect(screen.getByText("Q-RETURNED")).toBeInTheDocument();
+    expect(await screen.findByText("Q-RETURNED")).toBeInTheDocument();
     expect(screen.queryByText("Q-PENDING")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", {name:"Returned"})).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", {name:"Returned"})).toHaveAttribute("aria-current", "page");
     fireEvent.click(screen.getByRole("button", {name:"Approved"}));
-    expect(screen.getByText("Q-APPROVED")).toBeInTheDocument();
+    expect(await screen.findByText("Q-APPROVED")).toBeInTheDocument();
     expect(screen.queryByText("Q-RETURNED")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", {name:"Approved"})).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", {name:"Approved"})).toHaveAttribute("aria-current", "page");
     expect(screen.queryByText("Q-REJECTED")).not.toBeInTheDocument();
   });
   it("edits and publishes every discount ceiling with an audit reason", async () => {
     window.history.replaceState({}, "", "/app");
-    const policy = { id: "p1", tier: "Gold", maxDiscount: 15, hardwareLimit: 15, servicesLimit: 10, subscriptionLimit: 10, financeThreshold: 5, version: 2, publishedAt: "2026-09-05T08:00:00.000Z" };
+    const policy = { id: "p1", tier: "Gold", maxDiscount: 15, hardwareLimit: 15, servicesLimit: 10, subscriptionLimit: 10, financeThreshold: 5, aggregateDiscountLimit: 20, minimumMarginPercent: 12, version: 2, publishedAt: "2026-09-05T08:00:00.000Z" };
     const workspace = { user: { id: "a", name: "Admin", email: "admin@acme.test", role: "ADMIN", moduleAccess: [], actorType: "USER", platformSuperAdmin: false, viewContext: null }, organization: { id: "o", name: "Acme" }, users: [], quotes: [], products: [], policies: [policy], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] };
     fetchMock.mockImplementation((url: string, options?: RequestInit) => Promise.resolve({
       ok: true,
@@ -177,7 +177,7 @@ describe("DealOS public routes", () => {
       "/api/v1/policies/p1",
       expect.objectContaining({
         method: "PATCH",
-        body: JSON.stringify({ maxDiscount: 14, hardwareLimit: 14, servicesLimit: 9, subscriptionLimit: 8, financeThreshold: 4, reason: "Margin protection review." }),
+        body: JSON.stringify({ maxDiscount: 14, hardwareLimit: 14, servicesLimit: 9, subscriptionLimit: 8, financeThreshold: 4, aggregateDiscountLimit: 20, minimumMarginPercent: 12, reason: "Margin protection review." }),
       }),
     ));
   });
@@ -239,14 +239,14 @@ describe("DealOS public routes", () => {
   it("renders live fulfillment stock and previews a warehouse split before reservation", async () => {
     window.history.replaceState({}, "", "/app");
     const product = { id: "p1", name: "Laptop Pro 14", sku: "LP14", category: "Hardware", description: "Laptop", unit: "unit", price: 1200, cost: 800, taxRate: 18, recurring: false, active: true, stocks: [] };
-    const quote = { id: "q1", number: "Q-1042", customer: "Acme Corp", customerTier: "Gold", stage: "CONFIRMED", version: 1, orderDiscount: 0, total: 1200, margin: 400, riskScore: 0, updatedAt: "2026-09-05T00:00:00.000Z", order: { id: "o1", number: "SO-1042" }, lines: [{ id: "l1", productId: "p1", quantity: 6, unitPrice: 1200, unitCost: 800, discount: 0, allowedDiscount: 15, product }], approvals: [], negotiation: [], invoices: [] };
+    const quote = { id: "q1", number: "Q-1042", customer: "Acme Corp", customerTier: "Gold", stage: "CONFIRMED", version: 1, orderDiscount: 0, total: 1200, margin: 400, riskScore: 0, updatedAt: "2026-09-05T00:00:00.000Z", order: { id: "o1", number: "SO-1042", state: "CONFIRMED" }, lines: [{ id: "l1", productId: "p1", quantity: 6, unitPrice: 1200, unitCost: 800, discount: 0, allowedDiscount: 15, product }], approvals: [], negotiation: [], invoices: [] };
     const warehouses = [
       { id: "w1", name: "Main Warehouse", priority: 1, shippingCost: 45, active: true, stocks: [{ onHand: 4, reserved: 0, available: 4, product }] },
       { id: "w2", name: "East Depot", priority: 2, shippingCost: 28, active: true, stocks: [{ onHand: 8, reserved: 1, available: 7, product }] },
     ];
     const workspace = { user: { id: "a", name: "Admin", email: "admin@acme.test", role: "ADMIN", moduleAccess: [], actorType: "USER", platformSuperAdmin: false, viewContext: null }, organization: { id: "o", name: "Acme" }, users: [], quotes: [quote], products: [product], policies: [], warehouses, subscriptions: [], invoices: [], alerts: [], audits: [] };
-    const preview = { state: "SPLIT_PENDING", split: { split: [{ productId: "p1", warehouseId: "w1", warehouseName: "Main Warehouse", quantity: 4 }, { productId: "p1", warehouseId: "w2", warehouseName: "East Depot", quantity: 2 }], backorders: [] }, estimatedCost: 73, shipmentCount: 2, preview: true };
-    fetchMock.mockImplementation((url: string) => Promise.resolve({ ok: true, json: async () => ({ success: true, data: url.endsWith("/fulfillment/q1/preview") ? preview : workspace }) }));
+    const preview = { state: "SPLIT_PENDING", split: { split: [{ orderLineId: "ol1", productId: "p1", warehouseId: "w1", warehouseName: "Main Warehouse", quantity: 4 }, { orderLineId: "ol1", productId: "p1", warehouseId: "w2", warehouseName: "East Depot", quantity: 2 }], backorders: [] }, items:[{orderLineId:"ol1",productId:"p1",productName:"Laptop Pro 14",orderedQuantity:6,reservedQuantity:6,fulfilledQuantity:6,backorderedQuantity:0}], estimatedCost: 73, shipmentCount: 2, stockFingerprint:"a".repeat(64), preview: true };
+    fetchMock.mockImplementation((url: string) => Promise.resolve({ ok: true, json: async () => ({ success: true, data: url.endsWith("/fulfillment/o1/preview") ? preview : workspace }) }));
     render(<App />);
     expect(await screen.findByRole("heading", { name: "Sales dashboard" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Fulfillment" }));
@@ -261,10 +261,10 @@ describe("DealOS public routes", () => {
     fireEvent.click(screen.getByRole("button", { name: "Record stock receipt" }));
     fireEvent.change(screen.getByLabelText("Quantity received"), { target: { value: "3" } });
     fireEvent.change(screen.getByLabelText("Receipt reason"), { target: { value: "PO-1042 received at dock" } });
-    fireEvent.click(screen.getByRole("button", { name: "Record Receipt" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/warehouses/w1/restock", expect.objectContaining({ method: "POST", body: JSON.stringify({ productId: "p1", quantity: 3, reason: "PO-1042 received at dock" }) })));
-    fireEvent.click(screen.getByRole("row", { name: /Q-1042.*Acme Corp.*Split Pending/ }));
-    expect(await screen.findByRole("heading", { name: "Fulfillment Detail: Q-1042 (Acme Corp)" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Record Receipt & Check Backorder" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/fulfillment/o1/receive", expect.objectContaining({ method: "POST", body: JSON.stringify({ warehouseId: "w1", productId: "p1", quantity: 3, reason: "PO-1042 received at dock" }) })));
+    fireEvent.click(screen.getByRole("row", { name: /SO-1042.*Acme Corp.*Split Pending/ }));
+    expect(await screen.findByRole("heading", { name: "Fulfillment Detail: SO-1042 (Acme Corp)" })).toBeInTheDocument();
     expect(await screen.findByRole("row", { name: /Main Warehouse.*4 units.*1.*₹45/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Accept Suggested Split" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Manual Override" }));

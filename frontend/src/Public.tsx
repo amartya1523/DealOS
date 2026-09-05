@@ -128,15 +128,30 @@ function GoogleAuth({ mode, organizationName = "", email = "", hideDivider = fal
 
 export function CustomerAuthPage({ onSuccess, signedInRole }: { onSuccess: () => void | Promise<void>; signedInRole?: string | null }) {
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const ready = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  async function passwordLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await request('/auth/login', { method: 'POST', body: JSON.stringify({ identifier: email.trim().toLowerCase(), password }) });
+      await onSuccess();
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : 'Customer sign in could not be completed.');
+    } finally {
+      setBusy(false);
+    }
+  }
   return <main className="customer-auth-page">
     <div className="customer-auth-brand"><Brand/><span>Customer portal</span></div>
     <section className="customer-auth-card">
       <div className="customer-auth-mark"><ShieldCheck/></div>
       <span className="section-label">SECURE DEAL ROOM</span>
       <h1>Everything shared with you, in one place.</h1>
-      <p>Enter your customer Email ID, then continue with the same Google Sign-In ID. DealOS opens quotations and invoices only after both emails match.</p>
+      <p>Enter your customer Email ID and use the portal password you created from your invitation. After activation, you can also link the same Google Sign-In ID.</p>
       {signedInRole&&signedInRole!=="CUSTOMER"&&<div className="auth-error" role="alert">This session belongs to an internal workspace. Sign out there before entering the customer portal.</div>}
       <label className="customer-email-field">Customer Email ID<input type="email" autoComplete="email" placeholder="you@company.com" value={email} onChange={event=>{setEmail(event.target.value);setError("")}}/></label>
       {ready&&<small className="customer-email-hint">Continue with the Google account for {email.trim().toLowerCase()}.</small>}
@@ -144,10 +159,15 @@ export function CustomerAuthPage({ onSuccess, signedInRole }: { onSuccess: () =>
         <GoogleAuth mode="customer" email={email.trim().toLowerCase()} hideDivider onComplete={onSuccess} onError={setError}/>
       </div>
       {!ready&&<small>Enter your Email ID to enable Google sign-in.</small>}
+      <div className="auth-divider"><span>or use your portal password</span></div>
+      <form className="customer-password-form" onSubmit={passwordLogin}>
+        <label>Portal password<input type="password" autoComplete="current-password" minLength={12} maxLength={128} required value={password} onChange={event=>{setPassword(event.target.value);setError("")}}/></label>
+        <button className="button primary" disabled={busy||!ready}>{busy?'Signing in…':'Sign in to customer portal'}</button>
+      </form>
       {error&&<div className="auth-error" role="alert">{error}</div>}
       <div className="customer-auth-trust"><span><Check/>Email ID must match Google</span><span><LockKeyhole/>Customer-scoped access</span></div>
     </section>
-    <footer>Invitations are issued by the business that shared a quotation or invoice with you.</footer>
+    <footer>Portal invitations are issued by the business after your customer account is configured.</footer>
   </main>;
 }
 
