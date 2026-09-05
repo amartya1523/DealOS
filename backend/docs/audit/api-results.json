@@ -1,5 +1,5 @@
 {
-  "date": "2026-09-05T10:46:06.474Z",
+  "date": "2026-09-05T20:03:42.484Z",
   "environment": "isolated PostgreSQL schema; synthetic fixtures",
   "results": [
     {
@@ -202,15 +202,15 @@
           "split": [
             {
               "quantity": 98,
-              "productId": "e8c1e451-022e-49e9-95e3-bdcfde3384c7",
-              "warehouseId": "27ffa3ee-f56a-42b0-988f-8c3781ec1b23",
+              "productId": "aa944433-8aa8-48e7-833b-6ac3c988784c",
+              "warehouseId": "27bf017d-985e-4781-a87b-d6f7caff45a8",
               "warehouseName": "Audit warehouse"
             }
           ],
           "backorders": [
             {
               "quantity": 2,
-              "productId": "e8c1e451-022e-49e9-95e3-bdcfde3384c7"
+              "productId": "aa944433-8aa8-48e7-833b-6ac3c988784c"
             }
           ]
         }
@@ -230,7 +230,7 @@
       "name": "Restock identifies consolidation candidate",
       "status": "PASS",
       "actual": [
-        "6d58c07a-f0e1-4dae-a624-a859ee05136d"
+        "b9d7cfeb-5e5b-49f3-ad51-9824f20103ca"
       ]
     },
     {
@@ -263,15 +263,15 @@
           "split": [
             {
               "quantity": 3,
-              "productId": "e8c1e451-022e-49e9-95e3-bdcfde3384c7",
-              "warehouseId": "27ffa3ee-f56a-42b0-988f-8c3781ec1b23",
+              "productId": "aa944433-8aa8-48e7-833b-6ac3c988784c",
+              "warehouseId": "27bf017d-985e-4781-a87b-d6f7caff45a8",
               "warehouseName": "Audit warehouse"
             }
           ],
           "backorders": [
             {
               "quantity": 2,
-              "productId": "e8c1e451-022e-49e9-95e3-bdcfde3384c7"
+              "productId": "aa944433-8aa8-48e7-833b-6ac3c988784c"
             }
           ]
         }
