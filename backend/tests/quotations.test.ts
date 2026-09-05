@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allowedDiscountForCategory, buildQuotationWhere, createQuotationSchema, deriveQuotationStage, quotationCapabilities, quotationCreationOwnership, quotationListQuerySchema, quotationSummaryDto, quotePreviewSchema, revisionHistory } from '../src/quotations.js';
+import { allowedDiscountForCategory, approvedDeliveryTransition, buildQuotationWhere, createQuotationSchema, deriveQuotationStage, quotationCapabilities, quotationCreationOwnership, quotationListQuerySchema, quotationSummaryDto, quotePreviewSchema, revisionHistory } from '../src/quotations.js';
 
 const base = {
   stage: 'APPROVED', currentRevisionId: 'revision-1', currentRevision: { id: 'revision-1', state: 'SENT' },
@@ -33,6 +33,17 @@ describe('quotation list read model', () => {
     expect(quotationCapabilities({id:'manager-1',role:'MANAGER',organizationId:'org-1'},pending).approve).toBe(true);
     expect(quotationCapabilities({id:'rep-1',role:'ADMIN',organizationId:'org-1'},pending).approve).toBe(false);
     expect(quotationCapabilities({id:'admin-1',role:'ADMIN',organizationId:'org-1',readOnlyView:true},draft).submit).toBe(false);
+    const negotiation={...base,stage:'NEGOTIATION',ownerId:'rep-1',negotiation:[{revisionId:'revision-1',kind:'PROPOSAL',state:'OPEN'}],currentRevision:{id:'revision-1',state:'SENT',submittedById:'rep-1'}};
+    expect(quotationCapabilities({id:'rep-1',role:'REP',organizationId:'org-1'},negotiation).negotiate).toBe(true);
+    expect(quotationCapabilities({id:'rep-2',role:'REP',organizationId:'org-1'},negotiation).negotiate).toBe(false);
+  });
+
+  it('sends the approved revision directly to the customer after the final approval', () => {
+    const approvedAt = new Date('2026-09-06T10:00:00.000Z');
+    expect(approvedDeliveryTransition(approvedAt)).toEqual({
+      revision: { state: 'SENT', sentAt: approvedAt },
+      quote: { stage: 'APPROVED', sentAt: approvedAt, version: { increment: 1 }, lastActivity: approvedAt },
+    });
   });
 
   it('builds adjacent immutable revision comparisons and removes cost for unauthorized viewers',()=>{

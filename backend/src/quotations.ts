@@ -6,7 +6,7 @@ export const quotationStages = [...primaryQuotationStages, 'REJECTED'] as const;
 export type QuotationStage = typeof quotationStages[number];
 
 export type QuotationActor = { id: string; role: string; organizationId: string; readOnlyView?: boolean };
-export type QuotationCapability = 'editDraft'|'saveDraft'|'submit'|'assign'|'approve'|'send'|'previewCustomer'|'downloadPdf'|'viewCost'|'viewMargin'|'viewActivity';
+export type QuotationCapability = 'editDraft'|'saveDraft'|'submit'|'assign'|'approve'|'send'|'negotiate'|'previewCustomer'|'downloadPdf'|'viewCost'|'viewMargin'|'viewActivity';
 
 export const quotationListQuerySchema = z.object({
   stage: z.enum(quotationStages).optional(),
@@ -216,6 +216,7 @@ export function quotationCapabilities(actor: QuotationActor, quote: CapabilitySo
     assign: !readOnly && ['MANAGER','ADMIN'].includes(actor.role) && ['DRAFT','PENDING_APPROVAL'].includes(stage),
     approve: !readOnly && Boolean(currentApproval && approvalRoleMatches && !selfApproval),
     send: !readOnly && seller && stage === 'APPROVED' && !quote.sentAt,
+    negotiate: !readOnly && seller && stage === 'NEGOTIATION',
     previewCustomer: true,
     downloadPdf: true,
     viewCost: ['FINANCE','ADMIN'].includes(actor.role),
@@ -223,14 +224,22 @@ export function quotationCapabilities(actor: QuotationActor, quote: CapabilitySo
     viewActivity: true,
   };
   const reasons:Partial<Record<QuotationCapability,string>> = {};
-  if (readOnly) for (const action of ['editDraft','saveDraft','submit','assign','approve','send'] as QuotationCapability[]) reasons[action] = 'View As mode is read-only.';
+  if (readOnly) for (const action of ['editDraft','saveDraft','submit','assign','approve','send','negotiate'] as QuotationCapability[]) reasons[action] = 'View As mode is read-only.';
   if (!readOnly && stage !== 'DRAFT') reasons.editDraft = reasons.saveDraft = reasons.submit = 'Submitted revisions are immutable. Create or return a revision to Draft before editing.';
-  if (!readOnly && !seller) reasons.editDraft = reasons.saveDraft = reasons.submit = reasons.send = 'Only the quotation owner can perform this action.';
+  if (!readOnly && !seller) reasons.editDraft = reasons.saveDraft = reasons.submit = reasons.send = reasons.negotiate = 'Only the quotation owner can perform this action.';
   if (!currentApproval) reasons.approve = 'There is no active approval step.';
   else if (selfApproval) reasons.approve = 'Quotation owners and submitters cannot approve their own submission.';
   else if (!approvalRoleMatches) reasons.approve = `This step requires the ${currentApproval.step} role.`;
   if (stage !== 'APPROVED') reasons.send = 'The quotation must complete approval before it can be sent.';
+  if (stage !== 'NEGOTIATION') reasons.negotiate = 'There is no active customer proposal to review.';
   return { ...values, reasons };
+}
+
+export function approvedDeliveryTransition(sentAt = new Date()) {
+  return {
+    revision: { state: 'SENT' as const, sentAt },
+    quote: { stage: 'APPROVED' as const, sentAt, version: { increment: 1 }, lastActivity: sentAt },
+  };
 }
 
 type SnapshotLine = { productId?: string; name?: string; sku?: string; quantity?: number; discount?: number|string; unitPrice?: number|string; net?: number|string };

@@ -90,7 +90,46 @@ export async function findOrLinkGoogleLoginUser(profile: GoogleSignupProfile): P
 export async function acceptCustomerGoogleInvitation(profile: GoogleSignupProfile): Promise<User | null> {
   const linkedUser = await db.user.findUnique({ where: { googleSubject: profile.subject } });
   if (linkedUser) return linkedUser.role === 'CUSTOMER' && linkedUser.organizationId && linkedUser.customerId && linkedUser.status === 'ACTIVE' ? linkedUser : null;
+
+  const invitation = await db.organizationInvitation.findFirst({
+    where: { email: profile.email, status: 'PENDING', customerId: { not: null }, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: 'desc' },
+  });
   const emailUser = await db.user.findUnique({ where: { email: profile.email } });
-  if (!emailUser?.organizationId || !emailUser.customerId || emailUser.role !== 'CUSTOMER' || emailUser.status !== 'ACTIVE' || emailUser.googleSubject) return null;
-  return findOrLinkGoogleLoginUser(profile);
+  if (emailUser?.googleSubject && emailUser.googleSubject !== profile.subject) return null;
+
+  // A sent quotation or an issued invoice is itself evidence that this email was
+  // granted customer-portal access. This also recovers access when an invitation
+  // expired or was never accepted, without exposing unshared draft quotations.
+  const eligibleCustomers = invitation ? [] : await db.customer.findMany({
+    where: {
+      email: { equals: profile.email, mode: 'insensitive' },
+      active: true,
+      OR: [
+        { quotes: { some: { sentAt: { not: null } } } },
+        { invoices: { some: {} } },
+      ],
+    },
+    select: { id: true, organizationId: true },
+    take: 2,
+  });
+  const documentCustomer = eligibleCustomers.length === 1 ? eligibleCustomers[0]! : null;
+  const organizationId = invitation?.organizationId ?? documentCustomer?.organizationId;
+  const customerId = invitation?.customerId ?? documentCustomer?.id;
+  if (!organizationId || !customerId) return null;
+  if (emailUser && (emailUser.role !== 'CUSTOMER' || emailUser.organizationId !== organizationId || emailUser.customerId !== customerId)) return null;
+
+  const passwordHash = emailUser ? undefined : await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
+  return db.$transaction(async (tx) => {
+    const user = emailUser
+      ? await tx.user.update({ where: { id: emailUser.id }, data: { googleSubject: profile.subject, status: 'ACTIVE', name: profile.displayName } })
+      : await tx.user.create({ data: { organizationId, customerId, email: profile.email, name: profile.displayName, passwordHash: passwordHash!, googleSubject: profile.subject, status: 'ACTIVE', role: 'CUSTOMER', moduleAccess: [] } });
+    await tx.organizationMembership.upsert({
+      where: { organizationId_userId: { organizationId, userId: user.id } },
+      update: { accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' },
+      create: { organizationId, userId: user.id, accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' },
+    });
+    await tx.organizationInvitation.updateMany({ where: { email: profile.email, organizationId, customerId, status: 'PENDING' }, data: { status: 'ACCEPTED' } });
+    return user;
+  });
 }

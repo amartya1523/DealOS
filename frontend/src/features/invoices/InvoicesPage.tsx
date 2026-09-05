@@ -36,7 +36,7 @@ export function InvoicesPage({data,openInvoice,mutate}:{data:Workspace;openInvoi
   const [sort,setSort]=useState<InvoiceSort>('due-asc');
   const [aging,setAging]=useState<AgingFilter>('any');
   const [page,setPage]=useState(1);
-  const [issuing,setIssuing]=useState(false);
+  const [issuing,setIssuing]=useState(()=>new URLSearchParams(window.location.search).get('newInvoice')==='1');
   const invoices=data.invoices;
   const canIssue=['FINANCE','ADMIN'].includes(data.user.role)&&!data.user.viewContext;
   const totals=useMemo(()=>{
@@ -69,6 +69,7 @@ export function InvoicesPage({data,openInvoice,mutate}:{data:Workspace;openInvoi
   const visible=filtered.slice((page-1)*pageSize,page*pageSize);
   useEffect(()=>setPage(1),[aging,filter,query,sort]);
   useEffect(()=>setPage(current=>Math.min(current,pages)),[pages]);
+  useEffect(()=>{const params=new URLSearchParams(window.location.search);if(issuing)params.set('newInvoice','1');else params.delete('newInvoice');const suffix=params.toString();window.history.replaceState({},'',`${window.location.pathname}${suffix?`?${suffix}`:''}`)},[issuing]);
   const openRow=(event:KeyboardEvent<HTMLTableRowElement>,id:string)=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();openInvoice(id)}};
   return <div className="invoice-module">
     <div className="invoice-intro"><div><span className="eyebrow">Receivables control</span><h2>Invoices <span>({invoices.length})</span></h2><p>Track every issued charge from order through delivery and recorded settlement.</p></div>{canIssue&&<button className="button primary" onClick={()=>setIssuing(true)}><Plus/>Issue invoice</button>}</div>

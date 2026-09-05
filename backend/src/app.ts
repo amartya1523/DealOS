@@ -24,6 +24,7 @@ import { BillingError, changeSubscription, recordPayment, requestInvoiceDueDateC
 import { evaluateAlerts } from './deal-health.js';
 import { aggregateSales, reportAsPdf, reportAsXls } from './reporting.js';
 import { consolidateBackorder, consolidateSchema, FulfillmentError, previewSplit, receiveStock, receiveStockSchema, reserveStock, reserveStockSchema } from './fulfillment.js';
+import { assistantMessagesSchema, runAssistant, type AssistantContext } from './assistant.js';
 
 type Actor = { id: string; name: string; email: string; loginId: string | null; role: string; customerId: string | null; organizationId: string; moduleAccess: string[]; csrfToken: string; actorType: 'USER' | 'PLATFORM_OWNER'; platformSuperAdmin: boolean; readOnlyView: boolean; organization: { id: string; name: string; status: string } | null; viewContext: { readOnly: true; organizationId: string; organizationName: string; simulatedUserId: string | null; realActor: { id: string; name: string } } | null };
 type AuthRequest = Request & { user?: Actor; requestId?: string };
@@ -180,6 +181,17 @@ app.use(helmet());
 app.use(cors({ origin: allowedOrigin, credentials: true }));
 app.use(express.json({ limit: '256kb' }));
 
+app.post('/api/v1/assistant/public', async (req: AuthRequest, res) => {
+  const parsed = assistantMessagesSchema.safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Send a valid conversation.');
+  try {
+    return ok(req, res, await runAssistant({ mode: 'public' }, parsed.data.messages));
+  } catch (error) {
+    if (error instanceof Error && error.message === 'GROQ_NOT_CONFIGURED') return fail(req, res, 503, 'AI_NOT_CONFIGURED', 'DealOS Assistant is not configured yet. Add GROQ_API_KEY to backend/.env.');
+    return fail(req, res, 502, 'AI_UNAVAILABLE', error instanceof Error ? error.message : 'The assistant is temporarily unavailable.');
+  }
+});
+
 async function authenticate(req: AuthRequest, res: Response, next: NextFunction) {
   const cookies = parseCookies(req.headers.cookie);
   const platformToken = cookies[platformSessionCookieName];
@@ -239,6 +251,42 @@ const quotationListInclude = {
   negotiation: { select: { revisionId: true, kind: true, state: true } },
   order: { select: { id: true } },
 } satisfies Prisma.QuoteInclude;
+
+app.post('/api/v1/assistant', authenticate, async (req: AuthRequest, res) => {
+  const parsed = assistantMessagesSchema.safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Send a valid conversation.');
+  if (req.user!.actorType === 'PLATFORM_OWNER' && !req.user!.organizationId) return fail(req, res, 403, 'WORKSPACE_REQUIRED', 'Open an organization workspace to use the internal assistant.');
+  const portal = req.user!.role === 'CUSTOMER';
+  const canCreateInvoices = Boolean(!portal && hasModule(req.user, 'invoices') && ['FINANCE', 'ADMIN'].includes(req.user!.role) && !req.user!.readOnlyView);
+  const canCommentOnQuotes = Boolean(portal && req.user!.customerId && !req.user!.readOnlyView);
+  const canReadCustomers = Boolean(!portal && (hasModule(req.user, 'customers') || canCreateInvoices));
+  const canReadProducts = Boolean(!portal && (hasModule(req.user, 'products') || hasModule(req.user, 'fulfillment') || canCreateInvoices));
+  const canReadInvoices = Boolean(portal || hasModule(req.user, 'invoices'));
+  const canReadQuotes = Boolean(portal || ['quotations', 'approvals', 'fulfillment', 'health', 'reports'].some((module) => hasModule(req.user, module as typeof modules[number])));
+  const readableModules = portal
+    ? ['customer-portal', 'quotations', 'invoices']
+    : modules.filter((module) => hasModule(req.user, module));
+  const [organization, customers, products, invoices, quotes] = await Promise.all([
+    db.organization.findUnique({ where: { id: req.user!.organizationId }, select: { name: true } }),
+    canReadCustomers ? db.customer.findMany({ where: { organizationId: req.user!.organizationId, active: true }, select: { id: true, name: true, paymentTerms: true, email: true }, orderBy: { name: 'asc' }, take: 100 }) : Promise.resolve([]),
+    canReadProducts ? db.product.findMany({ where: { organizationId: req.user!.organizationId, active: true }, select: { id: true, name: true, sku: true, price: true, taxRate: true, recurring: true, stocks: { select: { onHand: true, reserved: true } } }, orderBy: { name: 'asc' }, take: 100 }) : Promise.resolve([]),
+    canReadInvoices ? db.invoice.findMany({ where: { organizationId: req.user!.organizationId, ...(portal ? { customerId: req.user!.customerId! } : req.user!.role === 'REP' ? { quote: { ownerId: req.user!.id } } : {}) }, select: { number: true, customer: true, amount: true, state: true, dueAt: true }, orderBy: { createdAt: 'desc' }, take: 20 }) : Promise.resolve([]),
+    canReadQuotes ? db.quote.findMany({ where: portal ? { organizationId: req.user!.organizationId, customerId: req.user!.customerId!, sentAt: { not: null } } : internalQuoteWhere(req.user!), select: { id: true, number: true, customer: true, total: true, stage: true }, orderBy: { updatedAt: 'desc' }, take: 20 }) : Promise.resolve([]),
+  ]);
+  const context: AssistantContext = {
+    mode: 'workspace', organization: organization?.name, screen: parsed.data.screen, today: new Date().toISOString().slice(0, 10),
+    user: { name: req.user!.name, role: req.user!.role, canCreateInvoices, canCommentOnQuotes, readOnly: req.user!.readOnlyView, readableModules },
+    customers, products: products.map((product) => ({ id: product.id, name: product.name, sku: product.sku, price: decimal(product.price), taxRate: decimal(product.taxRate), recurring: product.recurring, available: product.recurring ? null : product.stocks.reduce((sum, stock) => sum + stock.onHand - stock.reserved, 0) })),
+    invoices: invoices.map((invoice) => ({ ...invoice, amount: decimal(invoice.amount), dueAt: invoice.dueAt.toISOString() })),
+    quoteSummary: quotes.map((quote) => ({ ...quote, total: decimal(quote.total) })),
+  };
+  try {
+    return ok(req, res, await runAssistant(context, parsed.data.messages));
+  } catch (error) {
+    if (error instanceof Error && error.message === 'GROQ_NOT_CONFIGURED') return fail(req, res, 503, 'AI_NOT_CONFIGURED', 'DealOS Assistant is not configured yet. Add GROQ_API_KEY to backend/.env.');
+    return fail(req, res, 502, 'AI_UNAVAILABLE', error instanceof Error ? error.message : 'The assistant is temporarily unavailable.');
+  }
+});
 
 function portalQuoteDto(quote: any) {
   return customerSafeQuotationDto(quote);
@@ -343,19 +391,40 @@ app.post('/api/v1/auth/google/login', async (req: AuthRequest, res) => {
 app.post('/api/v1/auth/google/customer', async (req: AuthRequest, res) => {
   if (req.headers.origin !== allowedOrigin) return fail(req, res, 403, 'ORIGIN_INVALID', 'This request origin is not allowed.');
   if (!googleClientId) return fail(req, res, 503, 'AUTH_PROVIDER_UNAVAILABLE', 'Google sign-in is not configured.');
-  const parsed = z.object({ credential: z.string().trim().min(1).max(8192), email: z.string().trim().email().toLowerCase() }).strict().safeParse(req.body);
-  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter the invited email and continue with Google.');
+  const parsed = z.object({ credential: z.string().trim().min(1).max(8192), email: z.string().trim().email().toLowerCase().optional() }).strict().safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'A valid Google credential is required.');
   try {
     const profile = await verifyGoogleSignupCredential(parsed.data.credential, googleClientId);
-    if (profile.email !== parsed.data.email) return fail(req, res, 401, 'EMAIL_MISMATCH', `Google signed in as ${profile.email}. Enter that Email ID above or choose the Google account for ${parsed.data.email}.`);
+    if (parsed.data.email && profile.email !== parsed.data.email) return fail(req, res, 401, 'EMAIL_MISMATCH', `Google signed in as ${profile.email}. Enter that Email ID above or choose the Google account for ${parsed.data.email}.`);
     const user = await acceptCustomerGoogleInvitation(profile);
-    if (!user) return fail(req, res, 401, 'INVITATION_REQUIRED', 'No active customer invitation was found for this email. Ask the sender to invite this address again.');
+    if (!user) return fail(req, res, 401, 'CUSTOMER_ACCESS_NOT_FOUND', 'No shared quotation, invoice, or active customer invitation was found for this Google email.');
     const token = await startSession(user, res);
     return ok(req, res, { id: user.id, name: user.name, email: user.email, role: user.role, destination: '/customer', csrfToken: csrfForToken(token) });
   } catch (error) {
     if (res.headersSent) return;
     return fail(req, res, 401, 'INVALID_GOOGLE_CREDENTIAL', 'Google could not verify this customer sign-in.');
   }
+});
+
+app.post('/api/v1/auth/customer/login', async (req: AuthRequest, res) => {
+  if (req.headers.origin !== allowedOrigin) return fail(req, res, 403, 'ORIGIN_INVALID', 'This request origin is not allowed.');
+  const key = `customer:${req.ip}:${String(req.body?.email ?? '').toLowerCase()}`;
+  const attempt = loginAttempts.get(key);
+  if (attempt && attempt.resetAt > Date.now() && attempt.count >= 10) {
+    res.setHeader('Retry-After', Math.ceil((attempt.resetAt - Date.now()) / 1000));
+    return fail(req, res, 429, 'RATE_LIMITED', 'Too many login attempts. Try again later.');
+  }
+  const parsed = z.object({ email: z.string().trim().email().toLowerCase(), password: z.string().min(8).max(128) }).strict().safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter a valid customer email and password.');
+  const user = await db.user.findUnique({ where: { email: parsed.data.email }, include: { customer: { select: { active: true } } } });
+  if (!user || user.role !== 'CUSTOMER' || !user.customerId || !user.customer?.active || !(await bcrypt.compare(parsed.data.password, user.passwordHash))) {
+    loginAttempts.set(key, { count: (attempt?.resetAt ?? 0) > Date.now() ? attempt!.count + 1 : 1, resetAt: Date.now() + 15 * 60_000 });
+    return fail(req, res, 401, 'INVALID_CUSTOMER_CREDENTIALS', 'Customer email or password is incorrect. You can also continue with Google.');
+  }
+  if (user.status !== 'ACTIVE') return fail(req, res, 403, 'ACCOUNT_INACTIVE', 'This customer account is not active. Continue with Google or ask the sender to share access again.');
+  loginAttempts.delete(key);
+  const token = await startSession(user, res);
+  return ok(req, res, { id: user.id, name: user.name, email: user.email, role: user.role, destination: '/customer', csrfToken: csrfForToken(token) });
 });
 
 app.post('/api/v1/auth/login', async (req: AuthRequest, res) => {
@@ -522,6 +591,27 @@ const customerProfileSchema = z.object({
   active: z.boolean().default(true),
 }).strict();
 
+async function setCustomerPortalPassword(tx: Tx, req: AuthRequest, customer: { id: string; name: string; contactPerson: string | null; email: string | null }, password: string) {
+  if (!customer.email) throw new DomainError(422, 'CUSTOMER_EMAIL_REQUIRED', 'Add a customer email before setting a portal password.');
+  const email = customer.email.trim().toLowerCase();
+  const existing = await tx.user.findUnique({ where: { email } });
+  if (existing && (existing.organizationId !== req.user!.organizationId || existing.customerId !== customer.id || existing.role !== 'CUSTOMER')) {
+    throw new DomainError(409, 'EMAIL_EXISTS', 'This email already belongs to another DealOS account. Use a different customer email.');
+  }
+  const passwordHash = await bcrypt.hash(password, 12);
+  const user = existing
+    ? await tx.user.update({ where: { id: existing.id }, data: { name: customer.contactPerson || customer.name, passwordHash, status: 'ACTIVE', moduleAccess: [] } })
+    : await tx.user.create({ data: { organizationId: req.user!.organizationId, customerId: customer.id, name: customer.contactPerson || customer.name, email, passwordHash, status: 'ACTIVE', role: 'CUSTOMER', moduleAccess: [] } });
+  await tx.organizationMembership.upsert({
+    where: { organizationId_userId: { organizationId: req.user!.organizationId, userId: user.id } },
+    update: { accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' },
+    create: { organizationId: req.user!.organizationId, userId: user.id, accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' },
+  });
+  await tx.session.deleteMany({ where: { userId: user.id } });
+  await audit(tx, req, existing ? 'CUSTOMER_PORTAL_PASSWORD_RESET' : 'CUSTOMER_PORTAL_PASSWORD_CREATED', 'Customer', customer.id, email);
+  return user;
+}
+
 app.post('/api/v1/customers', authenticate, requireModule('customers'), requireRole('ADMIN', 'MANAGER'), requireCsrf, async (req: AuthRequest, res) => {
   const parsed = customerProfileSchema.safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter a customer name, tier, and currency.', parsed.error.flatten());
@@ -590,6 +680,28 @@ app.post('/api/v1/portal/invitations/:token/accept', async (req: AuthRequest, re
   const user = await acceptPortalInvitation(db, routeParam(req, 'token'), parsed.data, req.requestId);
   const sessionToken = await startSession(user, res);
   return ok(req, res, { id: user.id, name: user.name, email: user.email, role: user.role, customerId: user.customerId, destination: '/customer', csrfToken: csrfForToken(sessionToken) }, 201);
+});
+
+app.put('/api/v1/customers/:id/portal-password', authenticate, requireModule('customers'), requireRole('ADMIN', 'MANAGER'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = z.object({ password: z.string().min(12).max(128) }).strict().safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Customer portal passwords must be at least 12 characters.', parsed.error.flatten());
+  const customer = await db.customer.findFirst({
+    where: { id: routeParam(req, 'id'), organizationId: req.user!.organizationId, active: true },
+    include: {
+      primarySalesTeam: { select: { managerId: true } },
+      assignments: { where: { role: 'PRIMARY', active: true }, select: { id: true } },
+    },
+  });
+  if (!customer) return fail(req, res, 404, 'NOT_FOUND', 'Customer not found.');
+  if (req.user!.role === 'MANAGER' && customer.primarySalesTeam?.managerId !== req.user!.id) return fail(req, res, 403, 'FORBIDDEN', 'Managers can manage portal access only for teams they manage.');
+  if (!customer.primarySalesTeamId || !customer.primarySalesTeam || customer.assignments.length !== 1) return fail(req, res, 422, 'CONFIGURATION_REQUIRED', 'Assign a primary sales team and representative before activating portal access.');
+  try {
+    const user = await db.$transaction((tx) => setCustomerPortalPassword(tx, req, customer, parsed.data.password));
+    return ok(req, res, { id: user.id, email: user.email, status: user.status });
+  } catch (error) {
+    if (error instanceof DomainError) return fail(req, res, error.status, error.code, error.message);
+    throw error;
+  }
 });
 
 app.get('/api/v1/customers', authenticate, requireModule('quotations'), requireRole('REP', 'MANAGER', 'FINANCE', 'ADMIN'), async (req: AuthRequest, res) => {
@@ -1096,7 +1208,7 @@ app.post('/api/v1/portal/quotations/:id/proposals', authenticate, requireRole('C
 app.post('/api/v1/quotations/:id/proposals/:proposalId/respond', authenticate, requireModule('quotations'), requireRole('REP'), requireCsrf, async (req: AuthRequest, res) => {
   const parsed = proposalResponseSchema.safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'A decision and reason are required.');
-  const quote = await db.quote.findUnique({ where: { id: routeParam(req, 'id') }, include: { lines: { include: { product: true } }, currentRevision: true } });
+  const quote = await db.quote.findUnique({ where: { id: routeParam(req, 'id') }, include: { lines: { include: { product: true } }, currentRevision: true, approvals: true, negotiation: true, order: true } });
   if (!quote || !(await canAccessInternalQuote(req.user!, quote))) return fail(req, res, 404, 'NOT_FOUND', 'Quotation not found.');
   if (quote.ownerId !== req.user!.id) return fail(req, res, 403, 'OWNER_REQUIRED', 'Only the quotation owner can respond to commercial proposals.');
   if (quote.version !== parsed.data.expectedVersion) return fail(req, res, 409, 'STALE_VERSION', 'Refresh the quotation before responding.');
@@ -1423,6 +1535,8 @@ app.post('/api/v1/invoices', authenticate, requireModule('invoices'), requireRol
     dueAt: z.string().datetime().or(z.string().date()),
     lines: z.array(z.object({ productId: z.string().min(1), quantity: z.number().int().positive(), discount: z.number().min(0).max(100).default(0) }).strict()).min(1).max(100),
     sendReceipt: z.boolean().default(false),
+    gstMode: z.enum(['CATALOG', 'EXCLUSIVE', 'INCLUSIVE']).default('CATALOG'),
+    gstRate: z.number().min(0).max(100).optional(),
   }).strict().safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Select a customer or quotation, due date, and invoice lines.', parsed.error.flatten());
   const customer = parsed.data.customerId ? await db.customer.findFirst({ where: { id: parsed.data.customerId, organizationId: req.user!.organizationId, active: true } }) : null;
@@ -1434,12 +1548,16 @@ app.post('/api/v1/invoices', authenticate, requireModule('invoices'), requireRol
   if (products.length !== productIds.length) return fail(req, res, 422, 'CONFIGURATION_REQUIRED', 'One or more products are unavailable.');
   const inputLines = parsed.data.lines.map((line) => {
     const product = products.find((item) => item.id === line.productId)!;
-    return { ...line, unitPrice: product.price, unitCost: product.cost, allowedDiscount: line.discount, taxRate: product.taxRate, cadence: product.recurring ? product.cadence : 'One-time' };
+    const taxRate = parsed.data.gstMode === 'CATALOG' ? product.taxRate : new Prisma.Decimal(parsed.data.gstRate ?? 18);
+    const unitPrice = parsed.data.gstMode === 'INCLUSIVE'
+      ? product.price.div(new Prisma.Decimal(1).add(taxRate.div(100)))
+      : product.price;
+    return { ...line, unitPrice, unitCost: product.cost, allowedDiscount: line.discount, taxRate, cadence: product.recurring ? product.cadence : 'One-time' };
   });
   const calculation = calculateQuote(inputLines, 0);
   const invoiceLines = calculation.lines.map((line, index) => {
     const product = products.find((item) => item.id === parsed.data.lines[index]!.productId)!;
-    return { description: `${product.name} x ${line.quantity}`, productId: product.id, cadence: line.cadence, quantity: line.quantity, unitPrice: decimal(product.price), discount: line.discount, net: line.net, tax: line.tax, amount: line.net + line.tax };
+    return { description: `${product.name} x ${line.quantity}`, productId: product.id, cadence: line.cadence, quantity: line.quantity, unitPrice: decimal(product.price), taxableUnitPrice: decimal(inputLines[index]!.unitPrice), discount: line.discount, gstMode: parsed.data.gstMode, gstRate: decimal(inputLines[index]!.taxRate), net: line.net, tax: line.tax, amount: line.net + line.tax };
   });
   const receiptCustomer = quote?.customerId ? await db.customer.findFirst({ where: { id: quote.customerId, organizationId: req.user!.organizationId } }) : customer;
   if (parsed.data.sendReceipt && !receiptCustomer?.email) return fail(req, res, 422, 'CUSTOMER_EMAIL_REQUIRED', 'Add a valid customer email before sending an invoice receipt.');
@@ -1578,11 +1696,16 @@ app.post('/api/v1/alerts/:id/resolve', authenticate, requireModule('health'), re
 });
 
 app.post('/api/v1/products', authenticate, requireModule('products'), requireRole('ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
-  const parsed = z.object({ name: z.string().min(2), sku: z.string().min(2), category: z.string().min(2), description: z.string(), unit: z.string().min(1), price: z.number().nonnegative(), cost: z.number().nonnegative(), taxRate: z.number().min(0).max(100), recurring: z.boolean().default(false), cadence: z.string().nullable().optional(), active: z.boolean().default(true), storeVisible: z.boolean().default(true), featured: z.boolean().default(false), openingStock: z.number().int().nonnegative().default(0), minAlertLevel: z.number().int().nonnegative().default(0), maxCapacity: z.number().int().positive().nullable().optional() }).strict().safeParse(req.body);
+  const parsed = z.object({ name: z.string().trim().min(2), sku: z.string().trim().min(2).max(80).optional(), category: z.string().trim().min(2), description: z.string(), unit: z.string().trim().min(1), brand: z.string().trim().max(120).nullable().optional(), price: z.number().positive(), cost: z.number().nonnegative().default(0), taxRate: z.number().min(0).max(100), recurring: z.boolean().default(false), cadence: z.string().nullable().optional(), active: z.boolean().default(true), storeVisible: z.boolean().default(true), featured: z.boolean().default(false), openingStock: z.number().int().nonnegative().default(0), minAlertLevel: z.number().int().nonnegative().default(0), maxCapacity: z.number().int().positive().nullable().optional() }).strict()
+    .refine((value) => value.price > value.cost, { path: ['cost'], message: 'Purchase cost must be lower than the taxable selling price.' })
+    .refine((value) => value.maxCapacity == null || value.maxCapacity >= value.openingStock, { path: ['maxCapacity'], message: 'Maximum capacity cannot be below opening stock.' })
+    .safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter valid product values.', parsed.error.flatten());
   const product = await db.$transaction(async (tx) => {
-    const { openingStock, minAlertLevel, maxCapacity, ...productData } = parsed.data;
-    const created = await tx.product.create({ data: { ...productData, organizationId: req.user!.organizationId } });
+    const { openingStock, minAlertLevel, maxCapacity, sku: requestedSku, ...productData } = parsed.data;
+    const skuStem = productData.name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 18).toUpperCase() || 'ITEM';
+    const sku = requestedSku?.toUpperCase() ?? `${skuStem}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+    const created = await tx.product.create({ data: { ...productData, sku, organizationId: req.user!.organizationId } });
     const needsStockBalance = !productData.recurring && (openingStock > 0 || minAlertLevel > 0 || maxCapacity);
     if (needsStockBalance) {
       const warehouse = await tx.warehouse.findFirst({ where: { organizationId: req.user!.organizationId }, orderBy: { priority: 'asc' } })
@@ -1603,10 +1726,13 @@ app.post('/api/v1/products', authenticate, requireModule('products'), requireRol
   return ok(req, res, product, 201);
 });
 app.patch('/api/v1/products/:id', authenticate, requireModule('products'), requireRole('ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
-  const parsed = z.object({ name: z.string().min(2).optional(), category: z.string().min(2).optional(), description: z.string().optional(), unit: z.string().min(1).optional(), price: z.number().nonnegative().optional(), cost: z.number().nonnegative().optional(), taxRate: z.number().min(0).max(100).optional(), active: z.boolean().optional(), storeVisible: z.boolean().optional(), featured: z.boolean().optional(), cadence: z.string().nullable().optional() }).strict().safeParse(req.body);
+  const parsed = z.object({ name: z.string().min(2).optional(), sku: z.string().trim().min(2).max(80).optional(), category: z.string().min(2).optional(), description: z.string().optional(), unit: z.string().min(1).optional(), brand: z.string().trim().max(120).nullable().optional(), price: z.number().positive().optional(), cost: z.number().nonnegative().optional(), taxRate: z.number().min(0).max(100).optional(), recurring: z.boolean().optional(), active: z.boolean().optional(), storeVisible: z.boolean().optional(), featured: z.boolean().optional(), cadence: z.string().nullable().optional() }).strict().safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter valid product values.');
   const existing = await db.product.findFirst({ where: { id: routeParam(req, 'id'), organizationId: req.user!.organizationId } });
   if (!existing) return fail(req, res, 404, 'NOT_FOUND', 'Product not found.');
+  const nextPrice = parsed.data.price ?? Number(existing.price);
+  const nextCost = parsed.data.cost ?? Number(existing.cost);
+  if (nextCost >= nextPrice) return fail(req, res, 422, 'VALIDATION_ERROR', 'Purchase cost must be lower than the taxable selling price.');
   const product = await db.$transaction(async (tx) => { const updated = await tx.product.update({ where: { id: existing.id }, data: parsed.data }); await audit(tx, req, 'PRODUCT_UPDATED', 'Product', updated.id); return updated; });
   return ok(req, res, product);
 });

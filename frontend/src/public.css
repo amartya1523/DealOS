@@ -98,19 +98,6 @@ summary:focus-visible {
   letter-spacing: 1.5px;
   font-weight: 600;
 }
-.demo-roles summary {
-  list-style: none;
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 15px;
-  font-size: 13px;
-  font-weight: 550;
-}
-.demo-roles summary::-webkit-details-marker {
-  display: none;
-}
 .skip-link {
   position: fixed;
   top: -80px;
@@ -162,7 +149,7 @@ summary:focus-visible {
   color: #aaa69d;
 }
 .auth-story h1 {
-  font: 500 clamp(45px, 5.3vw, 80px)/1.12 "Manrope";
+  font: 500 clamp(49px, 5.65vw, 88px)/1.08 "Manrope";
   letter-spacing: -4px;
   margin: 25px 0;
 }
@@ -218,7 +205,8 @@ summary:focus-visible {
   align-self: flex-start;
 }
 .auth-form-wrap {
-  margin: auto 0;
+  width: min(100%, 400px);
+  margin: auto;
   padding: 50px 0;
 }
 .auth-form {
@@ -543,37 +531,6 @@ summary:focus-visible {
   font-size: 11px;
   font-weight: 700;
 }
-.demo-roles {
-  border-top: 1px solid #d9d3c8;
-  padding-top: 18px;
-  margin-top: 5px;
-}
-.demo-roles summary {
-  font-size: 10px;
-  color: #7d786f;
-}
-.demo-roles summary svg {
-  width: 12px;
-  height: 12px;
-}
-.demo-roles > div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 14px 0;
-}
-.demo-roles button {
-  border: 1px solid #d9d3c8;
-  background: #ece7dd;
-  padding: 7px 10px;
-  border-radius: 4px;
-  color: #4e4b45;
-  font-size: 10px;
-}
-.demo-roles small {
-  font-size: 9px;
-  color: #817c73;
-}
 .signup-success {
   display: flex;
   flex-direction: column;
@@ -713,9 +670,45 @@ summary:focus-visible {
 .auth-form input:focus { border-color:#ff4f1f; box-shadow:0 0 0 3px #ff4f1f1f; }
 .auth-form .cta { background:#171713; color:#fffdf8; border-radius:0; }
 .auth-form .cta:hover { background:#ff4f1f; }
-.demo-roles button { background:#fffdf8; border-color:#cfc9be; color:#171713; border-radius:0; }
 .success-icon { background:#ffbd0a; border-radius:0; }
 .customer-auth-page{min-height:100vh;background:#f4f1e9;color:#171713;display:grid;grid-template-rows:auto 1fr auto;padding:28px 4.5vw;position:relative;overflow:hidden}.customer-auth-page:before{content:"";position:absolute;width:620px;height:620px;border:1px solid #d7d0c4;border-radius:50%;right:-230px;top:-260px}.customer-auth-page:after{content:"";position:absolute;width:340px;height:340px;background:#ffbd0a;border-radius:50%;left:-210px;bottom:-230px}.customer-auth-brand{position:relative;z-index:1;width:max-content;color:#171713;display:flex;align-items:center;gap:18px;text-decoration:none}.customer-auth-brand>span{font-size:11px;text-transform:uppercase;letter-spacing:1.6px;padding-left:18px;border-left:1px solid #aaa49a}.customer-auth-card{position:relative;z-index:1;align-self:center;justify-self:center;width:min(510px,100%);background:#fffdf8;border:1px solid #272621;padding:42px;box-shadow:14px 14px 0 #171713}.customer-auth-mark{width:48px;height:48px;display:grid;place-items:center;background:#ff4f1f;color:#fff;margin-bottom:30px}.customer-auth-card .section-label{color:#77736b}.customer-auth-card h1{font:600 42px/1.05 "Space Grotesk","Manrope",sans-serif;letter-spacing:-2px;margin:15px 0}.customer-auth-card>p{color:#6b675f;font-size:14px;line-height:1.65;margin:0 0 28px}.customer-email-field{display:flex;flex-direction:column;gap:8px;font-size:11px;font-weight:750;margin-bottom:14px}.customer-email-field input{height:51px;border:1px solid #aaa49a;border-radius:0;padding:0 15px;font-size:14px}.customer-auth-card .google-signup,.customer-auth-card .google-signup-fallback{width:100%;min-height:51px;border-radius:0}.customer-google-disabled{pointer-events:none;opacity:.4;filter:grayscale(1)}.customer-auth-card>small{display:block;color:#77736b;margin:9px 0}.customer-auth-trust{display:flex;gap:18px;border-top:1px solid #ded8ce;margin-top:24px;padding-top:20px;font-size:10px;color:#625e57}.customer-auth-trust span{display:flex;align-items:center;gap:6px}.customer-auth-trust svg{width:14px}.customer-auth-page>footer{position:relative;z-index:1;text-align:center;color:#77736b;font-size:10px}.customer-route-loading{min-height:100vh;background:#f4f1e9;display:grid;place-items:center;font:600 14px "Space Grotesk",sans-serif}.auth-error{margin-top:14px}
 .customer-auth-card .customer-email-hint{background:#fff4df;border:1px solid #f4d18d;color:#755116;padding:10px 12px;margin:-4px 0 12px;font-weight:650}
 .customer-password-form{display:grid;gap:12px}.customer-password-form label{display:grid;gap:7px;font-size:11px;font-weight:750}.customer-password-form input{height:51px;border:1px solid #aaa49a;border-radius:0;padding:0 15px}.customer-password-form .button{justify-content:center}
+.customer-login-form{display:flex;flex-direction:column;gap:13px}.customer-login-form .customer-email-field{margin:0}.customer-password-field{position:relative;display:block}.customer-password-field input{width:100%;padding-right:50px}.customer-password-field button{position:absolute;right:1px;top:1px;width:48px;height:49px;border:0;border-left:1px solid #ded8ce;background:#fffdf8;color:#625e57;display:grid;place-items:center}.customer-password-field button svg{width:17px}.customer-email-submit{height:51px;border:1px solid #171713;background:#171713;color:#fff;font:700 12px "DM Sans",sans-serif;letter-spacing:.2px;cursor:pointer}.customer-email-submit:hover:not(:disabled){background:#ff4f1f;border-color:#ff4f1f}.customer-email-submit:disabled{opacity:.55;cursor:wait}.customer-auth-divider{display:flex;align-items:center;gap:12px;margin:19px 0;color:#77736b;font-size:10px;text-transform:uppercase;letter-spacing:.8px}.customer-auth-divider:before,.customer-auth-divider:after{content:"";height:1px;background:#ded8ce;flex:1}.customer-auth-divider span{white-space:nowrap}
 @media(max-width:600px){.customer-auth-page{padding:20px}.customer-auth-card{padding:28px 22px;box-shadow:8px 8px 0 #171713}.customer-auth-card h1{font-size:34px}.customer-auth-brand>span{display:none}.customer-auth-trust{flex-direction:column;gap:9px}}
+
+/* Customer portal entrance — a secure, living deal file. */
+.customer-auth-page{--portal-paper:#f4f1e9;--portal-ink:#171713;--portal-signal:#ff4f1f;min-height:100svh;padding:0 4.5vw;background:var(--portal-paper);grid-template-rows:auto 1fr auto}
+.customer-auth-page:before{inset:0;width:auto;height:auto;border:0;border-radius:0;background-image:linear-gradient(#77736b13 1px,transparent 1px),linear-gradient(90deg,#77736b13 1px,transparent 1px);background-size:62px 62px;mask-image:linear-gradient(90deg,#000,transparent 76%);pointer-events:none}
+.customer-auth-page:after{content:"CUSTOMER / ACCESS";left:-1.5vw;bottom:7vh;width:auto;height:auto;background:none;border-radius:0;font:600 clamp(72px,10vw,155px)/.75 "Space Grotesk","Manrope",sans-serif;letter-spacing:-.075em;color:#17171308;white-space:nowrap;pointer-events:none}
+.customer-auth-header{position:relative;z-index:2;height:82px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #aaa49a}
+.customer-auth-brand{z-index:auto}
+.customer-auth-brand>span{font-size:10px}
+.customer-workspace-link{display:flex;align-items:center;gap:8px;text-decoration:none;text-transform:uppercase;letter-spacing:1px;font-size:9px;font-weight:800}
+.customer-workspace-link svg{width:15px}
+.customer-auth-layout{position:relative;z-index:1;width:min(1320px,100%);margin:auto;display:grid;grid-template-columns:minmax(0,1.12fr) minmax(400px,.72fr);gap:clamp(50px,8vw,130px);align-items:center;padding:55px 0}
+.customer-auth-story{min-width:0}
+.customer-auth-index{font-size:9px;font-weight:800;letter-spacing:1.5px;color:#69665f}
+.customer-auth-story>h1{font:600 clamp(54px,6vw,94px)/.91 "Space Grotesk","Manrope",sans-serif;letter-spacing:-.065em;margin:24px 0}
+.customer-auth-story>h1 em{display:inline-block;font-family:Georgia,serif;font-weight:400;color:var(--portal-signal)}
+.customer-auth-story>p{max-width:520px;color:#656159;font-size:15px;line-height:1.7}
+.customer-deal-preview{width:min(610px,92%);margin-top:44px;background:#fffdf8;border:1px solid #272621;box-shadow:18px 20px 0 #ffbd0a;padding:22px;transform:rotate(-1deg)}
+.customer-deal-preview-top,.customer-deal-preview-head,.customer-deal-preview-lines span,.customer-deal-preview-foot{display:flex;align-items:center;justify-content:space-between}
+.customer-deal-preview-top{border-bottom:1px solid #d7d0c4;padding-bottom:14px;font-size:9px}
+.customer-deal-preview-top>span{font-weight:800}.customer-deal-preview-top>span i{display:inline-grid;place-items:center;width:22px;height:22px;background:#171713;color:#fff;font-style:normal;margin-right:7px}
+.customer-deal-preview-top>b{font-weight:600}.customer-deal-preview-top>b i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#2ca44f;margin-right:6px}
+.customer-deal-preview-head{padding:24px 0}.customer-deal-preview-head small,.customer-deal-preview-head strong{display:block}.customer-deal-preview-head small{font-size:8px;letter-spacing:1.2px;color:#77736b}.customer-deal-preview-head strong{font:600 21px "Space Grotesk",sans-serif;margin-top:6px}.customer-deal-preview-head>b{font:600 23px "Space Grotesk",sans-serif}
+.customer-deal-preview-lines{border-top:1px solid #d7d0c4}.customer-deal-preview-lines span{padding:12px 0;border-bottom:1px solid #ded8ce;font-size:10px}.customer-deal-preview-lines b{font-size:9px}
+.customer-deal-preview-foot{justify-content:flex-start;gap:10px;background:#eeebe3;margin-top:17px;padding:13px}.customer-deal-preview-foot svg{width:18px}.customer-deal-preview-foot small,.customer-deal-preview-foot b{display:block}.customer-deal-preview-foot small{font-size:7px;letter-spacing:1.2px}.customer-deal-preview-foot b{font-size:9px;margin-top:3px}
+.customer-story-points{display:flex;gap:24px;margin-top:32px;color:#57534c;font-size:10px;text-transform:uppercase;letter-spacing:.6px}.customer-story-points span{display:flex;align-items:center;gap:6px}.customer-story-points svg{width:13px;color:#ff4f1f}
+.customer-auth-card{align-self:auto;justify-self:auto;width:100%;padding:clamp(30px,3.2vw,46px)}
+.customer-auth-card:before{content:"02 / SIGN IN";position:absolute;right:14px;top:-25px;font-size:8px;letter-spacing:1.3px;font-weight:800}
+.customer-auth-card-head{display:flex;align-items:center;gap:13px;margin-bottom:30px}.customer-auth-card-head .customer-auth-mark{margin:0;width:44px;height:44px}.customer-auth-mark svg{width:20px}.customer-auth-card-head small,.customer-auth-card-head b{display:block}.customer-auth-card-head small{font-size:8px;letter-spacing:1.3px;color:#77736b}.customer-auth-card-head b{font-size:11px;margin-top:4px}
+.customer-auth-card h2{font:600 39px/1 "Space Grotesk","Manrope",sans-serif;letter-spacing:-1.8px;margin:0 0 12px}.customer-auth-card>p{font-size:13px;line-height:1.6;margin:0 0 26px}
+.customer-email-field input{height:53px;background:#fff}.customer-email-field input:focus{outline:0;border-color:#ff4f1f;box-shadow:0 0 0 3px #ff4f1f1f}.customer-auth-card .google-signup,.customer-auth-card .google-signup-fallback{min-height:53px}
+.customer-password-field button{height:51px;width:50px;cursor:pointer}
+.customer-email-submit{height:55px;display:flex;align-items:center;justify-content:space-between;padding:0 17px;transition:background .2s,transform .2s}.customer-email-submit svg{width:17px}.customer-email-submit:hover:not(:disabled){transform:translateY(-2px)}
+.customer-auth-divider{font-size:9px}
+.customer-auth-footer{position:relative;z-index:2;min-height:64px;border-top:1px solid #aaa49a;display:flex;justify-content:space-between;align-items:center;gap:24px;color:#77736b;font-size:10px;text-align:left}.customer-auth-footer b{font-weight:700;color:#393731}.customer-auth-footer i{font-style:normal;color:#ff4f1f}
+@media(max-width:920px){.customer-auth-layout{grid-template-columns:1fr;gap:55px;padding:55px 0 70px}.customer-auth-story{text-align:center}.customer-auth-story>p{margin-inline:auto}.customer-deal-preview{margin-inline:auto}.customer-story-points{justify-content:center}.customer-auth-card{width:min(520px,100%);justify-self:center}.customer-auth-footer{padding-block:20px}}
+@media(max-width:600px){.customer-auth-page{padding:0 20px}.customer-auth-header{height:70px}.customer-workspace-link{display:none}.customer-auth-layout{padding:44px 0 55px;gap:40px}.customer-auth-story>h1{font-size:46px}.customer-auth-story>p{font-size:13px}.customer-deal-preview{width:calc(100% - 9px);margin-top:30px;padding:16px;box-shadow:9px 10px 0 #ffbd0a}.customer-deal-preview-head{align-items:flex-start;flex-direction:column;gap:10px}.customer-deal-preview-head>b{font-size:20px}.customer-story-points{gap:12px;justify-content:flex-start;overflow:auto;padding-bottom:3px}.customer-story-points span{white-space:nowrap}.customer-auth-card h2{font-size:34px}.customer-auth-footer{align-items:flex-start;flex-direction:column;gap:7px}.customer-auth-footer>span{display:none}}

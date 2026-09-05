@@ -61,7 +61,7 @@ export type QuoteCalculation = {
   }>;
 };
 export type Customer = { id:string; name:string; tier:string; currency:string; customerType:string; region:string; contactPerson?:string|null; email?:string|null; phone?:string|null; countryCode:string; gstin?:string|null; billingAddress?:string|null; shippingAddress?:string|null; paymentTerms:number; active:boolean; createdAt:string; updatedAt:string; primaryTeam?:{id:string;name:string}|null; primaryRepresentative?:{id:string;name:string;assignedAt:string}|null; collaborators?:Array<{id:string;name:string;assignedAt:string}>; assignmentVersion?:number; openQuotationCount?:number; lastActivity?:string; quotes?:Array<{id:string;number:string;stage:string;total:number|string;version?:number;ownerId?:string;updatedAt:string}>; invoices?:Array<{id:string;number:string;state:string;amount:number|string;paidAmount:number|string;dueAt:string}>; users?:Array<{id:string;email:string;status:string;googleSubject?:string|null}>; invitations?:Array<{id:string;email:string;status:'PENDING'|'ACCEPTED'|'EXPIRED'|'REVOKED';expiresAt:string;invitedAt:string;acceptedAt?:string|null;revokedAt?:string|null;createdAt?:string}> };
-export type Product = { id:string;name:string;sku:string;category:string;description:string;unit:string;price:number|string;cost:number|string;taxRate:number|string;recurring:boolean;cadence?:string;active:boolean;storeVisible?:boolean;featured?:boolean;stocks:Array<{onHand:number;reserved:number;minAlertLevel?:number;maxCapacity?:number|null;warehouse:{name:string}}> };
+export type Product = { id:string;name:string;sku:string;category:string;description:string;unit:string;brand?:string|null;price:number|string;cost:number|string;taxRate:number|string;recurring:boolean;cadence?:string;active:boolean;storeVisible?:boolean;featured?:boolean;stocks:Array<{onHand:number;reserved:number;minAlertLevel?:number;maxCapacity?:number|null;warehouse:{name:string}}> };
 export type Policy = {id:string;tier:string;maxDiscount:number|string;hardwareLimit:number|string;servicesLimit:number|string;subscriptionLimit:number|string;financeThreshold:number|string;aggregateDiscountLimit:number|string;minimumMarginPercent:number|string;version:number;publishedAt:string};
 export type Warehouse = {id:string;name:string;priority:number;shippingCost:number|string;active:boolean;stocks:Array<{onHand:number;reserved:number;available:number;product:Product}>};
 export type SubscriptionChange = {id:string;kind:string;previousAmount?:number|string|null;newAmount?:number|string|null;previousState:string;newState:string;effectiveAt:string;reason:string;createdAt:string};
@@ -116,8 +116,8 @@ export type QuotationsResponse = {
 };
 
 export type QuotationCapabilities = {
-  editDraft:boolean;saveDraft:boolean;submit:boolean;assign:boolean;approve:boolean;send:boolean;previewCustomer:boolean;downloadPdf:boolean;viewCost:boolean;viewMargin:boolean;viewActivity:boolean;
-  reasons:Partial<Record<'editDraft'|'saveDraft'|'submit'|'assign'|'approve'|'send',string>>;
+  editDraft:boolean;saveDraft:boolean;submit:boolean;assign:boolean;approve:boolean;send:boolean;negotiate:boolean;previewCustomer:boolean;downloadPdf:boolean;viewCost:boolean;viewMargin:boolean;viewActivity:boolean;
+  reasons:Partial<Record<'editDraft'|'saveDraft'|'submit'|'assign'|'approve'|'send'|'negotiate',string>>;
 };
 export type QuotationDetail = QuotationSummary & {
   team:{id:string;name:string}|null;
@@ -138,7 +138,7 @@ export type QuotationDetail = QuotationSummary & {
   assignmentOptions:{teams:Array<{id:string;name:string;managerId:string|null;memberIds:string[]}>;owners:Array<{id:string;name:string;role:string}>;managers?:Array<{id:string;name:string;role:string}>;canCreateTeam?:boolean};
   catalog:Array<{id:string;name:string;sku:string;category:string;description:string;unit:string;price:string;cost?:string;taxRate:string;recurring:boolean;cadence:string|null;active:boolean}>;
   addOns?:Array<{id:string;name:string;sku:string;category:string;cadence:string;marginContribution:string;netContribution:string}>;
-  negotiation:Array<{id:string;author:string;message:string;messageType?:string;counterDiscount?:string|null;requestedDeliveryAt?:string|null;kind?:string;state?:string;responseReason?:string|null;respondedAt?:string|null;adoptedRevisionId?:string|null;createdAt:string}>;
+  negotiation:Array<{id:string;revisionId:string;author:string;message:string;messageType?:string;counterDiscount?:string|null;requestedDeliveryAt?:string|null;kind:'COMMENT'|'PROPOSAL';state:'OPEN'|'ADOPTED'|'DECLINED';responseReason?:string|null;respondedAt?:string|null;adoptedRevisionId?:string|null;createdAt:string}>;
   order:{id:string;number:string;state:string}|null;
   invoices:Array<{id:string;number:string;state:string}>;
 };

@@ -1,5 +1,5 @@
-import { FormEvent, useLayoutEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUpRight, AudioWaveform, Boxes, Check, FileText, Menu, MessageCircle, Mic, Pause, Play, Radio, ReceiptText, Send, ShieldCheck, Sparkles, Smartphone, X, Zap } from "lucide-react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { ArrowDown, ArrowUpRight, AudioWaveform, Boxes, Check, FileText, Menu, Mic, Pause, Play, Radio, ReceiptText, ShieldCheck, Sparkles, Smartphone, X, Zap } from "lucide-react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { Brand } from "./Brand";
@@ -33,22 +33,6 @@ function StatePanel({ index }: { index: number }) {
     {index === 3 && <div className="billing-ui"><div><small>ONE-TIME</small><strong>₹1,16,16,000</strong><span>Due 04 Oct</span></div><div><small>RECURRING</small><strong>₹1,04,000<em>/mo</em></strong><span>Next bill 04 Nov</span></div><p><ReceiptText /> Payment evidence and balances remain auditable.</p></div>}
     <div className="state-panel-foot"><span>{state.meta}</span><span>0{index + 1} / 04</span></div>
   </div>;
-}
-
-function DealAssistant() {
-  const [open, setOpen] = useState(false);
-  const [message, setMessage] = useState("");
-  const [reply, setReply] = useState("Q-1048 needs Finance because the service discount is 8 points above policy.");
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    if (!message.trim()) return;
-    setReply("I found the live record. Margin is healthy, 24 units are available, and Finance is the only pending reviewer.");
-    setMessage("");
-  };
-  return <aside className={`deal-assistant ${open ? "open" : ""}`} aria-label="DealOS assistant">
-    <button className="assistant-launcher" onClick={() => setOpen(!open)} aria-expanded={open} aria-label={open ? "Close DealOS assistant" : "Open DealOS assistant"}>{open ? <X /> : <MessageCircle />}<span>ASK DEALOS</span></button>
-    {open && <div className="assistant-panel"><div className="assistant-head"><Brand /><span><i /> LIVE CONTEXT</span></div><div className="assistant-context"><small>WATCHING</small><b>Aranya Systems · Q-1048</b></div><div className="assistant-message"><Sparkles /><p>{reply}</p></div><div className="assistant-prompts"><button onClick={() => setReply("Approval is waiting on Finance. Sales Manager approved at 10:24.")}>Who is holding this?</button><button onClick={() => setReply("Yes. Mumbai has 18 units and Pune has 6, with no backorder.")}>Can we fulfill it?</button></div><form onSubmit={submit}><input value={message} onChange={event => setMessage(event.target.value)} aria-label="Ask about this deal" placeholder="Ask about this deal…"/><button aria-label="Send question"><Send /></button></form></div>}
-  </aside>;
 }
 
 export function Landing() {
@@ -102,7 +86,6 @@ export function Landing() {
       <section className="audit-section"><div><span className="section-index inverse">06 / ACCOUNTABILITY BY DEFAULT</span><h2>Nothing important<br />becomes a mystery.</h2></div><div className="audit-list">{[["10:18", "Jordan submitted revision 06", "Commercial terms frozen"], ["10:24", "Maya approved the exception", "Reason attached"], ["10:31", "Finance review requested", "Policy v3.2 applied"], ["10:42", "Stock preview refreshed", "24 units available"]].map(([time, event, detail]) => <div key={time}><time>{time}</time><i><Check /></i><span><b>{event}</b><small>{detail}</small></span></div>)}</div><div className="audit-progress" aria-hidden="true"><i /></div></section>
       <section className="ledger-outro"><span className="section-index">THE NEXT DEAL STARTS HERE</span><h2><span>LESS CHASING.</span><span>MORE CERTAINTY.</span></h2><div><p>A single, accountable path from first quote to final payment.</p><a className="signal-button" href="/sign-up">Create your organization <ArrowUpRight /></a></div></section>
     </main>
-    <DealAssistant />
-    <footer className="ledger-footer"><Brand /><p>One record. Every decision.</p><a href="/sign-in">Enter workspace <ArrowUpRight /></a><button aria-pressed={paused} onClick={() => setPaused(!paused)}>{paused ? <Play /> : <Pause />}{paused ? "Resume motion" : "Pause motion"}</button><span>© {new Date().getFullYear()} DealOS</span></footer>
+    <footer className="ledger-footer"><Brand /><p>One record. Every decision.</p><a href="/sign-in">Enter workspace <ArrowUpRight /></a><button aria-pressed={paused} onClick={() => setPaused(!paused)}>{paused ? <Play /> : <Pause />}{paused ? "Resume motion" : "Pause motion"}</button><span className="ledger-footer-meta"><i>© {new Date().getFullYear()} DealOS</i><b>Made with <em>♥</em> by Amartya, Sanket, Hitesh &amp; Aryan.</b></span></footer>
   </div>;
 }

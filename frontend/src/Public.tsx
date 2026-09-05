@@ -3,7 +3,6 @@ import {
   ArrowUpRight,
   ArrowRight,
   Check,
-  ChevronDown,
   ShieldCheck,
   Eye,
   EyeOff,
@@ -57,7 +56,7 @@ function GoogleAuth({ mode, organizationName = "", email = "", hideDivider = fal
           try {
             await request(`/auth/google/${mode}`, {
               method: "POST",
-              body: JSON.stringify(mode === "signup" ? { credential, organizationName } : mode === "customer" ? { credential, email } : { credential }),
+              body: JSON.stringify(mode === "signup" ? { credential, organizationName } : mode === "customer" ? { credential, ...(email ? { email } : {}) } : { credential }),
             });
             await onComplete();
           } catch (error) {
@@ -129,45 +128,60 @@ function GoogleAuth({ mode, organizationName = "", email = "", hideDivider = fal
 export function CustomerAuthPage({ onSuccess, signedInRole }: { onSuccess: () => void | Promise<void>; signedInRole?: string | null }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const ready = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-  async function passwordLogin(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function submit(e: FormEvent) {
+    e.preventDefault();
     setBusy(true);
     setError("");
     try {
-      await request('/auth/login', { method: 'POST', body: JSON.stringify({ identifier: email.trim().toLowerCase(), password }) });
+      await request("/auth/customer/login", { method: "POST", body: JSON.stringify({ email: email.trim().toLowerCase(), password }) });
       await onSuccess();
-    } catch (problem) {
-      setError(problem instanceof Error ? problem.message : 'Customer sign in could not be completed.');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Customer sign-in could not be completed.");
     } finally {
       setBusy(false);
     }
   }
   return <main className="customer-auth-page">
-    <div className="customer-auth-brand"><Brand/><span>Customer portal</span></div>
-    <section className="customer-auth-card">
-      <div className="customer-auth-mark"><ShieldCheck/></div>
-      <span className="section-label">SECURE DEAL ROOM</span>
-      <h1>Everything shared with you, in one place.</h1>
-      <p>Enter your customer Email ID and use the portal password you created from your invitation. After activation, you can also link the same Google Sign-In ID.</p>
-      {signedInRole&&signedInRole!=="CUSTOMER"&&<div className="auth-error" role="alert">This session belongs to an internal workspace. Sign out there before entering the customer portal.</div>}
-      <label className="customer-email-field">Customer Email ID<input type="email" autoComplete="email" placeholder="you@company.com" value={email} onChange={event=>{setEmail(event.target.value);setError("")}}/></label>
-      {ready&&<small className="customer-email-hint">Continue with the Google account for {email.trim().toLowerCase()}.</small>}
-      <div className={!ready?"customer-google-disabled":""}>
+    <header className="customer-auth-header">
+      <div className="customer-auth-brand"><Brand/><span>Customer portal</span></div>
+      <a className="customer-workspace-link" href="/sign-in">Team workspace <ArrowUpRight/></a>
+    </header>
+    <div className="customer-auth-layout">
+      <section className="customer-auth-story" aria-labelledby="customer-auth-title">
+        <span className="customer-auth-index">CUSTOMER ACCESS / ONE SHARED RECORD</span>
+        <h1 id="customer-auth-title">Your deal.<br/><em>Without the chase.</em></h1>
+        <p>Review every approved quotation, invoice, and conversation from one private workspace.</p>
+        <div className="customer-deal-preview" aria-hidden="true">
+          <div className="customer-deal-preview-top"><span><i>D</i> DealOS</span><b><i/> Shared securely</b></div>
+          <div className="customer-deal-preview-head"><span><small>QUOTATION Q-1048</small><strong>Your latest proposal</strong></span><b>₹1,28,64,000</b></div>
+          <div className="customer-deal-preview-lines"><span>Commercial terms <b>Ready to review</b></span><span>Conversation <b>Attached to the deal</b></span></div>
+          <div className="customer-deal-preview-foot"><ShieldCheck/><span><small>VERIFIED ACCESS</small><b>Only documents shared with your email</b></span></div>
+        </div>
+        <div className="customer-story-points"><span><Check/> Review terms</span><span><Check/> Request changes</span><span><Check/> Track invoices</span></div>
+      </section>
+      <section className="customer-auth-card" aria-label="Customer portal sign in">
+        <div className="customer-auth-card-head">
+          <div className="customer-auth-mark"><ShieldCheck/></div>
+          <span><small>SECURE DEAL ROOM</small><b>Customer access</b></span>
+        </div>
+        <h2>Everything shared with you, in one place.</h2>
+        <p>Use the email address your DealOS invitation was sent to.</p>
+        {signedInRole&&signedInRole!=="CUSTOMER"&&<div className="auth-error" role="status">Signing in below will switch this browser from the internal workspace to the customer portal.</div>}
+        <form className="customer-login-form" onSubmit={submit}>
+          <label className="customer-email-field">Customer Email ID<input required type="email" autoComplete="email" placeholder="you@company.com" value={email} onChange={event=>{setEmail(event.target.value);setError("")}}/></label>
+          <label className="customer-email-field">Password<span className="customer-password-field"><input required minLength={8} type={visible?"text":"password"} autoComplete="current-password" placeholder="Enter your password" value={password} onChange={event=>{setPassword(event.target.value);setError("")}}/><button type="button" aria-label={visible?"Hide password":"Show password"} onClick={()=>setVisible(!visible)}>{visible?<EyeOff/>:<Eye/>}</button></span></label>
+          <button className="customer-email-submit" disabled={busy}>{busy?"Signing in…":"Sign in with Email ID"}<ArrowUpRight/></button>
+        </form>
+        <div className="customer-auth-divider"><span>or continue with Google</span></div>
         <GoogleAuth mode="customer" email={email.trim().toLowerCase()} hideDivider onComplete={onSuccess} onError={setError}/>
-      </div>
-      {!ready&&<small>Enter your Email ID to enable Google sign-in.</small>}
-      <div className="auth-divider"><span>or use your portal password</span></div>
-      <form className="customer-password-form" onSubmit={passwordLogin}>
-        <label>Portal password<input type="password" autoComplete="current-password" minLength={12} maxLength={128} required value={password} onChange={event=>{setPassword(event.target.value);setError("")}}/></label>
-        <button className="button primary" disabled={busy||!ready}>{busy?'Signing in…':'Sign in to customer portal'}</button>
-      </form>
-      {error&&<div className="auth-error" role="alert">{error}</div>}
-      <div className="customer-auth-trust"><span><Check/>Email ID must match Google</span><span><LockKeyhole/>Customer-scoped access</span></div>
-    </section>
-    <footer>Portal invitations are issued by the business after your customer account is configured.</footer>
+        {error&&<div className="auth-error" role="alert">{error}</div>}
+        <div className="customer-auth-trust"><span><Check/>Verified email matching</span><span><LockKeyhole/>Customer-scoped access</span></div>
+      </section>
+    </div>
+    <footer className="customer-auth-footer"><span>Access begins after the business assigns your account and sends a portal invitation.</span><b>Made with <i>♥</i> by Amartya, Sanket, Hitesh &amp; Aryan.</b></footer>
   </main>;
 }
 
@@ -395,35 +409,6 @@ export function AuthPage({
                   {signup ? "Sign in" : "Get started"} <ArrowUpRight />
                 </a>
               </div>
-              {!signup && (
-                <details className="demo-roles">
-                  <summary>
-                    Just exploring? Choose a demo role <ChevronDown />
-                  </summary>
-                  <div>
-                    {[
-                      ["rep", "Sales rep"],
-                      ["manager", "Manager"],
-                      ["finance", "Finance"],
-                      ["admin", "Admin"],
-                    ].map(([v, t]) => (
-                      <button
-                        type="button"
-                        key={v}
-                        onClick={() => {
-                          setEmail(`${v}@dealos.demo`);
-                          setPassword("DealOS2026!");
-                        }}
-                      >
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                  <small>
-                    Local development accounts. Select a role, then sign in.
-                  </small>
-                </details>
-              )}
             </form>
         </div>
         <div className="auth-security">
