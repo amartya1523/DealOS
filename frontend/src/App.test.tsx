@@ -30,10 +30,17 @@ describe("DealOS public routes", () => {
     expect(
       screen.getByRole("heading", { name: /Every deal\. In motion\./ }),
     ).toBeInTheDocument();
+    expect(screen.queryByText("Workspace preview")).not.toBeInTheDocument();
+    expect(screen.queryByText("$284,500")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^Explore / })).toHaveLength(4);
     const approve = screen.getByRole("button", { name: /Explore Approve/ });
     fireEvent.click(approve);
     expect(approve).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("heading", { name: /Find your green light/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Pause motion" }));
+    expect(
+      screen.getByRole("button", { name: "Resume motion" }),
+    ).toHaveAttribute("aria-pressed", "true");
     expect(
       screen.getByRole("link", { name: "Make your next move" }),
     ).toHaveAttribute("href", "/sign-up");

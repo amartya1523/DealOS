@@ -141,3 +141,7 @@ The user explicitly requested an English landing page, polished site-wide visual
 ## Confirmed audit repair instruction — 2026-09-05
 
 The user instructed implementation of the backend audit findings and supplied a QA gate requiring preservation of 24 previously passing cases. The repair preserves those cases and separately validates formerly failing customer isolation, commercial recalculation, approval history, owner scope, inventory retry/duplicate demand, payment retry/concurrency, cadence/tax, and downstream billing. Larger unimplemented product verticals remain governed by the open business decisions above and are not mislabeled as completed by this repair.
+
+## Confirmed visual revision — 2026-09-05
+
+User rejected the invented dashboard preview and requested a more ambitious visual and parallax treatment. Removed the public sample dashboard and all invented metrics. The actual authenticated workspace remains at `/app`. Confirmed direction: original imagery, stronger scroll storytelling inspired by the reference repository. Implemented original chrome/glass artwork, oversized type, layered hero parallax, text-color scroll reveal, clipped/pinned connection scene, desktop horizontal workflow, mobile vertical chapters, and an explicit motion pause control.

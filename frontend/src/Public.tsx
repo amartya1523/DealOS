@@ -2,34 +2,16 @@ import { useState, type FormEvent } from "react";
 import {
   ArrowUpRight,
   ArrowRight,
-  ArrowDown,
   Check,
   ChevronDown,
-  Layers,
   ShieldCheck,
-  Boxes,
-  FileText,
-  Activity,
-  Menu,
-  X,
   Eye,
   EyeOff,
   LockKeyhole,
-  Command,
 } from "lucide-react";
 import { request } from "./api";
 import "./public.css";
-export function Brand() {
-  return (
-    <a className="wordmark" href="/" aria-label="DealOS home">
-      <span className="brand-symbol">
-        <Layers />
-      </span>
-      deal<span>os</span>
-      <sup>®</sup>
-    </a>
-  );
-}
+import { Brand } from "./Brand";
 const stages = ["Quote", "Approve", "Fulfill", "Bill"];
 export { Landing } from "./MotionLanding";
 
