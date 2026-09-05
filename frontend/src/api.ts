@@ -1,5 +1,7 @@
 export type Workspace = {
-  user: { id: string; name: string; email: string; role: string };
+  user: { id: string; name: string; email: string; loginId?: string; role: string; moduleAccess: string[] };
+  organization: { id: string; name: string };
+  users: Array<{ id:string; name:string; loginId?:string; status:string; moduleAccess:string[]; createdAt:string }>;
   quotes: Quote[];
   products: Product[];
   policies: Policy[];

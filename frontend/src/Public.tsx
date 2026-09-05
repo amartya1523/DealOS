@@ -9,8 +9,6 @@ import {
   EyeOff,
   LockKeyhole,
   Building2,
-  UserPlus,
-  Trash2,
 } from "lucide-react";
 import { request } from "./api";
 import "./public.css";
@@ -31,7 +29,7 @@ declare global {
   }
 }
 
-function GoogleSignup({ onComplete, onError }: { onComplete: (complete: boolean) => void; onError: (message: string) => void }) {
+function GoogleAuth({ mode, organizationName = "", onComplete, onError }: { mode: "signup" | "login"; organizationName?: string; onComplete: () => void | Promise<void>; onError: (message: string) => void }) {
   const buttonRef = useRef<HTMLDivElement>(null);
   const [clientId, setClientId] = useState<string | null>(null);
   const [configurationLoaded, setConfigurationLoaded] = useState(false);
@@ -57,11 +55,11 @@ function GoogleSignup({ onComplete, onError }: { onComplete: (complete: boolean)
         callback: async ({ credential }) => {
           onError("");
           try {
-            await request("/auth/google/signup", {
+            await request(`/auth/google/${mode}`, {
               method: "POST",
-              body: JSON.stringify({ credential }),
+              body: JSON.stringify(mode === "signup" ? { credential, organizationName } : { credential }),
             });
-            onComplete(true);
+            await onComplete();
           } catch (error) {
             onError(error instanceof Error ? error.message : "Google signup could not be completed.");
           }
@@ -72,7 +70,7 @@ function GoogleSignup({ onComplete, onError }: { onComplete: (complete: boolean)
         type: "standard",
         theme: "outline",
         size: "large",
-        text: "signup_with",
+        text: mode === "signup" ? "signup_with" : "signin_with",
         shape: "rectangular",
         logo_alignment: "left",
         width: Math.min(400, buttonRef.current.clientWidth || 400),
@@ -95,17 +93,17 @@ function GoogleSignup({ onComplete, onError }: { onComplete: (complete: boolean)
       script.removeEventListener("load", render);
       buttonRef.current?.replaceChildren();
     };
-  }, [clientId, onComplete, onError]);
+  }, [clientId, mode, onComplete, onError, organizationName]);
 
   if (!clientId) return (
     <>
       <button
         type="button"
         className="google-signup-fallback"
-        aria-label="Continue with Google"
+        aria-label={mode === "signup" ? "Sign up with Google" : "Sign in with Google"}
         onClick={() => onError(configurationLoaded
-          ? "Google signup is not configured yet. Add GOOGLE_CLIENT_ID to backend/.env and restart the backend."
-          : "Google signup is still loading. Please try again in a moment.")}
+          ? "Google authentication is not configured yet. Add GOOGLE_CLIENT_ID to backend/.env and restart the backend."
+          : "Google authentication is still loading. Please try again in a moment.")}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.4-.18-2.07H12v3.92h5.38a4.6 4.6 0 0 1-2 3.02v2.55h3.24c1.9-1.75 2.98-4.33 2.98-7.42Z" />
@@ -113,14 +111,14 @@ function GoogleSignup({ onComplete, onError }: { onComplete: (complete: boolean)
           <path fill="#FBBC05" d="M6.39 13.93A6.01 6.01 0 0 1 6.08 12c0-.67.12-1.32.31-1.93V7.44H3.04A10 10 0 0 0 2 12c0 1.61.39 3.14 1.04 4.56l3.35-2.63Z" />
           <path fill="#EA4335" d="M12 5.94c1.47 0 2.79.5 3.83 1.5l2.87-2.88A9.64 9.64 0 0 0 12 2a10 10 0 0 0-8.96 5.44l3.35 2.63C7.18 7.7 9.39 5.94 12 5.94Z" />
         </svg>
-        Continue with Google
+        {mode === "signup" ? "Sign up with Google" : "Sign in with Google"}
       </button>
       <div className="auth-divider"><span>or continue with work email</span></div>
     </>
   );
   return (
     <>
-      <div className="google-signup" ref={buttonRef} aria-label="Google signup" />
+      <div className="google-signup" ref={buttonRef} aria-label={`Google ${mode}`} />
       <div className="auth-divider"><span>or continue with work email</span></div>
     </>
   );
@@ -140,14 +138,12 @@ export function AuthPage({
   const [name, setName] = useState("");
   const [organizationName, setOrganizationName] = useState("");
   const [step, setStep] = useState(1);
-  const [users, setUsers] = useState([{ email: "", role: "REP" }]);
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const setupComplete = !signup && new URLSearchParams(window.location.search).get("setup") === "complete";
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (signup && step < 3) {
+    if (signup && step < 2) {
       setStep(step + 1);
       return;
     }
@@ -162,8 +158,7 @@ export function AuthPage({
             email,
             password,
             displayName: name,
-            users: users.filter(user => user.email.trim()),
-          } : { email, password },
+          } : { identifier: email, password },
         ),
       });
       await onSuccess();
@@ -212,8 +207,8 @@ export function AuthPage({
         <div className="auth-form-wrap">
             <form className="auth-form" onSubmit={submit}>
               {signup && (
-                <div className="onboarding-progress" aria-label={`Onboarding step ${step} of 3`}>
-                  {["Organization", "User access", "Credentials"].map((label, index) => (
+                <div className="onboarding-progress two" aria-label={`Onboarding step ${step} of 2`}>
+                  {["Organization", "Admin account"].map((label, index) => (
                     <span className={step >= index + 1 ? "active" : ""} key={label}>
                       <i>{step > index + 1 ? <Check /> : index + 1}</i>{label}
                     </span>
@@ -221,23 +216,17 @@ export function AuthPage({
                 </div>
               )}
               <span className="section-label">
-                {signup ? `SETUP ${step} OF 3` : "YOUR WORKSPACE AWAITS"}
+                {signup ? `SETUP ${step} OF 2` : "YOUR WORKSPACE AWAITS"}
               </span>
-              <h2>{signup ? ["Create your organization.", "Set user access.", "Create admin credentials."][step - 1] : "Welcome back."}</h2>
+              <h2>{signup ? ["Create your organization.", "Create the admin account."][step - 1] : "Welcome back."}</h2>
               <p>
                 {signup
                   ? [
                     "The first account becomes this organization’s administrator.",
-                    "Add the people who should receive role-based workspace access.",
-                    "Use these credentials to sign in as the organization admin.",
+                    "Continue with Google or create credentials for the first organization admin.",
                   ][step - 1]
                   : "A little less friction. A lot more momentum."}
               </p>
-              {setupComplete && (
-                <div className="auth-success" role="status">
-                  <Check /> Organization created. Sign in with your new admin credentials.
-                </div>
-              )}
               {(error || externalError) && (
                 <div className="auth-error" role="alert">
                   {error || externalError}
@@ -261,36 +250,8 @@ export function AuthPage({
                 </label>
               )}
               {signup && step === 2 && (
-                <div className="access-list">
-                  {users.map((user, index) => (
-                    <div className="access-row" key={index}>
-                      <label>
-                        User email
-                        <input
-                          type="email"
-                          value={user.email}
-                          onChange={(e) => setUsers(users.map((item, itemIndex) => itemIndex === index ? {...item, email: e.target.value} : item))}
-                          placeholder="teammate@company.com"
-                        />
-                      </label>
-                      <label>
-                        Access
-                        <select value={user.role} onChange={(e) => setUsers(users.map((item, itemIndex) => itemIndex === index ? {...item, role: e.target.value} : item))}>
-                          <option value="REP">Sales rep</option>
-                          <option value="MANAGER">Manager</option>
-                          <option value="FINANCE">Finance</option>
-                          <option value="CUSTOMER">Customer</option>
-                        </select>
-                      </label>
-                      {users.length > 1 && <button type="button" className="remove-access" aria-label={`Remove user ${index + 1}`} onClick={() => setUsers(users.filter((_, itemIndex) => itemIndex !== index))}><Trash2 /></button>}
-                    </div>
-                  ))}
-                  <button type="button" className="add-access" onClick={() => setUsers([...users, {email: "", role: "REP"}])}><UserPlus /> Add another user</button>
-                  <small>You can also add or change access later from the admin workspace.</small>
-                </div>
-              )}
-              {signup && step === 3 && (
                 <>
+                <GoogleAuth mode="signup" organizationName={organizationName} onComplete={onSuccess} onError={setError} />
                 <label>
                   Admin full name
                   <input
@@ -303,7 +264,7 @@ export function AuthPage({
                   />
                 </label>
               <label>
-                Work email
+                Admin email
                 <input
                   type="email"
                   autoComplete="email"
@@ -338,14 +299,14 @@ export function AuthPage({
                 </div>
               </label>
                 <small>
-                  This first account will have organization administrator access.
+                  User access is configured after setup from the admin workspace.
                 </small>
                 </>
               )}
               {!signup && <>
                 <label>
-                  Work email
-                  <input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" />
+                  Email or user ID
+                  <input autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com or DL-1234ABCD" />
                 </label>
                 <label>
                   Password
@@ -355,13 +316,14 @@ export function AuthPage({
                   </div>
                 </label>
               </>}
+              {!signup && <GoogleAuth mode="login" onComplete={onSuccess} onError={setError} />}
               <div className="onboarding-actions">
                 {signup && step > 1 && <button className="back-step" type="button" onClick={() => setStep(step - 1)}>Back</button>}
               <button className="cta" disabled={busy}>
                 {busy
                   ? "Just a moment…"
                   : signup
-                    ? step < 3 ? "Continue" : "Create admin account"
+                    ? step < 2 ? "Continue" : "Create organization"
                     : "Sign in to your workspace"}
                 <ArrowUpRight />
               </button>

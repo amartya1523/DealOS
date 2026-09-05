@@ -11,14 +11,11 @@ export const signupSchema = z.object({
   displayName: z.string().trim().min(1).max(120),
   email: z.string().trim().email().max(254).transform(value => value.toLowerCase()),
   password: z.string().min(12).max(128),
-  users: z.array(z.object({
-    email: z.string().trim().email().max(254).transform(value => value.toLowerCase()),
-    role: z.enum(['REP', 'MANAGER', 'FINANCE', 'CUSTOMER']),
-  }).strict()).max(25).default([]),
 }).strict();
 
 export const googleSignupSchema = z.object({
   credential: z.string().trim().min(1).max(8192),
+  organizationName: z.string().trim().min(2).max(120),
 }).strict();
 
 export type GoogleSignupProfile = {
@@ -29,12 +26,9 @@ export type GoogleSignupProfile = {
 
 export async function createOrganizationAdmin(input: z.infer<typeof signupSchema>) {
   const passwordHash = await bcrypt.hash(input.password, 12);
-  const uniqueInvites = [...new Map(input.users
-    .filter(user => user.email !== input.email)
-    .map(user => [user.email, user])).values()];
   const existing = await db.user.findUnique({ where: { email: input.email } });
-  if (existing) return false;
-  await db.organization.create({ data: {
+  if (existing) return null;
+  return db.organization.create({ data: {
     name: input.organizationName,
     users: { create: {
       email: input.email,
@@ -42,10 +36,9 @@ export async function createOrganizationAdmin(input: z.infer<typeof signupSchema
       passwordHash,
       status: 'ACTIVE',
       role: 'ADMIN',
+      moduleAccess: [],
     } },
-    invites: { create: uniqueInvites },
-  } });
-  return true;
+  }, include: { users: true } });
 }
 
 export async function verifyGoogleSignupCredential(credential: string, clientId: string): Promise<GoogleSignupProfile> {
@@ -61,11 +54,20 @@ export async function verifyGoogleSignupCredential(credential: string, clientId:
   };
 }
 
-export async function createPendingGoogleAccount(profile: GoogleSignupProfile) {
-  // Google-only requests receive an unknowable local password. Existing identities
-  // are deliberately left untouched so a Google assertion cannot relink an account.
+export async function createGoogleOrganizationAdmin(profile: GoogleSignupProfile, organizationName: string) {
+  const existing = await db.user.findUnique({ where: { email: profile.email } });
+  if (existing) return null;
   const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
-  await db.user.upsert({ where: { email: profile.email }, update: {}, create: {
-    email: profile.email, name: profile.displayName, passwordHash, status: 'PENDING', role: 'REP',
-  } });
+  return db.organization.create({ data: {
+    name: organizationName,
+    users: { create: {
+      email: profile.email,
+      name: profile.displayName,
+      passwordHash,
+      googleSubject: profile.subject,
+      status: 'ACTIVE',
+      role: 'ADMIN',
+      moduleAccess: [],
+    } },
+  }, include: { users: true } });
 }
