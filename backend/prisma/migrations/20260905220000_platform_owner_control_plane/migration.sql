@@ -1,4 +1,5 @@
--- Merge-safe Platform Owner control plane, applied after the current main schema.
+-- Merge-safe Platform Owner control plane, applied after the current main schema
+-- and its customer tenant-isolation repair migrations.
 CREATE TYPE "OrganizationStatus" AS ENUM ('ACTIVE', 'SUSPENDED', 'ARCHIVED');
 CREATE TYPE "OrganizationAccessRole" AS ENUM ('ORGANIZATION_ADMIN', 'ORGANIZATION_MEMBER', 'PORTAL_USER');
 CREATE TYPE "MembershipStatus" AS ENUM ('ACTIVE', 'SUSPENDED', 'REVOKED');

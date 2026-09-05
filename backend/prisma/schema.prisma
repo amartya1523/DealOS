@@ -176,7 +176,7 @@ model Customer {
   subscriptions  Subscription[]
   invoices       Invoice[]
   createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @default(now()) @updatedAt
+  updatedAt      DateTime       @updatedAt
 
   @@unique([organizationId, name])
 }
@@ -521,7 +521,7 @@ model Order {
   subscriptions Subscription[]
   invoices      Invoice[]
   createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @default(now()) @updatedAt
+  updatedAt     DateTime           @updatedAt
 }
 
 model OrderLine {

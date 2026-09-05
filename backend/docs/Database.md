@@ -399,7 +399,7 @@ List queries constrain team/customer/state/date and use stable `(created_at,id)`
 
 ## Current database state
 
-The merged history contains six ordered migrations through `20260905200000_platform_owner_control_plane`. The final migration adds organization status/slug, `OrganizationMembership`, `OrganizationInvitation`, `PlatformOwnerSession`, `PrivilegedAudit`, CSRF/View As session fields and organization-scoped uniqueness. It backfills memberships from the latest-main `User.organizationId` relationship and does not persist the Platform Owner password.
+The merged history contains eight ordered migrations through `20260905220000_platform_owner_control_plane`. The final migration runs after the customer tenant-isolation repairs and adds organization status/slug, `OrganizationMembership`, `OrganizationInvitation`, `PlatformOwnerSession`, `PrivilegedAudit`, CSRF/View As session fields and organization-scoped uniqueness. It backfills memberships from the latest-main `User.organizationId` relationship and does not persist the Platform Owner password.
 
 The former feature-only `20260905130000`–`20260905150000` migration sequence was consolidated because it independently created tables later introduced on `main`. Retaining both sequences would make fresh and existing-main deployments fail. The consolidated migration was verified from an empty PostgreSQL database followed by the merged deterministic seed.
 
