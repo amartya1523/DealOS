@@ -137,3 +137,7 @@ The user requires application content inside `frontend/` and `backend/`. Each ow
 ## Confirmed visual expansion — 2026-09-05
 
 The user explicitly requested an English landing page, polished site-wide visuals, parallax and scroll animation inspired by the supplied GSAP reference, and sign-in/sign-up routes. This adds the public landing page alongside the existing application. Confirmed: retain all business screens. Inferred design choices: forest green, lime and warm paper, Manrope typography, original product illustrations, GSAP ScrollTrigger, reduced-motion support, and mobile layouts. Public preview values are illustrative, never live workspace metrics.
+
+## Confirmed visual revision — 2026-09-05
+
+User rejected the invented dashboard preview and requested a more ambitious visual and parallax treatment. Removed the public sample dashboard and all invented metrics. The actual authenticated workspace remains at `/app`. Confirmed direction: original imagery, stronger scroll storytelling inspired by the reference repository. Implemented original chrome/glass artwork, oversized type, layered hero parallax, text-color scroll reveal, clipped/pinned connection scene, desktop horizontal workflow, mobile vertical chapters, and an explicit motion pause control.

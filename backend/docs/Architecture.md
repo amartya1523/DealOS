@@ -341,3 +341,7 @@ These do not block the architecture package. They must not be silently represent
 ## Public frontend routes — 2026-09-05
 
 `/` renders the public landing page; `/sign-in` and `/sign-up` render authentication. `/signin`, `/login`, and `/signup` are supported aliases. `/app` loads the existing protected workspace; missing sessions show sign-in, and unknown paths show a recovery page. Browser history handles transitions into/out of the workspace. Hosting must rewrite non-API frontend paths to `index.html`. Vite already supports this locally. REST remains under `/api/v1`. GSAP animations clean up on unmount and respect reduced-motion. Public.tsx owns marketing and identity presentation; business screens remain in App.tsx.
+
+## Cinematic landing revision
+
+`MotionLanding.tsx` now owns the public landing and GSAP timelines; `Brand.tsx` holds shared branding; `Public.tsx` retains authentication. `motion.css` styles the landing, while `public.css` retains only shared/authentication styles. Removed the old ProductPreview component and its styling. Desktop scrolling pins the connection scene and the horizontal workflow; below 900px, chapters use a vertical grid. Reduced-motion and manual pause render all four chapters in a static grid. MatchMedia/context cleanup removes pin spacers and transforms on route exit or preference change. Original image assets and prompts are stored in frontend/public/images.
