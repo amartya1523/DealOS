@@ -1,7 +1,8 @@
 export type Workspace = {
-  user: { id: string; name: string; email: string; loginId?: string; role: string; moduleAccess: string[]; actorType:'USER'|'PLATFORM_OWNER'; platformSuperAdmin:boolean; viewContext:{readOnly:true;organizationId:string;organizationName:string;simulatedUserId:string|null;realActor:{id:string;name:string}}|null };
+  user: { id: string; name: string; email: string; loginId?: string; role: string; customerId?:string|null; moduleAccess: string[]; actorType:'USER'|'PLATFORM_OWNER'; platformSuperAdmin:boolean; viewContext:{readOnly:true;organizationId:string;organizationName:string;simulatedUserId:string|null;realActor:{id:string;name:string}}|null };
   organization: { id: string; name: string };
-  users: Array<{ id:string; name:string; role:string; loginId?:string; status:string; moduleAccess:string[]; createdAt:string }>;
+  users: Array<{ id:string; name:string; email:string; loginId?:string; role:string; status:string; moduleAccess:string[]; createdAt:string }>;
+  customers: Customer[];
   quotes: Quote[];
   products: Product[];
   policies: Policy[];
@@ -55,11 +56,12 @@ export type QuoteCalculation = {
     cadence:string;
   }>;
 };
-export type Product = { id:string;name:string;sku:string;category:string;description:string;unit:string;price:number|string;cost:number|string;taxRate:number|string;recurring:boolean;cadence?:string;active:boolean;stocks:Array<{onHand:number;reserved:number;warehouse:{name:string}}> };
+export type Customer = { id:string; name:string; tier:string; currency:string; customerType:string; region:string; contactPerson?:string|null; email?:string|null; phone?:string|null; countryCode:string; gstin?:string|null; billingAddress?:string|null; shippingAddress?:string|null; paymentTerms:number; active:boolean; createdAt:string; updatedAt:string; quotes?:Array<{id:string;number:string;stage:string;total:number|string;updatedAt:string}>; invoices?:Array<{id:string;number:string;state:string;amount:number|string;paidAmount:number|string;dueAt:string}>; users?:Array<{id:string;email:string;status:string;googleSubject?:string|null}>; invitations?:Array<{id:string;email:string;status:string;expiresAt:string;createdAt:string}> };
+export type Product = { id:string;name:string;sku:string;category:string;description:string;unit:string;price:number|string;cost:number|string;taxRate:number|string;recurring:boolean;cadence?:string;active:boolean;storeVisible?:boolean;featured?:boolean;stocks:Array<{onHand:number;reserved:number;minAlertLevel?:number;maxCapacity?:number|null;warehouse:{name:string}}> };
 export type Policy = {id:string;tier:string;maxDiscount:number|string;hardwareLimit:number|string;servicesLimit:number|string;subscriptionLimit:number|string;financeThreshold:number|string};
 export type Warehouse = {id:string;name:string;priority:number;shippingCost:number|string;stocks:Array<{onHand:number;reserved:number;product:Product}>};
 export type Subscription = {id:string;customer:string;productName:string;cadence:string;amount:number|string;nextBillAt:string;state:string;schedule?:string[]};
-export type Invoice = {id:string;number:string;customer:string;amount:number|string;paidAmount:number|string;state:string;dueAt:string;lines:Array<{description:string;amount:number}>;payments:Array<{id:string;amount:number|string;reference:string;paidAt:string}>};
+export type Invoice = {id:string;number:string;customer:string;customerRecord?:Pick<Customer,'id'|'email'|'phone'|'countryCode'|'contactPerson'>;amount:number|string;paidAmount:number|string;state:string;dueAt:string;lines:Array<{description:string;amount:number;productId?:string;quantity?:number;unitPrice?:number;discount?:number;tax?:number;net?:number;cadence?:string}>;payments:Array<{id:string;amount:number|string;reference:string;paidAt:string}>};
 export type Alert = {id:string;kind:string;title:string;detail:string;severity:string;resourceId:string;resolved:boolean;nudged:boolean};
 export type Audit = {id:string;action:string;resource:string;resourceId:string;reason?:string;createdAt:string};
 

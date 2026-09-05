@@ -7,7 +7,7 @@ const db = new PrismaClient();
 const passwordHash = await bcrypt.hash('DealOS2026!', 12);
 const organizationId = '00000000-0000-0000-0000-000000000001';
 const northstarOrganizationId = '00000000-0000-0000-0000-000000000002';
-const allModules = ['dashboard','quotations','approvals','fulfillment','subscriptions','invoices','health','reports','products','policies'];
+const allModules = ['dashboard','quotations','approvals','fulfillment','subscriptions','invoices','health','reports','products','customers','policies'];
 const json = (value: unknown) => JSON.parse(JSON.stringify(value));
 const hash = (value: unknown) => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
