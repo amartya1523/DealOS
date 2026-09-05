@@ -26,6 +26,7 @@ import { aggregateSales, reportAsPdf, reportAsXls } from './reporting.js';
 import { consolidateBackorder, consolidateSchema, FulfillmentError, previewSplit, receiveStock, receiveStockSchema, reserveStock, reserveStockSchema } from './fulfillment.js';
 import { assistantMessagesSchema, runAssistant, type AssistantContext } from './assistant.js';
 import { convertLead, dismissLead, dismissLeadSchema, getLead, leadListSchema, listLeads, listPortalRequests, portalRequestCatalog, PortalRequestError, portalRequestSchema, rfqHandlingSettingSchema, submitPortalRequest, updateRfqHandlingMode } from './portal-requests.js';
+import { createRazorpayClient, paymentWebhookKey, readRazorpayConfiguration, rupeesToPaise, verifyCheckoutSignature, verifyWebhookSignature } from './payments.js';
 
 type Actor = { id: string; name: string; email: string; loginId: string | null; role: string; customerId: string | null; organizationId: string; moduleAccess: string[]; csrfToken: string; actorType: 'USER' | 'PLATFORM_OWNER'; platformSuperAdmin: boolean; readOnlyView: boolean; organization: { id: string; name: string; status: string } | null; viewContext: { readOnly: true; organizationId: string; organizationName: string; simulatedUserId: string | null; realActor: { id: string; name: string } } | null };
 type AuthRequest = Request & { user?: Actor; requestId?: string };
@@ -38,6 +39,11 @@ class DomainError extends Error {
 const cookieName = process.env.SESSION_COOKIE_NAME ?? 'dealos_session';
 const allowedOrigin = process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173';
 const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim() ?? '';
+const googleClientAudiences = [
+  googleClientId,
+  process.env.GOOGLE_IOS_CLIENT_ID?.trim() ?? '',
+  process.env.GOOGLE_ANDROID_CLIENT_ID?.trim() ?? '',
+].filter((clientId): clientId is string => Boolean(clientId));
 const modules = ['dashboard','quotations','approvals','fulfillment','subscriptions','invoices','health','reports','products','customers','policies'] as const;
 const provisionableRoles = ['REP','MANAGER','FINANCE'] as const;
 const roleModulePresets: Record<typeof provisionableRoles[number], Array<typeof modules[number]>> = {
@@ -157,6 +163,119 @@ async function startSession(user: { id: string }, res: Response) {
   return token;
 }
 
+function razorpayConfiguration() {
+  try {
+    return readRazorpayConfiguration();
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'RAZORPAY_CONFIGURATION_INVALID';
+    throw new DomainError(503, code, 'Razorpay Test Mode is not configured correctly on the server.');
+  }
+}
+
+const paymentDto = (payment: any) => ({
+  id: payment.id,
+  invoiceId: payment.invoiceId,
+  amount: payment.amount,
+  currency: payment.currency,
+  reference: payment.reference,
+  provider: payment.provider,
+  status: payment.status,
+  razorpayOrderId: payment.razorpayOrderId,
+  razorpayPaymentId: payment.razorpayPaymentId,
+  failureCode: payment.failureCode,
+  failureDescription: payment.failureDescription,
+  verifiedAt: payment.verifiedAt,
+  paidAt: payment.paidAt,
+  createdAt: payment.createdAt,
+});
+
+async function settleRazorpayPayment(tx: Tx, paymentId: string, gatewayPaymentId?: string, signature?: string) {
+  const initial = await tx.payment.findUnique({ where: { id: paymentId } });
+  if (!initial) throw new DomainError(404, 'PAYMENT_NOT_FOUND', 'Payment attempt not found.');
+  await tx.$queryRaw`SELECT "id" FROM "Invoice" WHERE "id" = ${initial.invoiceId} FOR UPDATE`;
+  const payment = await tx.payment.findUniqueOrThrow({ where: { id: paymentId } });
+  if (payment.razorpayPaymentId && gatewayPaymentId && payment.razorpayPaymentId !== gatewayPaymentId) {
+    throw new DomainError(409, 'PAYMENT_ID_MISMATCH', 'The payment identifier does not match this order.');
+  }
+  const paidAt = payment.paidAt ?? new Date();
+  const verifiedAt = payment.verifiedAt ?? new Date();
+  const updatedPayment = await tx.payment.update({
+    where: { id: payment.id },
+    data: {
+      status: 'SUCCESS', paidAt, verifiedAt,
+      razorpayPaymentId: gatewayPaymentId ?? payment.razorpayPaymentId,
+      razorpaySignature: signature ?? payment.razorpaySignature,
+      failureCode: null, failureDescription: null,
+    },
+  });
+  const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: payment.invoiceId } });
+  const ledger = await tx.payment.findMany({ where: { invoiceId: invoice.id, status: 'SUCCESS' }, select: { amount: true, reversalOfId: true } });
+  const ledgerPaid = new Prisma.Decimal(paymentLedgerTotal(ledger));
+  const paidAmount = ledgerPaid.greaterThan(invoice.amount) ? invoice.amount : ledgerPaid;
+  const state = paidAmount.greaterThanOrEqualTo(invoice.amount) ? 'PAID' : paidAmount.greaterThan(0) ? 'PARTIAL' : 'UNPAID';
+  const updatedInvoice = await tx.invoice.update({ where: { id: invoice.id }, data: { paidAmount, state } });
+  return { payment: updatedPayment, invoice: updatedInvoice };
+}
+
+function webhookEntity(payload: unknown, key: 'payment' | 'order') {
+  if (!payload || typeof payload !== 'object') return null;
+  const outer = (payload as Record<string, unknown>)[key];
+  if (!outer || typeof outer !== 'object') return null;
+  const entity = (outer as Record<string, unknown>).entity;
+  return entity && typeof entity === 'object' ? entity as Record<string, unknown> : null;
+}
+
+async function handleRazorpayWebhook(req: AuthRequest, res: Response) {
+  const config = razorpayConfiguration();
+  if (!config.enabled) return fail(req, res, 503, 'RAZORPAY_NOT_CONFIGURED', 'Razorpay Test Mode is not configured.');
+  const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+  const signature = String(req.headers['x-razorpay-signature'] ?? '');
+  if (!rawBody.length || !verifyWebhookSignature(rawBody, signature, config.webhookSecret)) {
+    return fail(req, res, 401, 'WEBHOOK_SIGNATURE_INVALID', 'The webhook signature is invalid.');
+  }
+  let body: Record<string, unknown>;
+  try {
+    body = JSON.parse(rawBody.toString('utf8')) as Record<string, unknown>;
+  } catch {
+    return fail(req, res, 400, 'WEBHOOK_PAYLOAD_INVALID', 'The webhook payload is invalid JSON.');
+  }
+  const eventType = String(body.event ?? 'unknown');
+  const eventKey = paymentWebhookKey(rawBody, String(req.headers['x-razorpay-event-id'] ?? ''));
+  const payloadHash = hash(rawBody.toString('base64'));
+  const paymentEntity = webhookEntity(body.payload, 'payment');
+  const orderEntity = webhookEntity(body.payload, 'order');
+  const orderId = String(paymentEntity?.order_id ?? orderEntity?.id ?? '');
+  const gatewayPaymentId = String(paymentEntity?.id ?? '');
+  try {
+    const outcome = await db.$transaction(async (tx) => {
+      const replay = await tx.paymentWebhookEvent.findUnique({ where: { eventKey } });
+      if (replay && replay.payloadHash !== payloadHash) throw new DomainError(409, 'WEBHOOK_EVENT_CONFLICT', 'This webhook event ID was already used with different content.');
+      if (replay) return { duplicate: true, handled: true };
+      const payment = orderId
+        ? await tx.payment.findUnique({ where: { razorpayOrderId: orderId } })
+        : gatewayPaymentId ? await tx.payment.findUnique({ where: { razorpayPaymentId: gatewayPaymentId } }) : null;
+      await tx.paymentWebhookEvent.create({ data: { eventKey, eventType, payloadHash, organizationId: payment?.organizationId } });
+      if (!payment) return { duplicate: false, handled: false };
+      if (eventType === 'payment.captured' || eventType === 'order.paid') {
+        const settled = await settleRazorpayPayment(tx, payment.id, gatewayPaymentId || undefined);
+        await tx.auditEvent.create({ data: { organizationId: payment.organizationId, action: 'RAZORPAY_WEBHOOK_PAYMENT_CONFIRMED', resource: 'Invoice', resourceId: payment.invoiceId, reason: eventType, requestId: req.requestId } });
+        return { duplicate: false, handled: true, invoiceState: settled.invoice.state };
+      }
+      if (eventType === 'payment.failed' && payment.status !== 'SUCCESS') {
+        const error = paymentEntity?.error_reason ?? paymentEntity?.error_code;
+        await tx.payment.update({ where: { id: payment.id }, data: { status: 'FAILED', failureCode: String(paymentEntity?.error_code ?? 'PAYMENT_FAILED').slice(0, 120), failureDescription: String(error ?? 'Razorpay reported a failed payment.').slice(0, 500) } });
+        await tx.auditEvent.create({ data: { organizationId: payment.organizationId, action: 'RAZORPAY_WEBHOOK_PAYMENT_FAILED', resource: 'Invoice', resourceId: payment.invoiceId, reason: eventType, requestId: req.requestId } });
+        return { duplicate: false, handled: true };
+      }
+      return { duplicate: false, handled: true };
+    });
+    return ok(req, res, outcome);
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return ok(req, res, { duplicate: true, handled: true });
+    throw error;
+  }
+}
+
 export const app = express();
 app.use((req: AuthRequest, res, next) => {
   req.requestId = /^[a-zA-Z0-9_-]{8,80}$/.test(String(req.headers['x-request-id'] ?? '')) ? String(req.headers['x-request-id']) : crypto.randomUUID();
@@ -165,6 +284,7 @@ app.use((req: AuthRequest, res, next) => {
 });
 app.use(helmet());
 app.use(cors({ origin: allowedOrigin, credentials: true }));
+app.post('/api/v1/payments/webhook', express.raw({ type: 'application/json', limit: '256kb' }), handleRazorpayWebhook);
 app.use(express.json({ limit: '256kb' }));
 
 app.post('/api/v1/assistant/public', async (req: AuthRequest, res) => {
@@ -286,7 +406,13 @@ function portalInvoiceDto(invoice: any) {
     currency: invoice.currency, lines: invoice.lines,
     quoteId: invoice.quoteId, quote: invoice.quote, orderId: invoice.orderId,
     order: invoice.order ? { id: invoice.order.id, number: invoice.order.number, state: invoice.order.state, currency: invoice.order.currency, fulfillment: invoice.order.fulfillment } : null,
-    payments: invoice.payments.map((payment: any) => ({ id: payment.id, amount: payment.amount, paidAt: payment.paidAt, reversalOfId: payment.reversalOfId })),
+    payments: invoice.payments.map((payment: any) => ({
+      id: payment.id, amount: payment.amount, currency: payment.currency, reference: payment.reference,
+      provider: payment.provider, status: payment.status, razorpayOrderId: payment.razorpayOrderId,
+      razorpayPaymentId: payment.razorpayPaymentId, failureCode: payment.failureCode,
+      failureDescription: payment.failureDescription, verifiedAt: payment.verifiedAt, paidAt: payment.paidAt,
+      reversalOfId: payment.reversalOfId, reason: payment.reason,
+    })),
     notes: (invoice.notes ?? []).map((note: any) => ({ id: note.id, kind: note.kind, message: note.message, requestedDueAt: note.requestedDueAt, createdAt: note.createdAt })),
   };
 }
@@ -353,7 +479,7 @@ app.post('/api/v1/auth/google/signup', async (req: AuthRequest, res) => {
   const parsed = googleSignupSchema.safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'A valid Google credential is required.');
   try {
-    const profile = await verifyGoogleSignupCredential(parsed.data.credential, googleClientId);
+    const profile = await verifyGoogleSignupCredential(parsed.data.credential, googleClientAudiences);
     const organization = await createGoogleOrganizationAdmin(profile, parsed.data.organizationName);
     if (!organization) return fail(req, res, 409, 'ACCOUNT_EXISTS', 'An account already exists for this Google email. Sign in instead.');
     const token = await startSession(organization.users[0]!, res);
@@ -367,7 +493,7 @@ app.post('/api/v1/auth/google/login', async (req: AuthRequest, res) => {
   const parsed = z.object({ credential: z.string().trim().min(1).max(8192) }).strict().safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'A valid Google credential is required.');
   try {
-    const profile = await verifyGoogleSignupCredential(parsed.data.credential, googleClientId);
+    const profile = await verifyGoogleSignupCredential(parsed.data.credential, googleClientAudiences);
     const user = await findOrLinkGoogleLoginUser(profile);
     if (!user) return fail(req, res, 401, 'INVALID_CREDENTIALS', 'No active workspace was found for this Google account. Create an account first or sign in with work email.');
     const token = await startSession(user, res);
@@ -381,7 +507,7 @@ app.post('/api/v1/auth/google/customer', async (req: AuthRequest, res) => {
   const parsed = z.object({ credential: z.string().trim().min(1).max(8192), email: z.string().trim().email().toLowerCase().optional() }).strict().safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'A valid Google credential is required.');
   try {
-    const profile = await verifyGoogleSignupCredential(parsed.data.credential, googleClientId);
+    const profile = await verifyGoogleSignupCredential(parsed.data.credential, googleClientAudiences);
     if (parsed.data.email && profile.email !== parsed.data.email) return fail(req, res, 401, 'EMAIL_MISMATCH', `Google signed in as ${profile.email}. Enter that Email ID above or choose the Google account for ${parsed.data.email}.`);
     const user = await acceptCustomerGoogleInvitation(profile);
     if (!user) return fail(req, res, 401, 'CUSTOMER_ACCESS_NOT_FOUND', 'No shared quotation, invoice, or active customer invitation was found for this Google email.');
@@ -1358,6 +1484,138 @@ app.get('/api/v1/invoices/:id/pdf', authenticate, async (req: AuthRequest, res) 
   res.setHeader('Content-Disposition', `attachment; filename="${invoice.number.replace(/[^a-zA-Z0-9_-]/g, '-')}.pdf"`);
   res.setHeader('Cache-Control', 'private, no-store');
   return res.status(200).send(pdf);
+});
+
+app.get('/api/v1/payments/config', authenticate, requireRole('CUSTOMER'), (req: AuthRequest, res) => {
+  const config = razorpayConfiguration();
+  return ok(req, res, { enabled: config.enabled, testMode: true, provider: 'RAZORPAY' });
+});
+
+app.post('/api/v1/payments/orders', authenticate, requireRole('CUSTOMER'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = z.object({ invoiceId: z.string().uuid() }).strict().safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Select a valid invoice to pay.');
+  const config = razorpayConfiguration();
+  if (!config.enabled) return fail(req, res, 503, 'RAZORPAY_NOT_CONFIGURED', 'Razorpay Test Mode is not configured on the server.');
+  const result = await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Invoice" WHERE "id" = ${parsed.data.invoiceId} FOR UPDATE`;
+    const invoice = await tx.invoice.findFirst({
+      where: { id: parsed.data.invoiceId, organizationId: req.user!.organizationId, customerId: req.user!.customerId ?? '__none__' },
+      include: { customerRecord: { select: { currency: true, email: true, phone: true, countryCode: true, contactPerson: true } } },
+    });
+    if (!invoice) throw new DomainError(404, 'NOT_FOUND', 'Invoice not found.');
+    const outstanding = invoice.amount.minus(invoice.paidAmount);
+    if (invoice.state === 'PAID' || outstanding.lessThanOrEqualTo(0)) throw new DomainError(409, 'INVOICE_ALREADY_PAID', 'This invoice is already paid.');
+    if (invoice.customerRecord.currency.toUpperCase() !== 'INR') throw new DomainError(422, 'UNSUPPORTED_CURRENCY', 'Razorpay checkout currently supports INR invoices only.');
+    const reusable = await tx.payment.findFirst({
+      where: { invoiceId: invoice.id, organizationId: req.user!.organizationId, provider: 'RAZORPAY', status: 'CREATED', amount: outstanding, razorpayOrderId: { not: null } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (reusable) return { payment: reusable, invoice, amountPaise: rupeesToPaise(outstanding.toFixed(2)) };
+    const amountPaise = rupeesToPaise(outstanding.toFixed(2));
+    let order: { id: string };
+    try {
+      order = await createRazorpayClient(config).orders.create({
+        amount: amountPaise,
+        currency: 'INR',
+        receipt: `inv_${invoice.number}_${invoice.id.slice(0, 8)}`.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40),
+        notes: { invoiceId: invoice.id, organizationId: invoice.organizationId, customerId: invoice.customerId },
+      });
+    } catch {
+      throw new DomainError(502, 'RAZORPAY_ORDER_FAILED', 'Razorpay could not create a checkout order. Please try again.');
+    }
+    const payment = await tx.payment.create({
+      data: {
+        organizationId: invoice.organizationId, invoiceId: invoice.id, amount: outstanding, currency: 'INR',
+        reference: `RAZORPAY:${order.id}`, provider: 'RAZORPAY', status: 'CREATED', razorpayOrderId: order.id,
+      },
+    });
+    await audit(tx, req, 'RAZORPAY_ORDER_CREATED', 'Invoice', invoice.id, order.id);
+    return { payment, invoice, amountPaise };
+  });
+  const contact = result.invoice.customerRecord;
+  return ok(req, res, {
+    paymentRecordId: result.payment.id,
+    orderId: result.payment.razorpayOrderId,
+    amount: result.amountPaise,
+    amountRupees: result.payment.amount,
+    currency: 'INR',
+    keyId: config.keyId,
+    testMode: true,
+    invoice: { id: result.invoice.id, number: result.invoice.number, customer: result.invoice.customer },
+    prefill: {
+      name: contact.contactPerson ?? result.invoice.customer,
+      email: contact.email ?? req.user!.email,
+      contact: contact.phone ? `${contact.countryCode}${contact.phone}`.replace(/\s+/g, '') : '',
+    },
+  }, 201);
+});
+
+app.post('/api/v1/payments/verify', authenticate, requireRole('CUSTOMER'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = z.object({
+    paymentRecordId: z.string().uuid(),
+    razorpayOrderId: z.string().trim().min(4).max(100),
+    razorpayPaymentId: z.string().trim().min(4).max(100),
+    razorpaySignature: z.string().regex(/^[a-f0-9]{64}$/i),
+  }).strict().safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Razorpay returned an incomplete payment response.');
+  const config = razorpayConfiguration();
+  if (!config.enabled) return fail(req, res, 503, 'RAZORPAY_NOT_CONFIGURED', 'Razorpay Test Mode is not configured on the server.');
+  const payment = await db.payment.findFirst({
+    where: { id: parsed.data.paymentRecordId, organizationId: req.user!.organizationId, invoice: { customerId: req.user!.customerId ?? '__none__' } },
+  });
+  if (!payment) return fail(req, res, 404, 'PAYMENT_NOT_FOUND', 'Payment attempt not found.');
+  if (payment.razorpayOrderId !== parsed.data.razorpayOrderId) return fail(req, res, 409, 'PAYMENT_ORDER_MISMATCH', 'The Razorpay order does not match this invoice.');
+  if (!verifyCheckoutSignature(payment.razorpayOrderId, parsed.data.razorpayPaymentId, parsed.data.razorpaySignature, config.keySecret)) {
+    await db.$transaction(async (tx) => { await audit(tx, req, 'RAZORPAY_SIGNATURE_REJECTED', 'Invoice', payment.invoiceId, payment.razorpayOrderId ?? undefined); });
+    return fail(req, res, 400, 'PAYMENT_SIGNATURE_INVALID', 'Razorpay could not verify this payment. The invoice was not marked paid.');
+  }
+  const result = await db.$transaction(async (tx) => {
+    const settled = await settleRazorpayPayment(tx, payment.id, parsed.data.razorpayPaymentId, parsed.data.razorpaySignature);
+    await audit(tx, req, 'RAZORPAY_PAYMENT_VERIFIED', 'Invoice', payment.invoiceId, parsed.data.razorpayPaymentId);
+    return settled;
+  });
+  return ok(req, res, { payment: paymentDto(result.payment), invoice: portalInvoiceDto({ ...result.invoice, payments: [result.payment] }) });
+});
+
+app.post('/api/v1/payments/failure', authenticate, requireRole('CUSTOMER'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = z.object({
+    paymentRecordId: z.string().uuid(), razorpayOrderId: z.string().trim().min(4).max(100),
+    code: z.union([z.string(), z.number()]).optional(), message: z.string().trim().max(500).optional(),
+  }).strict().safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'The failed payment response is invalid.');
+  const payment = await db.payment.findFirst({ where: { id: parsed.data.paymentRecordId, organizationId: req.user!.organizationId, invoice: { customerId: req.user!.customerId ?? '__none__' } } });
+  if (!payment) return fail(req, res, 404, 'PAYMENT_NOT_FOUND', 'Payment attempt not found.');
+  if (payment.razorpayOrderId !== parsed.data.razorpayOrderId) return fail(req, res, 409, 'PAYMENT_ORDER_MISMATCH', 'The Razorpay order does not match this invoice.');
+  const updated = payment.status === 'SUCCESS' ? payment : await db.$transaction(async (tx) => {
+    const failed = await tx.payment.update({ where: { id: payment.id }, data: { status: 'FAILED', failureCode: String(parsed.data.code ?? 'CHECKOUT_CANCELLED').slice(0, 120), failureDescription: parsed.data.message ?? 'The customer closed checkout or Razorpay reported a failure.' } });
+    await audit(tx, req, 'RAZORPAY_CHECKOUT_FAILED', 'Invoice', payment.invoiceId, failed.failureCode ?? undefined);
+    return failed;
+  });
+  return ok(req, res, { payment: paymentDto(updated) });
+});
+
+app.get('/api/v1/payments/:id', authenticate, async (req: AuthRequest, res) => {
+  const portal = req.user!.role === 'CUSTOMER';
+  if (!portal && !hasModule(req.user, 'invoices')) return fail(req, res, 403, 'FORBIDDEN', 'The invoices module is not enabled for your account.');
+  const payment = await db.payment.findFirst({
+    where: { id: routeParam(req, 'id'), organizationId: req.user!.organizationId, ...(portal ? { invoice: { customerId: req.user!.customerId ?? '__none__' } } : {}) },
+  });
+  if (!payment) return fail(req, res, 404, 'PAYMENT_NOT_FOUND', 'Payment not found.');
+  return ok(req, res, paymentDto(payment));
+});
+
+app.get('/api/v1/invoices/:id/payments', authenticate, async (req: AuthRequest, res) => {
+  const portal = req.user!.role === 'CUSTOMER';
+  if (!portal && !hasModule(req.user, 'invoices')) return fail(req, res, 403, 'FORBIDDEN', 'The invoices module is not enabled for your account.');
+  const invoice = await db.invoice.findFirst({
+    where: { id: routeParam(req, 'id'), organizationId: req.user!.organizationId, ...(portal ? { customerId: req.user!.customerId ?? '__none__' } : {}) },
+    select: {
+      id: true, number: true, state: true, amount: true, paidAmount: true,
+      payments: { select: { id: true, invoiceId: true, amount: true, currency: true, reference: true, provider: true, status: true, razorpayOrderId: true, razorpayPaymentId: true, failureCode: true, failureDescription: true, verifiedAt: true, paidAt: true, createdAt: true }, orderBy: { createdAt: 'desc' } },
+    },
+  });
+  if (!invoice) return fail(req, res, 404, 'NOT_FOUND', 'Invoice not found.');
+  return ok(req, res, { invoice: { id: invoice.id, number: invoice.number, state: invoice.state, amount: invoice.amount, paidAmount: invoice.paidAmount }, payments: invoice.payments.map(paymentDto) });
 });
 
 app.post('/api/v1/portal/invoices/:id/request-change', authenticate, requireRole('CUSTOMER'), requireCsrf, async (req: AuthRequest, res) => {

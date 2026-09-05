@@ -126,6 +126,9 @@ The backend reads the following values from `backend/.env`:
 | `PLATFORM_OWNER_LOGIN_ID` | Platform Owner login ID | Set explicitly; no secure default |
 | `PLATFORM_OWNER_PASSWORD` | Platform Owner password (minimum 16 characters) | Set explicitly; no secure default |
 | `GOOGLE_CLIENT_ID` | Google OAuth web client ID | Required for Google authentication |
+| `RAZORPAY_KEY_ID` | Razorpay publishable Test Mode key (`rzp_test_…`) | Required for customer payments |
+| `RAZORPAY_KEY_SECRET` | Razorpay Test Mode signing secret | Required for customer payments |
+| `RAZORPAY_WEBHOOK_SECRET` | Secret used to validate raw Razorpay webhooks | Required for payment reconciliation |
 | `NODE_ENV` | Runtime environment | `development` |
 
 Never commit real credentials or production secrets.

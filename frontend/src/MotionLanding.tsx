@@ -16,7 +16,7 @@ const states = [
 
 function DealFrame({ compact = false }: { compact?: boolean }) {
   return <div className={`deal-frame ${compact ? "compact" : ""}`}>
-    <div className="frame-bar"><span className="frame-brand"><i>D</i> DealOS</span><span className="frame-state"><i /> Pending approval</span></div>
+    <div className="frame-bar"><span className="frame-brand"><img src="/images/dealos-logo.png" alt="DealOS" /></span><span className="frame-state"><i /> Pending approval</span></div>
     <div className="frame-head"><div><small>QUOTATION Q-1048</small><strong>Aranya Systems</strong></div><b>₹1,28,64,000</b></div>
     <div className="frame-lines"><div><span>Edge workstation</span><small>24 units</small><b>₹92,16,000</b></div><div><span>Deployment service</span><small>1 project</small><b>₹24,00,000</b></div><div><span>Priority support</span><small>Annual</small><b>₹12,48,000</b></div></div>
     <div className="frame-risk"><span><ShieldCheck /> Policy check</span><p>Service discount is <b>8 points</b> above its category ceiling.</p><strong>Manager → Finance</strong></div>

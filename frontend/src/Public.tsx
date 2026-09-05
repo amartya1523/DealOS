@@ -155,7 +155,7 @@ export function CustomerAuthPage({ onSuccess, signedInRole }: { onSuccess: () =>
         <h1 id="customer-auth-title">Your deal.<br/><em>Without the chase.</em></h1>
         <p>Review every approved quotation, invoice, and conversation from one private workspace.</p>
         <div className="customer-deal-preview" aria-hidden="true">
-          <div className="customer-deal-preview-top"><span><i>D</i> DealOS</span><b><i/> Shared securely</b></div>
+          <div className="customer-deal-preview-top"><span><img src="/images/dealos-logo.png" alt="DealOS" /></span><b><i/> Shared securely</b></div>
           <div className="customer-deal-preview-head"><span><small>QUOTATION Q-1048</small><strong>Your latest proposal</strong></span><b>₹1,28,64,000</b></div>
           <div className="customer-deal-preview-lines"><span>Commercial terms <b>Ready to review</b></span><span>Conversation <b>Attached to the deal</b></span></div>
           <div className="customer-deal-preview-foot"><ShieldCheck/><span><small>VERIFIED ACCESS</small><b>Only documents shared with your email</b></span></div>

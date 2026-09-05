@@ -112,16 +112,16 @@ export async function recordPayment(tx: Prisma.TransactionClient, input: RecordP
   if (replay) return tx.invoice.findUniqueOrThrow({ where: { id: invoice.id }, include: { payments: true } });
   const duplicate = await tx.payment.findUnique({ where: { invoiceId_reference: { invoiceId: invoice.id, reference: input.reference } } });
   if (duplicate) {
-    if (decimal(duplicate.amount).equals(decimal(input.amount)) && duplicate.paidAt.getTime() === input.paidAt.getTime()) return tx.invoice.findUniqueOrThrow({ where: { id: invoice.id }, include: { payments: true } });
+    if (decimal(duplicate.amount).equals(decimal(input.amount)) && duplicate.paidAt?.getTime() === input.paidAt.getTime()) return tx.invoice.findUniqueOrThrow({ where: { id: invoice.id }, include: { payments: true } });
     throw new BillingError(409, 'PAYMENT_REFERENCE_EXISTS', 'This settlement reference is already recorded with different evidence.');
   }
-  const ledger = await tx.payment.findMany({ where: { invoiceId: invoice.id }, select: { amount: true, reversalOfId: true } });
+  const ledger = await tx.payment.findMany({ where: { invoiceId: invoice.id, status: 'SUCCESS' }, select: { amount: true, reversalOfId: true } });
   const paid = paymentTotal(ledger);
   const amount = decimal(input.amount).toDecimalPlaces(2);
   const total = decimal(invoice.amount);
   if (amount.lessThanOrEqualTo(0)) throw new BillingError(422, 'VALIDATION_ERROR', 'Payment amount must be positive.');
   if (paid.add(amount).greaterThan(total)) throw new BillingError(422, 'AMOUNT_EXCEEDS_BALANCE', 'Payment exceeds the outstanding balance.');
-  const payment = await tx.payment.create({ data: { invoiceId: invoice.id, amount, reference: input.reference, paidAt: input.paidAt } });
+  const payment = await tx.payment.create({ data: { organizationId: invoice.organizationId, invoiceId: invoice.id, amount, currency: input.currency, reference: input.reference, provider: 'MANUAL', status: 'SUCCESS', verifiedAt: input.paidAt, paidAt: input.paidAt } });
   const newPaid = paid.add(amount);
   const result = await tx.invoice.update({ where: { id: invoice.id }, data: { paidAmount: newPaid, state: invoiceState(newPaid, total), version: { increment: 1 } }, include: { payments: true } });
   await tx.idempotencyRecord.create({ data: { actorId: input.actorId, operation: 'BILLING_RECORD_PAYMENT', resourceKey: invoice.id, key: input.idempotencyKey, payloadHash: fingerprint, responseStatus: 201, responseBody: asJson({ invoiceId: invoice.id, paymentId: payment.id }) } });
@@ -137,12 +137,14 @@ export async function reversePayment(tx: Prisma.TransactionClient, input: Revers
   if (!invoice) throw new BillingError(404, 'NOT_FOUND', 'Invoice not found.');
   const original = await tx.payment.findFirst({ where: { id: input.paymentId, invoiceId: invoice.id }, include: { reversal: true } });
   if (!original) throw new BillingError(404, 'NOT_FOUND', 'Payment not found.');
+  if (original.status && original.status !== 'SUCCESS') throw new BillingError(409, 'INVALID_STATE', 'Only a successful payment can be reversed.');
   if (original.reversalOfId) throw new BillingError(409, 'INVALID_STATE', 'A compensating entry cannot itself be reversed.');
   if (original.reversal) return tx.invoice.findUniqueOrThrow({ where: { id: invoice.id }, include: { payments: true } });
-  const ledger = await tx.payment.findMany({ where: { invoiceId: invoice.id }, select: { amount: true, reversalOfId: true } });
+  const ledger = await tx.payment.findMany({ where: { invoiceId: invoice.id, status: 'SUCCESS' }, select: { amount: true, reversalOfId: true } });
   const nextPaid = paymentTotal(ledger).sub(decimal(original.amount));
   if (nextPaid.lessThan(0)) throw new BillingError(409, 'LEDGER_MISMATCH', 'This reversal would make the recorded balance negative.');
-  await tx.payment.create({ data: { invoiceId: invoice.id, amount: original.amount, reference: `REV-${original.id}`, paidAt: new Date(), reversalOfId: original.id, reason: input.reason } });
+  const reversedAt = new Date();
+  await tx.payment.create({ data: { organizationId: invoice.organizationId, invoiceId: invoice.id, amount: original.amount, currency: original.currency, reference: `REV-${original.id}`, provider: 'MANUAL', status: 'SUCCESS', verifiedAt: reversedAt, paidAt: reversedAt, reversalOfId: original.id, reason: input.reason } });
   const result = await tx.invoice.update({ where: { id: invoice.id }, data: { paidAmount: nextPaid, state: invoiceState(nextPaid, decimal(invoice.amount)), version: { increment: 1 } }, include: { payments: true } });
   await tx.auditEvent.create({ data: { organizationId: input.organizationId, actorId: input.actorId, action: 'PAYMENT_REVERSED', resource: 'Invoice', resourceId: invoice.id, requestId: input.requestId, reason: input.reason } });
   return result;

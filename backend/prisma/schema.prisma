@@ -119,6 +119,12 @@ enum InvoiceState {
   PAID
 }
 
+enum PaymentStatus {
+  CREATED
+  SUCCESS
+  FAILED
+}
+
 enum AlertKind {
   STALLED
   DISCOUNT_ANOMALY
@@ -224,6 +230,8 @@ model Organization {
   stockMovements   StockMovement[]
   subscriptions    Subscription[]
   invoices         Invoice[]
+  payments         Payment[]
+  paymentWebhooks  PaymentWebhookEvent[]
   alerts           Alert[]
   portalRequests   PortalRequest[]
   leads            Lead[]
@@ -779,19 +787,45 @@ model InvoiceNote {
 }
 
 model Payment {
-  id           String   @id @default(uuid())
-  invoiceId    String
-  invoice      Invoice  @relation(fields: [invoiceId], references: [id])
-  amount       Decimal  @db.Decimal(14, 2)
-  reference    String
-  paidAt       DateTime
-  reversalOfId String?  @unique
-  reversalOf   Payment? @relation("PaymentReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
-  reversal     Payment? @relation("PaymentReversal")
-  reason       String?
-  createdAt    DateTime @default(now())
+  id                 String        @id @default(uuid())
+  organizationId     String
+  organization       Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invoiceId          String
+  invoice            Invoice       @relation(fields: [invoiceId], references: [id])
+  amount             Decimal       @db.Decimal(14, 2)
+  currency           String        @default("INR")
+  reference          String
+  provider           String        @default("MANUAL")
+  status             PaymentStatus @default(SUCCESS)
+  razorpayOrderId    String?       @unique
+  razorpayPaymentId  String?       @unique
+  razorpaySignature  String?
+  failureCode        String?
+  failureDescription String?
+  verifiedAt         DateTime?
+  paidAt             DateTime?
+  reversalOfId       String?       @unique
+  reversal           Payment?      @relation("PaymentReversal")
+  reversalOf         Payment?      @relation("PaymentReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reason             String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
   @@unique([invoiceId, reference])
+  @@index([organizationId, invoiceId, status])
+}
+
+model PaymentWebhookEvent {
+  id             String        @id @default(uuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  eventKey       String        @unique
+  eventType      String
+  payloadHash    String
+  processedAt    DateTime      @default(now())
+  createdAt      DateTime      @default(now())
+
+  @@index([organizationId, createdAt])
 }
 
 model Negotiation {

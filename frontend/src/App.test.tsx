@@ -13,6 +13,7 @@ vi.mock("gsap/ScrollTrigger", () => ({ ScrollTrigger: {} }));
 const fetchMock = vi.fn();
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
+  delete window.Razorpay;
   window.scrollTo = vi.fn();
   window.localStorage.clear();
   fetchMock.mockReset();
@@ -512,14 +513,35 @@ describe("DealOS public routes", () => {
   it("opens customer-scoped invoices in the new deal room", async () => {
     window.history.replaceState({}, "", "/customer");
     const portalWorkspace = { user:{id:'customer',name:'Priya Nair',email:'customer@dealos.demo',role:'CUSTOMER',moduleAccess:[],actorType:'USER',platformSuperAdmin:false,viewContext:null},organization:{id:'org',name:'DealOS Demo'},users:[],customers:[],quotes:[],products:[],policies:[],warehouses:[],subscriptions:[],invoices:[{id:'invoice',number:'INV-1042',customer:'Acme Corp',amount:'2520',paidAmount:'0',state:'UNPAID',dueAt:'2026-09-20T00:00:00.000Z',lines:[],payments:[]}],alerts:[],audits:[] };
-    fetchMock.mockResolvedValue({ok:true,json:async()=>({success:true,data:portalWorkspace})});
+    let paid=false;
+    let checkoutOptions:Record<string,any>|undefined;
+    window.Razorpay=class {
+      constructor(options:Record<string,any>){checkoutOptions=options;}
+      on(){/* The success path is driven by the checkout handler below. */}
+      open(){void checkoutOptions?.handler({razorpay_payment_id:'pay_test_1',razorpay_order_id:'order_test_1',razorpay_signature:'a'.repeat(64)});}
+    } as any;
+    fetchMock.mockImplementation((url:string,options?:RequestInit)=>{
+      if(url.endsWith('/payments/orders')&&options?.method==='POST')return Promise.resolve({ok:true,json:async()=>({success:true,data:{paymentRecordId:'00000000-0000-0000-0000-000000000002',orderId:'order_test_1',amount:252000,amountRupees:'2520.00',currency:'INR',keyId:'rzp_test_public',testMode:true,invoice:{id:'invoice',number:'INV-1042',customer:'Acme Corp'},prefill:{email:'customer@dealos.demo'}}})});
+      if(url.endsWith('/payments/verify')&&options?.method==='POST'){paid=true;return Promise.resolve({ok:true,json:async()=>({success:true,data:{payment:{status:'SUCCESS'}}})});}
+      const current=paid?{...portalWorkspace,invoices:[{...portalWorkspace.invoices[0],paidAmount:'2520',state:'PAID',payments:[{id:'payment',amount:'2520',reference:'PORTAL-DEMO',paidAt:'2026-09-06T00:00:00.000Z'}]}]}:portalWorkspace;
+      return Promise.resolve({ok:true,json:async()=>({success:true,data:current})});
+    });
     render(<App />);
     expect(await screen.findByRole("heading", { name: "Review your quotations" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Invoices/ }));
     expect(screen.getByRole("heading", { name: "INV-1042" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Download PDF" })).toHaveAttribute("href", "/api/v1/invoices/invoice/pdf");
     expect(screen.getByRole("button", { name: "Request due-date change" })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: /Pay now/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Pay now · ₹2,520" }));
+    expect(await screen.findByRole("heading", { name: "Successfully paid" })).toBeInTheDocument();
+    expect(screen.getByText("INV-1042 is now marked Paid in both the customer portal and the invoice workspace.")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/payments/orders',expect.objectContaining({method:'POST',body:JSON.stringify({invoiceId:'invoice'})}));
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/payments/verify',expect.objectContaining({method:'POST',body:JSON.stringify({paymentRecordId:'00000000-0000-0000-0000-000000000002',razorpayOrderId:'order_test_1',razorpayPaymentId:'pay_test_1',razorpaySignature:'a'.repeat(64)})}));
+    expect(checkoutOptions).toMatchObject({key:'rzp_test_public',amount:252000,currency:'INR',order_id:'order_test_1'});
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.getByRole("button", { name: "Paid" })).toBeDisabled();
+    expect(screen.getByText("This invoice is fully paid and synchronized with the business account.")).toBeInTheDocument();
+    expect(window.localStorage.getItem('dealos.invoice.updated')).toBeTruthy();
   });
   it("uses the dedicated Platform Owner login and opens global control", async () => {
     window.history.replaceState({}, "", "/login/super-admin");
