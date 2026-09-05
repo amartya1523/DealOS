@@ -16,6 +16,8 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>DealOS</string>
+	<key>GIDClientID</key>
+	<string>140515033573-bueoan9jpv0qvoaojgilllriab4spcs7.apps.googleusercontent.com</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -24,6 +26,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>dealos</string>
+				<string>com.googleusercontent.apps.140515033573-bueoan9jpv0qvoaojgilllriab4spcs7</string>
 			</array>
 		</dict>
 	</array>

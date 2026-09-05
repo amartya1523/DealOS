@@ -52,14 +52,6 @@ class GoogleCustomerIdentityProvider implements CustomerIdentityProvider {
     final applePlatform =
         defaultTargetPlatform == TargetPlatform.iOS ||
         defaultTargetPlatform == TargetPlatform.macOS;
-    if (applePlatform && _appleClientId.isEmpty) {
-      throw const AppException(
-        code: 'GOOGLE_NOT_CONFIGURED',
-        message:
-            'Customer sign-in needs the DealOS iOS Google OAuth client configuration.',
-      );
-    }
-
     if (_configuredServerClientId != null &&
         _configuredServerClientId != normalizedServerClientId) {
       throw const AppException(
@@ -70,7 +62,11 @@ class GoogleCustomerIdentityProvider implements CustomerIdentityProvider {
 
     _configuredServerClientId = normalizedServerClientId;
     _initialization ??= _googleSignIn.initialize(
-      clientId: applePlatform ? _appleClientId : null,
+      // iOS reads GIDClientID from Info.plist by default. The Dart define is
+      // retained as an override for CI/flavor-specific native clients.
+      clientId: applePlatform && _appleClientId.isNotEmpty
+          ? _appleClientId
+          : null,
       serverClientId: normalizedServerClientId,
     );
 

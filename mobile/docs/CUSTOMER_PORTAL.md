@@ -32,7 +32,7 @@ For Android, register these package names as needed and add the signing certific
 - `com.dealos.mobile.staging`
 - `com.dealos.mobile`
 
-For iOS, create OAuth clients for the corresponding bundle identifiers. Add each client's reversed ID as a URL scheme for its build configuration and provide the iOS client ID at build time:
+For iOS, create OAuth clients for the corresponding bundle identifiers and add each client's reversed ID as a URL scheme. The Development client for `com.dealos.mobile.dev` is configured in `ios/Runner/Info.plist`. A Dart define is only needed to override the client in CI or another flavor:
 
 ```bash
 flutter run --flavor Development \
