@@ -35,6 +35,8 @@ Each endpoint inherits applicable errors above. Endpoint-specific validation bel
 | QuoteCalculation | authoritative lines, taxes and totalsByCadence; each bucket includes revenue/cost/margin; risk components and policy ID; warnings for missing configuration |
 | ApprovalCase | id, version, revisionId, policyId, requiredLevel, riskComponents, state, ordered steps, auditable decisions |
 | PortalQuotation | id/number, customer-facing status, revisionId/version/termsHash, expiry, line descriptions/quantities/prices/discounts/taxes/cadence, commercial totals, customer-visible comments and proposals; **no costs, margins, risk, internal comments or reviewer notes** |
+| PortalRequest | id, requirementsText, preferredDeliveryDate?, safe status `RECEIVED|IN_PROGRESS|DECLINED`, createdAt and safe lines `{id,product?:{id,name,sku},description?,quantity?,catalogMatch}`; **no owner/team/result IDs, prices, internal/degradation/dismiss notes** |
+| Lead | id/status/summary, customer/team/assigned Rep, internal source request with degradation flags, converted quotation summary?, timestamps and internal dismiss reason; internal Rep/Manager projection only |
 | Order | id/number/version, source revision, customer, accepted lines, fulfillment summary, separate billing status |
 | Warehouse / Fulfillment | warehouse costs/priorities, balances, reservations, shipment history, remaining demand, estimate and version; no silent write during GET |
 | Subscription | id/version, order line, plan snapshot, quantity, cadence, timezone, current/next period, state, dated changes/credits |
@@ -537,6 +539,26 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 - **Errors:** common error contract above; validation, permission, lifecycle and concurrency conditions are enforced before commit.
 - **Business rules:** BR-019.
 
+### SET-08 — Read customer RFQ handling mode
+
+- **Method/path:** `GET /api/v1/settings/rfq-handling`
+- **Purpose:** Read the organization's explicit portal-request processing branch.
+- **Actor / authorization:** Organization Admin only.
+- **Authentication:** Active session required.
+- **Response:** 200 `{mode:LEAD_FIRST|DIRECT_DRAFT,defaultClassification:"PROPOSED"}`.
+- **Business rules:** R-047–R-049, BR-026.
+
+### SET-09 — Change customer RFQ handling mode
+
+- **Method/path:** `PUT /api/v1/settings/rfq-handling`
+- **Purpose:** Select Lead-first review or immediate private Draft creation.
+- **Actor / authorization:** Organization Admin only; service repeats the role gate.
+- **Authentication:** Active session and CSRF required.
+- **Request:** `{mode:LEAD_FIRST|DIRECT_DRAFT,reason?:string(5..500)}`; unknown fields rejected.
+- **Response:** 200 `{mode,changed,defaultClassification:"PROPOSED"}`. A real change appends `RFQ_HANDLING_MODE_CHANGED`; a no-op returns `changed:false` without a misleading change audit.
+- **Errors:** 403 `FORBIDDEN`; 404 scoped organization miss; 422 validation.
+- **Business rules:** R-047–R-049, BR-017, BR-021, BR-026.
+
 ### QUO-11 — Adopt or decline customer change request
 
 - **Method/path:** `POST /api/v1/quotations/:id/proposals/:proposalId/respond`
@@ -632,6 +654,77 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 - **Response:** 200 invitation status/timestamps.
 - **Errors:** 404 scoped miss; 409 `INVALID_STATE`.
 - **Business rules:** R-040, BR-017, BR-021, BR-025.
+
+### POR-00E — Read portal request catalog
+
+- **Method/path:** `GET /api/v1/portal/requests/catalog`
+- **Purpose:** Provide an optional customer-safe catalog picker without exposing price, cost, tax, stock or internal configuration.
+- **Actor / authorization:** Linked CUSTOMER portal identity only.
+- **Authentication:** Active session required.
+- **Response:** 200 `{items:[{id,name,sku,category,description,unit}]}` for active, store-visible products in the session organization, max 200.
+- **Errors:** 403 if no linked Customer identity.
+- **Business rules:** BR-008, BR-021, BR-026.
+
+### POR-00F — List own quotation requests
+
+- **Method/path:** `GET /api/v1/portal/requests`
+- **Purpose:** Show only the authenticated portal user's/customer's safe request history.
+- **Actor / authorization:** Linked CUSTOMER portal identity only.
+- **Authentication:** Active session required.
+- **Validation:** query is fixed; organization, customer and submittedBy user are all server scoped.
+- **Response:** 200 `{items:PortalRequestDTO[],rateLimit:{maximum:5,windowMinutes:60}}`. Internal NEW/PROCESSED/DISMISSED projects to Received/In progress/Declined.
+- **Errors:** 403 if no linked Customer identity.
+- **Business rules:** BR-008, BR-021, BR-026.
+
+### POR-00G — Submit quotation request
+
+- **Method/path:** `POST /api/v1/portal/requests`
+- **Purpose:** Persist the customer's original requirements and synchronously create the configured assigned Lead or private Draft.
+- **Actor / authorization:** Linked CUSTOMER portal identity only; current active primary team/Rep is locked and revalidated at submission time.
+- **Authentication:** Active session, CSRF and `Idempotency-Key` required.
+- **Request:** `{requirementsText:string(5..5000),preferredDeliveryDate?:YYYY-MM-DD|null,lines?:[{productId?:string,freeTextDescription?:string(1..1000),quantity?:number>0}]}`; max 50 lines; every line supplies product or text. Owner/team/price/cost/tax/margin/risk fields are rejected.
+- **Processing:** Product IDs resolve only against active products in the session organization. Unknown, malformed, inactive and cross-tenant IDs are removed from structured data; customer text (or a generic unmatched-selection fallback) and an internal degradation flag remain. Only resolved whole-quantity lines can enter a Draft. Raw request, result, recipient Alert, audit and idempotency record commit together. No email is sent.
+- **Response:** 201 `{id,status:RECEIVED|IN_PROGRESS,handlingMode,replayed:false}`; an identical retry returns 200 with `replayed:true`. No Lead/Quote/result ID or price is returned.
+- **Errors:** 422 `CONFIGURATION_REQUIRED` for missing current assignment; 429 `RATE_LIMITED` with `Retry-After` after five customer/user submissions in the rolling hour; 409 `IDEMPOTENCY_CONFLICT`; validation errors.
+- **Business rules:** R-047–R-049, BR-008, BR-015, BR-021, BR-024, BR-026.
+
+### LEA-01 — List scoped portal Leads
+
+- **Method/path:** `GET /api/v1/leads`
+- **Purpose:** List Lead-first portal intake for qualification.
+- **Actor / authorization:** REP sees only `assignedRepId=self`; MANAGER sees only customers whose primary team they manage. Requires quotations module.
+- **Request:** `query: status?:NEW|CONVERTED|DISMISSED`; unknown query fields rejected.
+- **Response:** 200 `{items:LeadDTO[]}` ordered newest first, max 100.
+- **Business rules:** BR-021, BR-024, BR-026.
+
+### LEA-02 — Read scoped portal Lead
+
+- **Method/path:** `GET /api/v1/leads/:id`
+- **Purpose:** Show original requirements, preferred date, catalog context and explicit degradation warnings.
+- **Actor / authorization:** Same REP-own / MANAGER-managed-team scope as LEA-01.
+- **Response:** 200 LeadDTO; cross-tenant/out-of-scope lookup is 404.
+- **Business rules:** BR-021, BR-024, BR-026.
+
+### LEA-03 — Convert Lead to quotation Draft
+
+- **Method/path:** `POST /api/v1/leads/:id/convert`
+- **Purpose:** Use the shared server-authoritative quotation `createDraft` service exactly once.
+- **Actor / authorization:** Assigned REP only; Managers/Admins cannot convert. Requires quotations module, active session and CSRF.
+- **Request:** `{}`; ownership/pricing fields are rejected.
+- **Processing:** Lock Lead; re-resolve active tenant products; price resolved whole-quantity lines only; copy other requirements into the internal revision note; mark Lead CONVERTED and request PROCESSED; resolve the request alert; audit.
+- **Response:** 201 `{lead,quotation:{id,revisionId},replayed:false}`; a repeated conversion returns 200 with the existing quotation and `replayed:true`.
+- **Errors:** 404 scoped miss; 409 `INVALID_STATE`; 422 pricing/customer configuration.
+- **Business rules:** BR-001, BR-015, BR-017, BR-024, BR-026.
+
+### LEA-04 — Dismiss Lead with retained reason
+
+- **Method/path:** `POST /api/v1/leads/:id/dismiss`
+- **Purpose:** Close an unqualified request without deletion.
+- **Actor / authorization:** Assigned REP or Manager of the customer's current primary team. Requires quotations module, active session and CSRF.
+- **Request:** `{reason:string(5..1000)}`; blank/missing/unknown fields rejected.
+- **Response:** 200 `{id,status:"DISMISSED"}`; Lead and internal reason remain for audit, while the customer projection becomes Declined without the reason.
+- **Errors:** 404 scoped miss; 409 `INVALID_STATE`; 422 validation.
+- **Business rules:** BR-008, BR-017, BR-021, BR-026.
 
 ### POR-01 — List customer sent quotations
 
@@ -1183,4 +1276,6 @@ CAT-01, CAT-03A, AUTH-08's implemented team read and QUO-02/03 now enforce the c
 
 ## Customer portal invitation implementation update — 2026-09-05
 
-POR-00A–POR-00D implement the assignment-gated invitation lifecycle on the existing `OrganizationInvitation` model. Customer creation, customer email edits, quotation sending, and invoice creation no longer create invitations implicitly. The customer detail UI shows the complete invitation status history, explains the assignment gate, and surfaces the raw manual-share link only immediately after issuance. `/customer/invitations/:token` provides password setup through the existing identity/session system, and `/customer/sign-in` supports that password plus Google linking for an already-active customer identity. No outbound email or future customer RFQ/intake endpoint exists.
+POR-00A–POR-00D implement the assignment-gated invitation lifecycle on the existing `OrganizationInvitation` model. Customer creation, customer email edits, quotation sending, and invoice creation no longer create invitations implicitly. The customer detail UI shows the complete invitation status history, explains the assignment gate, and surfaces the raw manual-share link only immediately after issuance. `/customer/invitations/:token` provides password setup through the existing identity/session system, and `/customer/sign-in` supports that password plus Google linking for an already-active customer identity. No outbound email exists.
+
+POR-00E–POR-00G, LEA-01–LEA-04 and SET-08/09 now implement the formerly deferred customer RFQ branch. Submission always retains the raw request, revalidates assignment and creates a recipient-scoped in-app Alert. `LEAD_FIRST` creates a qualification record; `DIRECT_DRAFT` and Lead conversion both call the same quotation draft service. Quotation list/detail DTOs identify portal origin for internal users. Customer request DTOs remain separate and never serialize Draft price/link, owner/team, degradation reason, internal note or Lead dismiss reason.

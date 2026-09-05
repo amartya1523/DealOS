@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QuotationsPage } from './QuotationsPage';
 import type { QuotationSummary, QuotationsResponse, Workspace } from '../../api';
 
-const draft:QuotationSummary={id:'quote-1',number:'Q-1001',customer:{id:'customer-1',name:'Acme Corp',tier:'Gold'},owner:{id:'rep-1',name:'Priya Shah'},stage:'DRAFT',total:'12400.00',currency:'INR',riskScore:'0',currentApprovalStep:null,currentRevisionId:'revision-1',version:1,lastActivityAt:'2026-09-05T10:00:00.000Z'};
+const draft:QuotationSummary={id:'quote-1',number:'Q-1001',customer:{id:'customer-1',name:'Acme Corp',tier:'Gold'},owner:{id:'rep-1',name:'Priya Shah'},stage:'DRAFT',total:'12400.00',currency:'INR',riskScore:'0',currentApprovalStep:null,currentRevisionId:'revision-1',version:1,lastActivityAt:'2026-09-05T10:00:00.000Z',origin:{type:'PORTAL_REQUEST',portalRequestId:'request-1'}};
 const rejected:QuotationSummary={...draft,id:'quote-2',number:'Q-1002',stage:'REJECTED',currentRevisionId:'revision-2'};
 const response:QuotationsResponse={items:[draft,rejected],pagination:{total:2,nextCursor:null},stageCounts:{DRAFT:1,PENDING_APPROVAL:0,APPROVED:0,NEGOTIATION:0,CONFIRMED:0,REJECTED:1},owners:[draft.owner],primaryStages:['DRAFT','PENDING_APPROVAL','APPROVED','NEGOTIATION','CONFIRMED']};
 const customerResponse={items:[
@@ -33,7 +33,7 @@ describe('quotation list',()=>{
     render(<QuotationsPage user={user()} openQuote={openQuote} onCreated={vi.fn()}/>);
     expect(await screen.findByRole('heading',{name:'Draft'})).toBeInTheDocument();
     for(const heading of ['Pending Approval','Approved','Negotiation','Confirmed'])expect(screen.getByRole('heading',{name:heading})).toBeInTheDocument();
-    expect(screen.getByText('₹12,400')).toBeInTheDocument(); expect(screen.getAllByText('Priya Shah').length).toBeGreaterThan(0);
+    expect(screen.getByText('₹12,400')).toBeInTheDocument(); expect(screen.getAllByText('Priya Shah').length).toBeGreaterThan(0);expect(screen.getByText('Portal request')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button',{name:'Open Q-1001 for Acme Corp'}));
     expect(openQuote).toHaveBeenCalledWith('quote-1','revision-1');
   });

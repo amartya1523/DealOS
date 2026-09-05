@@ -123,6 +123,24 @@ enum AlertKind {
   STALLED
   DISCOUNT_ANOMALY
   DELIVERY_SLIPPAGE
+  PORTAL_REQUEST
+}
+
+enum RfqHandlingMode {
+  LEAD_FIRST
+  DIRECT_DRAFT
+}
+
+enum PortalRequestStatus {
+  NEW
+  PROCESSED
+  DISMISSED
+}
+
+enum LeadStatus {
+  NEW
+  CONVERTED
+  DISMISSED
 }
 
 enum OrganizationStatus {
@@ -182,6 +200,10 @@ model User {
   subscriptionChanges     SubscriptionChange[]
   invoiceNotes            InvoiceNote[]
   stockMovements          StockMovement[]
+  portalRequestsSubmitted PortalRequest[]          @relation("PortalRequestSubmitter")
+  portalRequestsProcessed PortalRequest[]          @relation("PortalRequestProcessor")
+  assignedLeads           Lead[]                   @relation("LeadAssignedRep")
+  requestAlerts           Alert[]                  @relation("AlertRecipient")
   createdAt               DateTime                 @default(now())
 }
 
@@ -203,8 +225,11 @@ model Organization {
   subscriptions    Subscription[]
   invoices         Invoice[]
   alerts           Alert[]
+  portalRequests   PortalRequest[]
+  leads            Lead[]
   auditEvents      AuditEvent[]
   privilegedAudits PrivilegedAudit[]
+  rfqHandlingMode  RfqHandlingMode          @default(LEAD_FIRST)
   createdAt        DateTime                 @default(now())
   updatedAt        DateTime                 @updatedAt
 }
@@ -238,6 +263,8 @@ model Customer {
   invoices           Invoice[]
   invitations        OrganizationInvitation[]
   invoiceNotes       InvoiceNote[]
+  portalRequests     PortalRequest[]
+  leads              Lead[]
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
 
@@ -332,31 +359,32 @@ model OrganizationInvitation {
 }
 
 model Product {
-  id             String          @id @default(uuid())
-  organizationId String
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  name           String
-  sku            String          @unique
-  category       String
-  description    String
-  unit           String
-  brand          String?
-  price          Decimal         @db.Decimal(12, 2)
-  cost           Decimal         @db.Decimal(12, 2)
-  taxRate        Decimal         @db.Decimal(5, 2)
-  recurring      Boolean         @default(false)
-  cadence        String?
-  active         Boolean         @default(true)
-  storeVisible   Boolean         @default(true)
-  featured       Boolean         @default(false)
-  quoteLines     QuoteLine[]
-  orderLines     OrderLine[]
-  subscriptions  Subscription[]
-  stocks         StockBalance[]
-  backorders     Backorder[]
-  stockMovements StockMovement[]
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  id                 String              @id @default(uuid())
+  organizationId     String
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name               String
+  sku                String              @unique
+  category           String
+  description        String
+  unit               String
+  brand              String?
+  price              Decimal             @db.Decimal(12, 2)
+  cost               Decimal             @db.Decimal(12, 2)
+  taxRate            Decimal             @db.Decimal(5, 2)
+  recurring          Boolean             @default(false)
+  cadence            String?
+  active             Boolean             @default(true)
+  storeVisible       Boolean             @default(true)
+  featured           Boolean             @default(false)
+  quoteLines         QuoteLine[]
+  orderLines         OrderLine[]
+  subscriptions      Subscription[]
+  stocks             StockBalance[]
+  backorders         Backorder[]
+  stockMovements     StockMovement[]
+  portalRequestLines PortalRequestLine[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 }
 
 model DiscountPolicy {
@@ -380,43 +408,45 @@ model DiscountPolicy {
 }
 
 model Quote {
-  id                String              @id @default(uuid())
-  organizationId    String
-  organization      Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  number            String              @unique
-  customer          String
-  customerId        String
-  customerRecord    Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  customerTier      String
-  ownerId           String
-  owner             User                @relation("QuoteOwner", fields: [ownerId], references: [id])
-  createdById       String
-  createdBy         User                @relation("QuoteCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  teamId            String?
-  team              SalesTeam?          @relation(fields: [teamId], references: [id], onDelete: SetNull)
-  stage             QuoteStage          @default(DRAFT)
-  version           Int                 @default(1)
-  orderDiscount     Decimal             @default(0) @db.Decimal(5, 2)
-  total             Decimal             @default(0) @db.Decimal(14, 2)
-  margin            Decimal             @default(0) @db.Decimal(14, 2)
-  riskScore         Decimal             @default(0) @db.Decimal(8, 2)
-  taxTotal          Decimal             @default(0) @db.Decimal(14, 2)
-  totalsByCadence   Json                @default("{}")
-  sentAt            DateTime?
-  currentRevisionId String?             @unique
-  currentRevision   QuoteRevision?      @relation("CurrentQuoteRevision", fields: [currentRevisionId], references: [id], onDelete: Restrict)
-  lastActivity      DateTime            @default(now())
-  lines             QuoteLine[]
-  approvals         Approval[]
-  approvalCases     ApprovalCase[]
-  fulfillment       Fulfillment?
-  invoices          Invoice[]
-  negotiation       Negotiation[]
-  revisions         QuoteRevision[]     @relation("QuoteRevisions")
-  acceptance        CustomerAcceptance?
-  order             Order?
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
+  id                  String              @id @default(uuid())
+  organizationId      String
+  organization        Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  number              String              @unique
+  customer            String
+  customerId          String
+  customerRecord      Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  customerTier        String
+  ownerId             String
+  owner               User                @relation("QuoteOwner", fields: [ownerId], references: [id])
+  createdById         String
+  createdBy           User                @relation("QuoteCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  teamId              String?
+  team                SalesTeam?          @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  stage               QuoteStage          @default(DRAFT)
+  version             Int                 @default(1)
+  orderDiscount       Decimal             @default(0) @db.Decimal(5, 2)
+  total               Decimal             @default(0) @db.Decimal(14, 2)
+  margin              Decimal             @default(0) @db.Decimal(14, 2)
+  riskScore           Decimal             @default(0) @db.Decimal(8, 2)
+  taxTotal            Decimal             @default(0) @db.Decimal(14, 2)
+  totalsByCadence     Json                @default("{}")
+  sentAt              DateTime?
+  currentRevisionId   String?             @unique
+  currentRevision     QuoteRevision?      @relation("CurrentQuoteRevision", fields: [currentRevisionId], references: [id], onDelete: Restrict)
+  lastActivity        DateTime            @default(now())
+  lines               QuoteLine[]
+  approvals           Approval[]
+  approvalCases       ApprovalCase[]
+  fulfillment         Fulfillment?
+  invoices            Invoice[]
+  negotiation         Negotiation[]
+  revisions           QuoteRevision[]     @relation("QuoteRevisions")
+  acceptance          CustomerAcceptance?
+  order               Order?
+  sourcePortalRequest PortalRequest?      @relation("PortalRequestQuotation")
+  convertedLead       Lead?               @relation("LeadQuotation")
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
 
   @@index([organizationId, stage, lastActivity, id])
   @@index([organizationId, ownerId, lastActivity, id])
@@ -464,6 +494,7 @@ model QuoteRevision {
   validUntil         DateTime?
   promisedDeliveryAt DateTime?
   terms              String?
+  internalNote       String?
   orderDiscount      Decimal             @db.Decimal(5, 2)
   subtotal           Decimal             @db.Decimal(14, 2)
   taxTotal           Decimal             @db.Decimal(14, 2)
@@ -863,6 +894,9 @@ model Alert {
   detail           String
   severity         String
   resourceId       String
+  resourceType     String       @default("QUOTE")
+  recipientId      String?
+  recipient        User?        @relation("AlertRecipient", fields: [recipientId], references: [id], onDelete: Restrict)
   evaluationKey    String?      @unique
   resolved         Boolean      @default(false)
   nudged           Boolean      @default(false)
@@ -873,6 +907,71 @@ model Alert {
   createdAt        DateTime     @default(now())
 
   @@index([organizationId, resolved, kind])
+  @@index([recipientId, resolved, createdAt])
+}
+
+model PortalRequest {
+  id                    String              @id @default(uuid())
+  organizationId        String
+  organization          Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customerId            String
+  customer              Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  submittedByUserId     String
+  submittedBy           User                @relation("PortalRequestSubmitter", fields: [submittedByUserId], references: [id], onDelete: Restrict)
+  requirementsText      String
+  preferredDeliveryDate DateTime?
+  status                PortalRequestStatus @default(NEW)
+  resultingLeadId       String?             @unique
+  resultingLead         Lead?               @relation("PortalRequestResultingLead", fields: [resultingLeadId], references: [id], onDelete: SetNull)
+  resultingQuotationId  String?             @unique
+  resultingQuotation    Quote?              @relation("PortalRequestQuotation", fields: [resultingQuotationId], references: [id], onDelete: SetNull)
+  processedAt           DateTime?
+  processedById         String?
+  processedBy           User?               @relation("PortalRequestProcessor", fields: [processedById], references: [id], onDelete: Restrict)
+  lines                 PortalRequestLine[]
+  lead                  Lead?               @relation("LeadSourceRequest")
+  createdAt             DateTime            @default(now())
+
+  @@index([organizationId, customerId, createdAt])
+  @@index([submittedByUserId, createdAt])
+}
+
+model PortalRequestLine {
+  id                  String        @id @default(uuid())
+  portalRequestId     String
+  portalRequest       PortalRequest @relation(fields: [portalRequestId], references: [id], onDelete: Cascade)
+  productId           String?
+  product             Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  freeTextDescription String?
+  quantity            Decimal?      @db.Decimal(14, 3)
+  degraded            Boolean       @default(false)
+  degradedReason      String?
+
+  @@index([portalRequestId])
+  @@index([productId])
+}
+
+model Lead {
+  id                   String         @id @default(uuid())
+  organizationId       String
+  organization         Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customerId           String
+  customer             Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  portalRequestId      String         @unique
+  portalRequest        PortalRequest  @relation("LeadSourceRequest", fields: [portalRequestId], references: [id], onDelete: Cascade)
+  resultForRequest     PortalRequest? @relation("PortalRequestResultingLead")
+  assignedRepId        String
+  assignedRep          User           @relation("LeadAssignedRep", fields: [assignedRepId], references: [id], onDelete: Restrict)
+  status               LeadStatus     @default(NEW)
+  requirementsSummary  String
+  convertedQuotationId String?        @unique
+  convertedQuotation   Quote?         @relation("LeadQuotation", fields: [convertedQuotationId], references: [id], onDelete: SetNull)
+  dismissReason        String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  @@index([organizationId, assignedRepId, status, createdAt])
+  @@index([customerId, status])
 }
 
 model AuditEvent {

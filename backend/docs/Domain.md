@@ -1,6 +1,6 @@
 # DealOS — Domain model and business rules
 
-Status: design baseline. C/I/P classifications refer to [PRD.md](PRD.md). Proposed defaults are decisions for the initial implementation, not facts claimed from the source.
+Status: living domain contract. C/I/P classifications refer to [PRD.md](PRD.md). Proposed defaults are implemented initial decisions, not facts claimed from the source.
 
 ## Glossary
 
@@ -10,6 +10,8 @@ Status: design baseline. C/I/P classifications refer to [PRD.md](PRD.md). Propos
 | Customer tier | Pricing/discount classification, e.g. Bronze/Silver/Gold | Referenced by price lists and policy versions |
 | Product | Sellable hardware, service or subscription offering; this is domain language in the brief | Has category, variants and price rules |
 | Product variant | Purchasable combination of attribute values with SKU and price adjustments | Stock balances and quote lines reference it |
+| Portal request | Immutable raw customer requirements submitted through an accepted portal identity | May produce one Lead or one private Draft while retaining its own customer-safe status |
+| Lead | Deliberately small pre-quotation qualification record in Lead-first mode | Assigned to the customer's current primary Rep; converts once or is dismissed with a reason |
 | Price list | Effective pricing rules scoped to tier and currency | Resolved and snapshotted into quote lines |
 | Quotation | Stable deal identity and owner; current revision can change | Has immutable submitted revisions |
 | Quotation revision | Complete commercial snapshot: lines, terms, currency, prices, discounts and policy | Approval and acceptance bind to this ID |
@@ -36,21 +38,23 @@ Status: design baseline. C/I/P classifications refer to [PRD.md](PRD.md). Propos
 
 | Actor | Goal / decisions | Visible information | Allowed actions | Restrictions / outputs |
 |---|---|---|---|---|
-| Sales Rep | Build viable deals and respond to negotiation | Own/assigned-team quotes and customer context; internal margin | Draft, revise, submit, send, propose, inspect allocation | Cannot approve own deal, change stock or record payments; receives stage/risk explanations |
-| Sales Manager | Protect team pricing and progress | Team quotes, risk, review history, health, team reports | Approve/reject/return eligible step; configure approval policy | Cannot review a case they submitted; cannot skip Finance; receives reasons and audit |
+| Sales Rep | Build viable deals and respond to negotiation | Own/assigned-team quotes, assigned Leads and customer context; internal margin | Qualify/convert/dismiss own Leads; draft, revise, submit, send, propose, inspect allocation | Cannot convert another Rep's Lead, approve own deal, change stock or record payments; receives stage/risk explanations |
+| Sales Manager | Protect team pricing and progress | Team Leads/quotes, risk, review history, health, team reports | Inspect/dismiss managed-team Leads; approve/reject/return eligible step; configure approval policy | Cannot convert Leads or review a case they submitted; cannot skip Finance; receives reasons and audit |
 | Finance/Operations | Control high-risk discounts, stock and receivables | Approved commercial details, stock and invoices | Second review, allocate, ship, receive stock and record payment | No subscription-module access; sequential approval and immutable ledger restrictions apply |
-| Customer | Understand and agree commercial offer | Own business's sent quotes, allowed terms/comments and invoices | Submit proposal/comment, accept current revision | Cannot access draft quotes, other customers, internal notes/cost/risk; receives confirmation/pending-review state |
-| Admin | Maintain correct setup, identities and recurring obligations | Organization configuration, identities, subscriptions and reports | Activate accounts; assign roles/team/customer links; configure catalog, warehouses/plans/policies; preview and commit subscription changes/cancellations | Subscription module is Admin-only; no implicit reviewer bypass; cannot edit issued financial history; receives configuration audit |
+| Customer | Request, understand and agree commercial offers | Own safe request history, sent quotes, allowed terms/comments and invoices | Submit quote request/proposal/comment; accept current revision | Cannot access Drafts, other customers, owner/dismiss/internal notes/cost/risk; receives honest safe progress state |
+| Admin | Maintain correct setup, identities and recurring obligations | Organization configuration, identities, subscriptions and reports | Activate accounts; assign roles/team/customer links; configure catalog, warehouses/plans/policies and RFQ mode; preview and commit subscription changes/cancellations | Subscription/RFQ mode controls are Admin-only; no implicit reviewer bypass; cannot edit issued financial history; receives configuration audit |
 | Platform Super Admin / Platform Owner | Securely oversee the complete installation | Global organization/member and tenant operational summaries | Create/suspend/archive organizations; manage memberships; inspect records; enter read-only View As | Independent environment identity and session, never an organization user or role; privileged mutations are audited |
 | System scheduler | Process due billing and health rules | Only job-required domain data | Claim due jobs, generate recurring invoices, resolve/reopen alerts | No interactive login; transaction/idempotency protections apply; receives durable job status |
 
 ## Entities and relationships
 
-Customer N→1 primary SalesTeam and Customer 1→N historical CustomerRepresentative assignments, with at most one active PRIMARY and optional active COLLABORATOR rows. Customer 1→N Quotation; each quotation snapshots one owner, team and creator independently of later account reassignment. Quotation 1→N Revision; Revision 1→N Line; Revision 1→N ApprovalCase (at most one active); Case 1→N ordered Step. Revision 0→1 Acceptance and 0→1 SalesOrder. CustomerProposal references an exact revision and its lines. Product 1→N Variant; Variant N↔N Warehouse through StockBalance. Order 1→N OrderLine; OrderLine 1→N Reservation/ShipmentLine and 0→1 Subscription for recurring lines. Subscription 1→N BillingPeriod; Invoice 1→N InvoiceLine; Payment N↔N Invoice through allocations. Detailed fields and constraints belong to [Database.md](Database.md).
+Customer N→1 primary SalesTeam and Customer 1→N historical CustomerRepresentative assignments, with at most one active PRIMARY and optional active COLLABORATOR rows. Customer 1→N PortalRequest; PortalRequest 1→N PortalRequestLine and produces at most one Lead or one source-linked Quotation. Lead belongs to one customer/request/assigned Rep and converts to at most one Quotation. Customer 1→N Quotation; each quotation snapshots one owner, team and creator independently of later account reassignment. Quotation 1→N Revision; Revision 1→N Line; Revision 1→N ApprovalCase (at most one active); Case 1→N ordered Step. Revision 0→1 Acceptance and 0→1 SalesOrder. CustomerProposal references an exact revision and its lines. Product 1→N Variant; Variant N↔N Warehouse through StockBalance. Order 1→N OrderLine; OrderLine 1→N Reservation/ShipmentLine and 0→1 Subscription for recurring lines. Subscription 1→N BillingPeriod; Invoice 1→N InvoiceLine; Payment N↔N Invoice through allocations. Detailed fields and constraints belong to [Database.md](Database.md).
 
 ## Lifecycles and invariants
 
 Quotation revision: `DRAFT → SUBMITTED → SENT → SUPERSEDED` describes document publication; rejection/return creates a new editable draft revision. Approval case: `PENDING → APPROVED | REJECTED | RETURNED | SUPERSEDED`; steps execute in sequence. Customer review: `NOT_SENT → SENT → UNDER_NEGOTIATION → ACCEPTED | SUPERSEDED`. A consolidated pipeline stage is derived, not a freely writable authorization field.
+
+Portal request: `NEW → PROCESSED | DISMISSED`. Lead-first keeps the request NEW while its Lead is NEW; conversion marks both Lead CONVERTED and request PROCESSED, while reasoned dismissal marks Lead/request DISMISSED. Direct-draft marks the request PROCESSED in the creation transaction. Customer status is a separate safe projection: NEW=`Received`, PROCESSED=`In progress`, DISMISSED=`Declined`.
 
 Order: `CONFIRMED → PARTIALLY_FULFILLED → FULFILLED`; cancellation of unshipped balance is a distinct audited operation. Billing status runs independently. Subscription: `ACTIVE ↔ PAUSED → CANCELLED`; every amount or lifecycle modification is a dated, reasoned change event with an optimistic version. Amount changes affect future periods only and never rewrite an issued invoice.
 
@@ -84,6 +88,15 @@ Invoice: `DRAFT → ISSUED → PARTIALLY_PAID → PAID`, with credit-adjusted ba
 - Database: quote, draft revision/lines and audited saves; suggestion dismissals scoped to revision/user.
 - Output: calculated lines/totals, risk explanation, suggestions and draft revision token.
 - Failure/recovery: inactive product or missing cost/price rule prevents submit; return field error; stale revision conflict requires refresh and explicit reconciliation.
+
+### W-03A Customer-originated quotation request
+
+- Trigger/actor: a linked active Customer portal identity submits requirements after invitation acceptance; Admin changes the organization handling mode.
+- Input: 5–5000 character requirement, optional delivery date, and up to 50 optional catalog/free-text lines with positive quantity. Owner, team, pricing, cost, tax, margin and risk are never accepted from the customer.
+- Processing/logic: lock the Customer; revalidate exactly one active PRIMARY Rep on its primary team; enforce five requests per customer/user/rolling hour; resolve products only inside the active organization catalog. An unavailable/inactive/cross-tenant product loses its structured reference while retaining customer text and an internal degradation reason. Persist the raw request, then synchronously branch on `RfqHandlingMode`: create an assigned Lead, or use the shared quotation `createDraft` service. Recipient-scoped Alert is the in-app notification; no email side effect exists.
+- Database: PortalRequest/PortalRequestLine plus either Lead or source-linked Quote/Revision, Alert, AuditEvent and IdempotencyRecord in one transaction.
+- Output: Customer receives only request ID and safe status. Rep sees original text/degradation context. A directly created Draft is internal until the normal approved SENT boundary.
+- Failure/recovery: stale/missing assignment returns 422 without an orphan request; rate excess returns 429 plus Retry-After; same submission key replays one result and a payload mismatch returns 409. Lead conversion locks the Lead and returns the existing quotation after a repeated conversion.
 
 ### W-04 Evaluate and approve discounts
 
@@ -230,7 +243,11 @@ Condition: customer assignment, quotation creation or quotation access. Behavior
 
 ### BR-025 — Assignment-gated portal onboarding [C]
 
-Condition: Manager/Admin creates, inspects, accepts, or revokes a customer portal invitation. Behavior: invitation creation requires an active customer email, primary team and exactly one active primary Rep; a Manager must manage that team. A cryptographically random token is returned once in a manual-share link while only its SHA-256 hash is persisted. Tokens expire after seven days, are single-use, and use the same non-leaking unavailable response for unknown, expired, accepted, or revoked values. Acceptance atomically claims the pending invitation, creates or activates one `CUSTOMER` User plus `PORTAL_USER` membership linked only to `customerId`, records acceptance time/audit, and starts the normal database-backed session. Issuing a replacement revokes the prior pending link; creation is limited to five links per customer per hour. Owner: identity/portal; W-01/W-05. Edge cases: cross-organization customer/invitation IDs return scoped misses; an active portal account cannot be reinvited; email delivery and customer-originated RFQ intake remain out of scope.
+Condition: Manager/Admin creates, inspects, accepts, or revokes a customer portal invitation. Behavior: invitation creation requires an active customer email, primary team and exactly one active primary Rep; a Manager must manage that team. A cryptographically random token is returned once in a manual-share link while only its SHA-256 hash is persisted. Tokens expire after seven days, are single-use, and use the same non-leaking unavailable response for unknown, expired, accepted, or revoked values. Acceptance atomically claims the pending invitation, creates or activates one `CUSTOMER` User plus `PORTAL_USER` membership linked only to `customerId`, records acceptance time/audit, and starts the normal database-backed session. Issuing a replacement revokes the prior pending link; creation is limited to five links per customer per hour. Owner: identity/portal; W-01/W-05. Edge cases: cross-organization customer/invitation IDs return scoped misses; an active portal account cannot be reinvited; email delivery remains out of scope. Customer-originated RFQ intake is implemented separately by BR-026 after acceptance.
+
+### BR-026 — Assignment-gated portal RFQ processing [C/I/P]
+
+Condition: portal request submission, Lead conversion/dismissal, or organization RFQ mode change. Behavior: revalidate the current active primary Rep and team at submission; retain the raw request even when product references degrade; synchronously create exactly one assigned Lead or private Draft under the configured mode. `LEAD_FIRST` and five requests per customer/user/hour are Proposed defaults. Only the assigned Rep converts a NEW Lead via the same server-authoritative draft service; Rep or managed-team Manager may reasonedly dismiss it. A customer projection exposes only Received/In progress/Declined and customer-safe line context. Admin alone changes the mode, and a real change is audited. Owner: portal intake/quotations; W-03A. Edge cases: stale assignment rejects before persistence; cross-tenant/inactive/malformed product references become text-only, never catalog data; non-whole structured quantity remains context only; free text never becomes a priced line; repeated submit/convert does not duplicate a commercial document; no Draft identifier, price, owner ID, internal note, degradation reason or dismissal reason crosses the customer boundary.
 
 ## Implemented audit-repair decisions — 2026-09-05
 

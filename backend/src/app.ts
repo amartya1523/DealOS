@@ -8,8 +8,8 @@ import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { db } from './db.js';
 import { acceptCustomerGoogleInvitation, createGoogleOrganizationAdmin, createOrganizationAdmin, findOrLinkGoogleLoginUser, googleSignupSchema, signupSchema, verifyGoogleSignupCredential } from './identity.js';
-import { allocateStock, allocationMetrics, billingSchedule, calculateAddOnContribution, calculateQuote, FulfillmentRuleError, manualAllocation } from './rules.js';
-import { allowedDiscountForCategory, buildQuotationWhere, createQuotationSchema, customerListQuerySchema, primaryQuotationStages, quotationCapabilities, QuotationCreationError, quotationCreationOwnership, quotationListQuerySchema, quotationOrderBy, quotationRecordScope, quotationStages, quotationSummaryDto, quoteDraftSchema, quotePreviewSchema, quoteSubmitSchema, revisionHistory } from './quotations.js';
+import { billingSchedule, calculateAddOnContribution, calculateQuote } from './rules.js';
+import { allowedDiscountForCategory, buildQuotationWhere, createDraft, createQuotationSchema, customerListQuerySchema, primaryQuotationStages, quotationCapabilities, QuotationCreationError, quotationListQuerySchema, quotationOrderBy, quotationRecordScope, quotationStages, quotationSummaryDto, quoteDraftSchema, quotePreviewSchema, quoteSubmitSchema, revisionHistory } from './quotations.js';
 import { renderQuotationPdf, type CustomerQuotationPreview } from './quotation-pdf.js';
 import { authenticate as authenticatePlatform, csrfCookieName, hashToken as hashPlatformToken, identityDto, platformSessionCookieName } from './authorization.js';
 import { platformRouter } from './platform.js';
@@ -25,6 +25,7 @@ import { evaluateAlerts } from './deal-health.js';
 import { aggregateSales, reportAsPdf, reportAsXls } from './reporting.js';
 import { consolidateBackorder, consolidateSchema, FulfillmentError, previewSplit, receiveStock, receiveStockSchema, reserveStock, reserveStockSchema } from './fulfillment.js';
 import { assistantMessagesSchema, runAssistant, type AssistantContext } from './assistant.js';
+import { convertLead, dismissLead, dismissLeadSchema, getLead, leadListSchema, listLeads, listPortalRequests, portalRequestCatalog, PortalRequestError, portalRequestSchema, rfqHandlingSettingSchema, submitPortalRequest, updateRfqHandlingMode } from './portal-requests.js';
 
 type Actor = { id: string; name: string; email: string; loginId: string | null; role: string; customerId: string | null; organizationId: string; moduleAccess: string[]; csrfToken: string; actorType: 'USER' | 'PLATFORM_OWNER'; platformSuperAdmin: boolean; readOnlyView: boolean; organization: { id: string; name: string; status: string } | null; viewContext: { readOnly: true; organizationId: string; organizationName: string; simulatedUserId: string | null; realActor: { id: string; name: string } } | null };
 type AuthRequest = Request & { user?: Actor; requestId?: string };
@@ -147,21 +148,6 @@ const parseFulfillmentSplit = (value: unknown) => {
   const parsed = fulfillmentSplitSchema.safeParse(value);
   return parsed.success ? parsed.data : { split: [], backorders: [] };
 };
-const stockFingerprint = (balances: Array<{ productId: string; warehouseId: string; onHand: number; reserved: number; warehouse?: { priority: number; shippingCost: unknown } }>) => termsHash(balances.map((balance) => ({ productId: balance.productId, warehouseId: balance.warehouseId, onHand: balance.onHand, reserved: balance.reserved, priority: balance.warehouse?.priority, shippingCost: balance.warehouse ? decimal(balance.warehouse.shippingCost) : undefined })).sort((a, b) => `${a.productId}:${a.warehouseId}`.localeCompare(`${b.productId}:${b.warehouseId}`)));
-const fulfillmentView = (quote: any, fulfillment: any, balances: Array<{ productId: string; onHand: number; reserved: number }>) => {
-  const split = parseFulfillmentSplit(fulfillment.split);
-  const allocated = new Map<string, number>();
-  for (const row of split.split) allocated.set(row.productId, (allocated.get(row.productId) ?? 0) + row.quantity);
-  const shortages = new Map(split.backorders.map((row) => [row.productId, row.quantity]));
-  const demand = new Map<string, { productName: string; orderedQuantity: number }>();
-  for (const line of quote.lines.filter((item: any) => !item.product.recurring && item.product.category === 'Hardware')) {
-    const current = demand.get(line.productId);
-    demand.set(line.productId, { productName: line.product.name, orderedQuantity: (current?.orderedQuantity ?? 0) + line.quantity });
-  }
-  const items = [...demand.entries()].map(([productId, item]) => ({ orderLineId: quote.order?.lines?.find((line: any) => line.productId === productId)?.id ?? null, productId, productName: item.productName, orderedQuantity: item.orderedQuantity, fulfilledQuantity: allocated.get(productId) ?? 0, backorderedQuantity: shortages.get(productId) ?? 0 }));
-  const consolidationAvailable = split.backorders.some((shortage) => balances.some((balance) => balance.productId === shortage.productId && balance.onHand - balance.reserved > 0));
-  return { ...fulfillment, split, items, consolidationAvailable };
-};
 
 async function startSession(user: { id: string }, res: Response) {
   const token = crypto.randomBytes(32).toString('hex');
@@ -250,6 +236,7 @@ const quotationListInclude = {
   approvals: { select: { revisionId: true, state: true, step: true, sequence: true, cycle: true }, orderBy: [{ cycle: 'desc' }, { sequence: 'asc' }] },
   negotiation: { select: { revisionId: true, kind: true, state: true } },
   order: { select: { id: true } },
+  sourcePortalRequest: { select: { id: true } },
 } satisfies Prisma.QuoteInclude;
 
 app.post('/api/v1/assistant', authenticate, async (req: AuthRequest, res) => {
@@ -551,7 +538,7 @@ app.get('/api/v1/workspace', authenticate, async (req: AuthRequest, res) => {
   const workspaceCustomerScope = req.user!.role === 'REP' && !repScopingEnabled ? {} : customerRecordScope(req.user!);
   if (!portal && !req.user!.readOnlyView && hasModule(req.user, 'health')) await db.$transaction((tx) => evaluateAlerts(tx, req.user!.organizationId, quotationRecordScope(req.user!)));
   const [organization, users, customers, rawQuotes, products, policies, warehouses, rawSubscriptions, rawInvoices, alerts, audits] = await Promise.all([
-    db.organization.findUnique({ where: { id: req.user!.organizationId }, select: { id: true, name: true } }),
+    db.organization.findUnique({ where: { id: req.user!.organizationId }, select: { id: true, name: true, rfqHandlingMode: true } }),
     req.user!.role === 'ADMIN' ? db.organizationMembership.findMany({ where: { organizationId: req.user!.organizationId }, select: { accessRole: true, businessRole: true, status: true, createdAt: true, user: { select: { id: true, name: true, email: true, loginId: true, status: true, moduleAccess: true, createdAt: true } } }, orderBy: { createdAt: 'desc' } }).then((memberships) => memberships.map(({ user, ...membership }) => ({ ...user, role: membership.businessRole, membershipStatus: membership.status, accessRole: membership.accessRole, joinedAt: membership.createdAt }))) : [],
     !portal && (hasModule(req.user, 'customers') || hasModule(req.user, 'invoices')) ? db.customer.findMany({ where: { organizationId: req.user!.organizationId, AND: [workspaceCustomerScope] }, include: { primarySalesTeam: { select: { id: true, name: true } }, assignments: { where: { active: true }, select: { role: true, assignedAt: true, user: { select: { id: true, name: true } } }, orderBy: { assignedAt: 'asc' } }, quotes: { select: { id: true, number: true, stage: true, total: true, version: true, ownerId: true, updatedAt: true }, orderBy: { updatedAt: 'desc' }, take: 20 }, invoices: { select: { id: true, number: true, state: true, amount: true, paidAmount: true, dueAt: true }, orderBy: { createdAt: 'desc' }, take: 5 }, users: { where: { role: 'CUSTOMER' }, select: { id: true, email: true, status: true, googleSubject: true } }, invitations: { orderBy: { createdAt: 'desc' }, take: 25, select: { id: true, email: true, status: true, expiresAt: true, acceptedAt: true, revokedAt: true, createdAt: true } } }, orderBy: { updatedAt: 'desc' } }) : [],
     db.quote.findMany({ where: quoteWhere, include: { currentRevision: true, owner: { select: { id: true, name: true } }, lines: { include: { product: true } }, approvals: { orderBy: [{ cycle: 'desc' }, { sequence: 'asc' }] }, fulfillment: true, order: true, negotiation: { orderBy: { createdAt: 'desc' } }, invoices: true }, orderBy: { updatedAt: 'desc' } }),
@@ -560,7 +547,7 @@ app.get('/api/v1/workspace', authenticate, async (req: AuthRequest, res) => {
     !portal && hasModule(req.user, 'fulfillment') ? db.warehouse.findMany({ where: { organizationId: req.user!.organizationId }, include: { stocks: { include: { product: true } } }, orderBy: { priority: 'asc' } }) : [],
     !portal && req.user!.role === 'ADMIN' ? db.subscription.findMany({ where: { organizationId: req.user!.organizationId }, include: { changes: { orderBy: { createdAt: 'desc' }, take: 50 } }, orderBy: { nextBillAt: 'asc' } }) : [],
     (portal || hasModule(req.user, 'invoices')) ? db.invoice.findMany({ where: { organizationId: req.user!.organizationId, ...(portal ? { customerId: req.user!.customerId! } : req.user!.role === 'REP' ? { quote: { ownerId: req.user!.id } } : {}) }, include: { payments: true, notes: { orderBy: { createdAt: 'desc' } }, customerRecord: { select: { id: true, email: true, phone: true, countryCode: true, contactPerson: true, currency: true } }, quote: { select: { id: true, number: true, stage: true } }, order: { include: { fulfillment: true } } }, orderBy: { createdAt: 'desc' } }) : [],
-    !portal && hasModule(req.user, 'health') ? db.alert.findMany({ where: { organizationId: req.user!.organizationId }, orderBy: { createdAt: 'desc' } }) : [],
+    !portal && (hasModule(req.user, 'health') || hasModule(req.user, 'quotations')) ? db.alert.findMany({ where: { organizationId: req.user!.organizationId, OR: [{ recipientId: null }, { recipientId: req.user!.id }] }, orderBy: { createdAt: 'desc' } }) : [],
     !portal && (hasModule(req.user, 'reports') || hasModule(req.user, 'health')) ? db.auditEvent.findMany({ where: { organizationId: req.user!.organizationId, ...(req.user!.role === 'REP' ? { actorId: req.user!.id } : {}) }, orderBy: { createdAt: 'desc' }, take: 60 }) : [],
   ]);
   const quotes = portal ? rawQuotes.map(portalQuoteDto) : rawQuotes.map((quote) => ({ ...quote, riskBreakdown: approvalRiskBreakdown(quote) }));
@@ -817,6 +804,7 @@ app.get('/api/v1/quotations/:id', authenticate, requireModule('quotations'), req
       negotiation: { orderBy: { createdAt: 'desc' } },
       order: { select: { id: true, number: true, state: true } },
       invoices: { select: { id: true, number: true, state: true } },
+      sourcePortalRequest: { include: { lines: { include: { product: { select: { id: true, name: true, sku: true } } }, orderBy: { id: 'asc' } } } },
     },
   });
   if (!quote || !(await canAccessInternalQuote(req.user!, quote))) return fail(req, res, 404, 'NOT_FOUND', 'Quotation not found.');
@@ -850,7 +838,7 @@ app.get('/api/v1/quotations/:id', authenticate, requireModule('quotations'), req
     viewerAccess: { accountRole: quote.ownerId === req.user!.id ? 'DEAL_OWNER' : viewerAssignment?.role ?? (req.user!.role === 'REP' ? 'TEAM_MEMBER' : req.user!.role), readOnlyTeamView: req.user!.role === 'REP' && quote.ownerId !== req.user!.id },
     sentAt: quote.sentAt?.toISOString() ?? null, orderDiscount: quote.orderDiscount.toString(), subtotal:String(currentCalculation.subtotal), taxTotal:String(currentCalculation.taxTotal), total:String(currentCalculation.total), totalsByCadence:currentCalculation.totalsByCadence,
     ...(capabilities.viewMargin ? { margin:String(currentCalculation.margin) } : {}), capabilities,
-    currentRevision: quote.currentRevision ? { id: quote.currentRevision.id, revisionNumber: quote.currentRevision.revisionNumber, state: quote.currentRevision.state, currency: quote.currentRevision.currency, validUntil: quote.currentRevision.validUntil?.toISOString()??null, promisedDeliveryAt: quote.currentRevision.promisedDeliveryAt?.toISOString()??null, terms: quote.currentRevision.terms, submittedBy } : null,
+    currentRevision: quote.currentRevision ? { id: quote.currentRevision.id, revisionNumber: quote.currentRevision.revisionNumber, state: quote.currentRevision.state, currency: quote.currentRevision.currency, validUntil: quote.currentRevision.validUntil?.toISOString()??null, promisedDeliveryAt: quote.currentRevision.promisedDeliveryAt?.toISOString()??null, terms: quote.currentRevision.terms, internalNote: quote.currentRevision.internalNote, submittedBy } : null,
     lines,
     approval: { caseId:currentApprovalCase?.id??null, caseVersion:currentApprovalCase?.version??null, route:currentApprovalCase?.route??'NONE', state:currentApprovalCase?.state??null, explanation, riskBreakdown, violations, currentStep: currentApproval?.step??null, timeline: quote.approvals.filter((approval)=>approval.revisionId===quote.currentRevisionId).map((approval)=>({ id:approval.id, step:approval.step, sequence:approval.sequence, cycle:approval.cycle, state:approval.state, reason:approval.reason, reviewer:approval.reviewer, decidedAt:approval.decidedAt?.toISOString()??null, createdAt:approval.createdAt.toISOString() })) },
     revisions: revisionHistory(quote.revisions, capabilities.viewMargin, capabilities.viewCost),
@@ -859,6 +847,7 @@ app.get('/api/v1/quotations/:id', authenticate, requireModule('quotations'), req
     catalog:catalog.map((product)=>({id:product.id,name:product.name,sku:product.sku,category:product.category,description:product.description,unit:product.unit,price:product.price.toString(),...(capabilities.viewCost?{cost:product.cost.toString()}:{}),taxRate:product.taxRate.toString(),recurring:product.recurring,cadence:product.cadence,active:product.active})),
     addOns:activePolicy?catalog.filter((product)=>!quote.lines.some((line)=>line.productId===product.id)).map((product)=>{const contribution=calculateAddOnContribution({productId:product.id,quantity:1,unitPrice:product.price,unitCost:product.cost,discount:0,allowedDiscount:allowedDiscountForCategory(product.category,activePolicy),taxRate:product.taxRate,cadence:product.recurring?product.cadence:'One-time'},quote.orderDiscount,{financeThreshold:activePolicy.financeThreshold,aggregateDiscountLimit:activePolicy.aggregateDiscountLimit,minimumMarginPercent:activePolicy.minimumMarginPercent});return{id:product.id,name:product.name,sku:product.sku,category:product.category,cadence:contribution.cadence,marginContribution:String(contribution.marginContribution),netContribution:String(contribution.netContribution)}}):[],
     negotiation: quote.negotiation, order: quote.order, invoices: quote.invoices,
+    origin: quote.sourcePortalRequest ? { type: 'PORTAL_REQUEST', request: { id: quote.sourcePortalRequest.id, requirementsText: quote.sourcePortalRequest.requirementsText, preferredDeliveryDate: quote.sourcePortalRequest.preferredDeliveryDate?.toISOString()??null, createdAt: quote.sourcePortalRequest.createdAt.toISOString(), lines: quote.sourcePortalRequest.lines.map((line) => ({ id: line.id, product: line.product, freeTextDescription: line.freeTextDescription, quantity: line.quantity?.toString()??null, degraded: line.degraded, degradedReason: line.degradedReason })) } } : { type: 'INTERNAL' },
   });
 });
 
@@ -911,23 +900,24 @@ app.get('/api/v1/quotations/:id/pdf',authenticate,requireModule('quotations'),re
 app.post('/api/v1/quotations', authenticate, requireModule('quotations'), requireRole('REP', 'MANAGER', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
   const parsed = createQuotationSchema.safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Select an active customer and enter valid quotation details.', parsed.error.flatten());
-  const customer = await db.customer.findFirst({
-    where: { id: parsed.data.customerId, organizationId: req.user!.organizationId, active: true },
-    include: { primarySalesTeam: { include: { members: { select: { userId: true } } } }, assignments: { where: { active: true }, include: { user: { select: { id: true, name: true, role: true, status: true } } } } },
-  });
-  if (!customer) return fail(req, res, 422, 'CONFIGURATION_REQUIRED', 'Select an active customer.');
-  let ownership;
-  try { ownership = quotationCreationOwnership(req.user!, customer, parsed.data.ownerId); }
-  catch (error) { if (error instanceof QuotationCreationError) return fail(req, res, error.status, error.code, error.message); throw error; }
-  const { ownerId, teamId } = ownership;
-  const number = `Q-${Date.now().toString().slice(-8)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
-  const quoteId = await db.$transaction(async (tx) => {
-    const created = await tx.quote.create({ data: { organizationId: req.user!.organizationId, number, customer: customer.name, customerId: customer.id, customerTier: customer.tier, ownerId, createdById: req.user!.id, teamId } });
-    const revision = await tx.quoteRevision.create({ data: { quoteId: created.id, revisionNumber: 1, state: 'DRAFT', currency: customer.currency, validUntil: parsed.data.validUntil ? new Date(parsed.data.validUntil) : null, promisedDeliveryAt: parsed.data.promisedDeliveryAt ? new Date(parsed.data.promisedDeliveryAt) : null, terms: parsed.data.terms || null, orderDiscount: 0, subtotal: 0, taxTotal: 0, total: 0, margin: 0, riskScore: 0, totalsByCadence: {}, linesSnapshot: [], policySnapshot: {}, termsHash: termsHash({ quoteId: created.id, revision: 1, nonce: crypto.randomUUID() }) } });
-    const result = await tx.quote.update({ where: { id: created.id }, data: { currentRevisionId: revision.id } });
-    await audit(tx, req, 'QUOTE_CREATED', 'Quote', created.id, undefined, revision.id);
-    return result.id;
-  });
+  let created;
+  try {
+    created = await db.$transaction((tx) => createDraft(tx, {
+      organizationId: req.user!.organizationId,
+      actor: req.user!,
+      customerId: parsed.data.customerId,
+      requestedOwnerId: parsed.data.ownerId,
+      createdById: req.user!.id,
+      validUntil: parsed.data.validUntil ? new Date(parsed.data.validUntil) : null,
+      promisedDeliveryAt: parsed.data.promisedDeliveryAt ? new Date(parsed.data.promisedDeliveryAt) : null,
+      terms: parsed.data.terms || null,
+      requestId: req.requestId,
+    }));
+  } catch (error) {
+    if (error instanceof QuotationCreationError) return fail(req, res, error.status, error.code, error.message);
+    throw error;
+  }
+  const quoteId = created.quoteId;
   const quote = await db.quote.findUniqueOrThrow({ where: { id: quoteId }, include: quotationListInclude });
   return ok(req, res, quotationSummaryDto(quote), 201);
 });
@@ -1159,6 +1149,44 @@ app.post('/api/v1/quotations/:id/send', authenticate, requireModule('quotations'
   return ok(req, res, { quoteId: updated.id, revisionId: parsed.data.revisionId, state: 'SENT', version: updated.version, sentAt });
 });
 
+app.get('/api/v1/leads', authenticate, requireModule('quotations'), requireRole('REP', 'MANAGER'), async (req: AuthRequest, res) => {
+  const parsed = leadListSchema.safeParse(req.query);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Use a valid Lead status filter.', parsed.error.flatten());
+  return ok(req, res, await listLeads(db, req.user!, parsed.data.status));
+});
+
+app.get('/api/v1/leads/:id', authenticate, requireModule('quotations'), requireRole('REP', 'MANAGER'), async (req: AuthRequest, res) => {
+  return ok(req, res, await getLead(db, req.user!, routeParam(req, 'id')));
+});
+
+app.post('/api/v1/leads/:id/convert', authenticate, requireModule('quotations'), requireRole('REP'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = z.object({}).strict().safeParse(req.body ?? {});
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'This action does not accept quotation ownership or pricing fields.', parsed.error.flatten());
+  const result = await db.$transaction((tx) => convertLead(tx, req.user!, routeParam(req, 'id')));
+  return ok(req, res, result, result.replayed ? 200 : 201);
+});
+
+app.post('/api/v1/leads/:id/dismiss', authenticate, requireModule('quotations'), requireRole('REP', 'MANAGER'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = dismissLeadSchema.safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Provide a reason of at least five characters.', parsed.error.flatten());
+  return ok(req, res, await db.$transaction((tx) => dismissLead(tx, req.user!, routeParam(req, 'id'), parsed.data.reason)));
+});
+
+app.get('/api/v1/portal/requests/catalog', authenticate, requireRole('CUSTOMER'), async (req: AuthRequest, res) => {
+  return ok(req, res, await portalRequestCatalog(db, req.user!));
+});
+
+app.get('/api/v1/portal/requests', authenticate, requireRole('CUSTOMER'), async (req: AuthRequest, res) => {
+  return ok(req, res, await listPortalRequests(db, req.user!));
+});
+
+app.post('/api/v1/portal/requests', authenticate, requireRole('CUSTOMER'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = portalRequestSchema.safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Describe what you need and correct any invalid request lines.', parsed.error.flatten());
+  const result = await db.$transaction((tx) => submitPortalRequest(tx, req.user!, { ...parsed.data, idempotencyKey: idempotencyKey(req.headers['idempotency-key']) }));
+  return ok(req, res, result, result.replayed ? 200 : 201);
+});
+
 const portalQuotationInclude = { currentRevision: true, negotiation: { orderBy: { createdAt: 'asc' as const } }, order: { select: { id: true, number: true, state: true, revisionId: true } }, acceptance: true } satisfies Prisma.QuoteInclude;
 
 app.get('/api/v1/portal/quotations', authenticate, requireRole('CUSTOMER'), async (req: AuthRequest, res) => {
@@ -1312,26 +1340,6 @@ app.patch('/api/v1/warehouses/:id', authenticate, requireModule('fulfillment'), 
   return ok(req, res, updated);
 });
 
-app.post('/api/v1/warehouses/:id/restock', authenticate, requireModule('fulfillment'), requireRole('FINANCE', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
-  const parsed = z.object({ productId: z.string().uuid(), quantity: z.number().int().positive().max(1_000_000), reason: z.string().trim().min(5).max(240) }).strict().safeParse(req.body);
-  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Choose a product, enter a positive receipt quantity, and provide a reason.', parsed.error.flatten());
-  const warehouse = await db.warehouse.findFirst({ where: { id: routeParam(req, 'id'), organizationId: req.user!.organizationId, active: true } });
-  const product = await db.product.findFirst({ where: { id: parsed.data.productId, organizationId: req.user!.organizationId, category: 'Hardware', active: true } });
-  if (!warehouse || !product) return fail(req, res, 404, 'NOT_FOUND', 'Active warehouse or hardware product not found.');
-  const result = await db.$transaction(async (tx) => {
-    const current = await tx.stockBalance.findUnique({ where: { warehouseId_productId: { warehouseId: warehouse.id, productId: product.id } } });
-    if (current) await tx.$queryRaw`SELECT "id" FROM "StockBalance" WHERE "id" = ${current.id} FOR UPDATE`;
-    const balance = current
-      ? await tx.stockBalance.update({ where: { id: current.id }, data: { onHand: { increment: parsed.data.quantity } } })
-      : await tx.stockBalance.create({ data: { warehouseId: warehouse.id, productId: product.id, onHand: parsed.data.quantity, reserved: 0 } });
-    await audit(tx, req, 'STOCK_RECEIVED', 'StockBalance', balance.id, `${parsed.data.reason} (+${parsed.data.quantity})`);
-    const possible = await tx.fulfillment.findMany({ where: { state: 'BACKORDER', quote: { organizationId: req.user!.organizationId } }, select: { quoteId: true, split: true } });
-    const consolidationCandidates = possible.filter((item) => parseFulfillmentSplit(item.split).backorders.some((row) => row.productId === product.id)).map((item) => item.quoteId);
-    return { ...balance, available: balance.onHand - balance.reserved, consolidationCandidates };
-  });
-  return ok(req, res, result, 201);
-});
-
 app.get('/api/v1/fulfillment', authenticate, requireModule('fulfillment'), requireRole('REP', 'MANAGER', 'FINANCE', 'ADMIN'), async (req: AuthRequest, res) => {
   const quotes = await db.quote.findMany({ where: { ...internalQuoteWhere(req.user!), stage: 'CONFIRMED', order: { is: { state: { notIn: ['FULFILLED', 'CANCELLED'] } } }, lines: { some: { product: { category: 'Hardware', recurring: false } } } }, include: { order: true, fulfillment: true }, orderBy: { updatedAt: 'desc' } });
   return ok(req, res, quotes.map((quote) => { const split = quote.fulfillment ? parseFulfillmentSplit(quote.fulfillment.split) : { split: [], backorders: [] }; return { quoteId: quote.id, orderId: quote.order?.id, orderNumber: quote.order?.number ?? quote.number, quoteNumber: quote.number, customer: quote.customer, status: quote.fulfillment?.state ?? 'SPLIT_PENDING', warehouses: [...new Set(split.split.map((row) => row.warehouseName))] }; }));
@@ -1362,121 +1370,6 @@ app.post('/api/v1/portal/invoices/:id/request-change', authenticate, requireRole
 app.get('/api/v1/fulfillment/:orderId', authenticate, requireModule('fulfillment'), requireRole('REP', 'MANAGER', 'FINANCE', 'ADMIN'), async (req: AuthRequest, res) => {
   const result = await previewSplit(db, { organizationId: req.user!.organizationId, orderId: routeParam(req, 'orderId'), quoteScope: quotationRecordScope(req.user!) });
   return ok(req, res, result);
-});
-
-app.post('/api/v1/fulfillment/:quoteId/allocate', authenticate, requireModule('fulfillment'), requireRole('FINANCE', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
-  const parsed = z.object({ stockFingerprint: z.string().length(64).optional() }).strict().safeParse(req.body ?? {});
-  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Refresh the allocation preview and try again.');
-  const quoteId = routeParam(req, 'quoteId');
-  const fulfillment = await db.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT "id" FROM "Quote" WHERE "id" = ${quoteId} FOR UPDATE`;
-    const quote = await tx.quote.findUnique({ where: { id: quoteId }, include: { lines: { include: { product: true } }, order: true, fulfillment: true } });
-    if (!quote || quote.organizationId !== req.user!.organizationId || quote.stage !== 'CONFIRMED' || !quote.order) throw new DomainError(409, 'INVALID_STATE', 'Confirm the quotation before reserving stock.');
-    if (quote.fulfillment) return quote.fulfillment;
-    const tracked = quote.lines.filter((line) => !line.product.recurring && line.product.category === 'Hardware');
-    const ids = await tx.stockBalance.findMany({ where: { productId: { in: tracked.map((line) => line.productId) }, warehouse: { organizationId: req.user!.organizationId, active: true } }, select: { id: true }, orderBy: { id: 'asc' } });
-    if (ids.length) await tx.$queryRaw`SELECT "id" FROM "StockBalance" WHERE "id" IN (${Prisma.join(ids.map((item) => item.id))}) ORDER BY "id" FOR UPDATE`;
-    const balances = await tx.stockBalance.findMany({ where: { id: { in: ids.map((item) => item.id) }, warehouse: { active: true } }, include: { warehouse: true } });
-    if (parsed.data.stockFingerprint && parsed.data.stockFingerprint !== stockFingerprint(balances)) throw new DomainError(409, 'STOCK_CHANGED', 'Warehouse stock changed after this recommendation. Refresh before accepting it.');
-    const allocation = allocateStock(tracked.map((line) => ({ productId: line.productId, quantity: line.quantity })), balances.map((balance) => ({ productId: balance.productId, warehouseId: balance.warehouseId, warehouseName: balance.warehouse.name, priority: balance.warehouse.priority, shippingCost: decimal(balance.warehouse.shippingCost), onHand: balance.onHand, reserved: balance.reserved })));
-    for (const row of allocation.split) { const changed = await tx.stockBalance.updateMany({ where: { warehouseId: row.warehouseId, productId: row.productId, reserved: { lte: balances.find((balance) => balance.warehouseId === row.warehouseId && balance.productId === row.productId)!.onHand - row.quantity } }, data: { reserved: { increment: row.quantity } } }); if (changed.count !== 1) throw new DomainError(409, 'STOCK_CHANGED', 'Stock changed. Refresh the allocation.'); }
-    const metrics = allocationMetrics(allocation.split, balances.map((balance) => ({ warehouseId: balance.warehouseId, shippingCost: decimal(balance.warehouse.shippingCost) })));
-    const fulfilled = allocation.backorders.length === 0;
-    const result = await tx.fulfillment.create({ data: { quoteId: quote.id, orderId: quote.order.id, split: asJson(allocation), state: fulfilled ? 'FULFILLED' : 'BACKORDER', estimatedCost: metrics.estimatedCost, shipmentCount: metrics.shipmentCount } });
-    await tx.order.update({ where: { id: quote.order.id }, data: { state: fulfilled ? 'FULFILLED' : 'PARTIALLY_FULFILLED' } });
-    await audit(tx, req, 'STOCK_ALLOCATED', 'Order', quote.order.id, undefined, quote.currentRevisionId ?? undefined);
-    return result;
-  });
-  return ok(req, res, fulfillment);
-});
-
-app.get('/api/v1/fulfillment/:quoteId/preview', authenticate, requireModule('fulfillment'), requireRole('REP', 'MANAGER', 'FINANCE', 'ADMIN'), async (req: AuthRequest, res) => {
-  const quote = await db.quote.findFirst({ where: { id: routeParam(req, 'quoteId'), organizationId: req.user!.organizationId }, include: { lines: { include: { product: true } }, order: { include: { lines: true } }, fulfillment: true } });
-  if (!quote || quote.stage !== 'CONFIRMED' || !quote.order) return fail(req, res, 409, 'INVALID_STATE', 'Confirm the quotation before previewing stock allocation.');
-  if (quote.fulfillment) {
-    const split = parseFulfillmentSplit(quote.fulfillment.split);
-    const balances = await db.stockBalance.findMany({ where: { productId: { in: split.backorders.map((row) => row.productId) }, warehouse: { organizationId: req.user!.organizationId, active: true } } });
-    return ok(req, res, fulfillmentView(quote, quote.fulfillment, balances));
-  }
-  const tracked = quote.lines.filter((line) => !line.product.recurring && line.product.category === 'Hardware');
-  const balances = await db.stockBalance.findMany({ where: { productId: { in: tracked.map((line) => line.productId) }, warehouse: { organizationId: req.user!.organizationId, active: true } }, include: { warehouse: true } });
-  const allocation = allocateStock(tracked.map((line) => ({ productId: line.productId, quantity: line.quantity })), balances.map((balance) => ({ productId: balance.productId, warehouseId: balance.warehouseId, warehouseName: balance.warehouse.name, priority: balance.warehouse.priority, shippingCost: decimal(balance.warehouse.shippingCost), onHand: balance.onHand, reserved: balance.reserved })));
-  const metrics = allocationMetrics(allocation.split, balances.map((balance) => ({ warehouseId: balance.warehouseId, shippingCost: decimal(balance.warehouse.shippingCost) })));
-  return ok(req, res, fulfillmentView(quote, { state: allocation.backorders.length ? 'BACKORDER' : 'SPLIT_PENDING', split: allocation, estimatedCost: metrics.estimatedCost, shipmentCount: metrics.shipmentCount, stockFingerprint: stockFingerprint(balances), preview: true }, balances));
-});
-
-const manualAllocationSchema = z.object({
-  allocations: z.array(z.object({ productId: z.string().uuid(), warehouseId: z.string().uuid(), quantity: z.number().int().positive() }).strict()).min(1).max(200),
-  reason: z.string().trim().min(5).max(240),
-}).strict().superRefine((value, ctx) => {
-  const keys = value.allocations.map((row) => `${row.productId}:${row.warehouseId}`);
-  if (new Set(keys).size !== keys.length) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['allocations'], message: 'Combine duplicate product and warehouse rows.' });
-});
-
-app.post('/api/v1/fulfillment/:quoteId/allocate-manual', authenticate, requireModule('fulfillment'), requireRole('FINANCE', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
-  const parsed = manualAllocationSchema.safeParse(req.body);
-  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter valid warehouse quantities and an override reason.', parsed.error.flatten());
-  const quoteId = routeParam(req, 'quoteId');
-  const fulfillment = await db.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT "id" FROM "Quote" WHERE "id" = ${quoteId} FOR UPDATE`;
-    const quote = await tx.quote.findUnique({ where: { id: quoteId }, include: { lines: { include: { product: true } }, order: true, fulfillment: true } });
-    if (!quote || quote.organizationId !== req.user!.organizationId || quote.stage !== 'CONFIRMED' || !quote.order) throw new DomainError(409, 'INVALID_STATE', 'Confirm the quotation before reserving stock.');
-    if (quote.fulfillment) return quote.fulfillment;
-    const required = quote.lines.filter((item) => !item.product.recurring && item.product.category === 'Hardware').map((line) => ({ productId: line.productId, quantity: line.quantity }));
-    const balanceIds = await tx.stockBalance.findMany({ where: { OR: parsed.data.allocations.map((row) => ({ productId: row.productId, warehouseId: row.warehouseId })), warehouse: { organizationId: req.user!.organizationId } }, select: { id: true }, orderBy: { id: 'asc' } });
-    if (balanceIds.length !== parsed.data.allocations.length) throw new DomainError(422, 'INVALID_ALLOCATION', 'One or more warehouse stock rows do not exist.');
-    await tx.$queryRaw`SELECT "id" FROM "StockBalance" WHERE "id" IN (${Prisma.join(balanceIds.map((item) => item.id))}) ORDER BY "id" FOR UPDATE`;
-    const balances = await tx.stockBalance.findMany({ where: { id: { in: balanceIds.map((item) => item.id) }, warehouse: { active: true } }, include: { warehouse: true } });
-    let allocation;
-    try { allocation = manualAllocation(required, parsed.data.allocations, balances.map((balance) => ({ productId: balance.productId, warehouseId: balance.warehouseId, warehouseName: balance.warehouse.name, priority: balance.warehouse.priority, shippingCost: decimal(balance.warehouse.shippingCost), onHand: balance.onHand, reserved: balance.reserved }))); }
-    catch (error) { if (error instanceof FulfillmentRuleError) throw new DomainError(error.code === 'INSUFFICIENT_STOCK' ? 409 : 422, error.code === 'INSUFFICIENT_STOCK' ? 'STOCK_CHANGED' : error.code, error.message); throw error; }
-    for (const row of allocation.split) await tx.stockBalance.update({ where: { warehouseId_productId: { warehouseId: row.warehouseId, productId: row.productId } }, data: { reserved: { increment: row.quantity } } });
-    const metrics = allocationMetrics(allocation.split, balances.map((balance) => ({ warehouseId: balance.warehouseId, shippingCost: decimal(balance.warehouse.shippingCost) })));
-    const fulfilled = allocation.backorders.length === 0;
-    const result = await tx.fulfillment.create({ data: { quoteId: quote.id, orderId: quote.order.id, split: asJson(allocation), state: fulfilled ? 'FULFILLED' : 'BACKORDER', estimatedCost: metrics.estimatedCost, shipmentCount: metrics.shipmentCount } });
-    await tx.order.update({ where: { id: quote.order.id }, data: { state: fulfilled ? 'FULFILLED' : 'PARTIALLY_FULFILLED' } });
-    await audit(tx, req, 'STOCK_ALLOCATION_OVERRIDDEN', 'Order', quote.order.id, parsed.data.reason, quote.currentRevisionId ?? undefined);
-    return result;
-  });
-  return ok(req, res, fulfillment);
-});
-
-app.get('/api/v1/fulfillment/:quoteId', authenticate, requireModule('fulfillment'), requireRole('REP', 'MANAGER', 'FINANCE', 'ADMIN'), async (req: AuthRequest, res) => {
-  const quote = await db.quote.findUnique({ where: { id: routeParam(req, 'quoteId') }, include: { lines: { include: { product: true } }, order: { include: { lines: true } }, fulfillment: true } });
-  if (!quote || !(await canAccessInternalQuote(req.user!, quote)) || !quote.order) return fail(req, res, 404, 'NOT_FOUND', 'Fulfillment order not found.');
-  if (!quote.fulfillment) return fail(req, res, 409, 'SPLIT_PENDING', 'Generate and accept a warehouse split first.');
-  const split = parseFulfillmentSplit(quote.fulfillment.split);
-  const balances = await db.stockBalance.findMany({ where: { productId: { in: split.backorders.map((row) => row.productId) }, warehouse: { organizationId: req.user!.organizationId, active: true } } });
-  return ok(req, res, fulfillmentView(quote, quote.fulfillment, balances));
-});
-
-app.post('/api/v1/fulfillment/:quoteId/consolidate-backorder', authenticate, requireModule('fulfillment'), requireRole('FINANCE', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
-  const parsed = z.object({ reason: z.string().trim().min(5).max(240) }).strict().safeParse(req.body);
-  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Provide a reason for consolidating the backorder.', parsed.error.flatten());
-  const quoteId = routeParam(req, 'quoteId');
-  const updated = await db.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT "id" FROM "Quote" WHERE "id" = ${quoteId} FOR UPDATE`;
-    const quote = await tx.quote.findUnique({ where: { id: quoteId }, include: { order: true, fulfillment: true } });
-    if (!quote || quote.organizationId !== req.user!.organizationId || !quote.order || !quote.fulfillment) throw new DomainError(404, 'NOT_FOUND', 'Fulfillment order not found.');
-    const current = parseFulfillmentSplit(quote.fulfillment.split);
-    if (!current.backorders.length) throw new DomainError(409, 'ALREADY_FULFILLED', 'This order has no remaining backorder.');
-    const ids = await tx.stockBalance.findMany({ where: { productId: { in: current.backorders.map((row) => row.productId) }, warehouse: { organizationId: req.user!.organizationId, active: true } }, select: { id: true }, orderBy: { id: 'asc' } });
-    if (ids.length) await tx.$queryRaw`SELECT "id" FROM "StockBalance" WHERE "id" IN (${Prisma.join(ids.map((item) => item.id))}) ORDER BY "id" FOR UPDATE`;
-    const balances = await tx.stockBalance.findMany({ where: { id: { in: ids.map((item) => item.id) } }, include: { warehouse: true } });
-    const addition = allocateStock(current.backorders, balances.map((balance) => ({ productId: balance.productId, warehouseId: balance.warehouseId, warehouseName: balance.warehouse.name, priority: balance.warehouse.priority, shippingCost: decimal(balance.warehouse.shippingCost), onHand: balance.onHand, reserved: balance.reserved })));
-    if (!addition.split.length) throw new DomainError(409, 'INSUFFICIENT_STOCK', 'No new stock is available for this backorder.');
-    for (const row of addition.split) { const balance = balances.find((item) => item.warehouseId === row.warehouseId && item.productId === row.productId)!; const changed = await tx.stockBalance.updateMany({ where: { id: balance.id, reserved: { lte: balance.onHand - row.quantity } }, data: { reserved: { increment: row.quantity } } }); if (changed.count !== 1) throw new DomainError(409, 'STOCK_CHANGED', 'Stock changed. Refresh the fulfillment detail.'); }
-    const combined = { split: [...current.split, ...addition.split], backorders: addition.backorders };
-    const warehouseIds = [...new Set(combined.split.map((row) => row.warehouseId))];
-    const warehouses = await tx.warehouse.findMany({ where: { id: { in: warehouseIds }, organizationId: req.user!.organizationId } });
-    const metrics = allocationMetrics(combined.split, warehouses.map((warehouse) => ({ warehouseId: warehouse.id, shippingCost: decimal(warehouse.shippingCost) })));
-    const fulfilled = combined.backorders.length === 0;
-    const fulfillment = await tx.fulfillment.update({ where: { id: quote.fulfillment.id }, data: { split: asJson(combined), state: fulfilled ? 'FULFILLED' : 'BACKORDER', estimatedCost: metrics.estimatedCost, shipmentCount: metrics.shipmentCount } });
-    await tx.order.update({ where: { id: quote.order.id }, data: { state: fulfilled ? 'FULFILLED' : 'PARTIALLY_FULFILLED' } });
-    await audit(tx, req, 'BACKORDER_CONSOLIDATED', 'Order', quote.order.id, parsed.data.reason, quote.currentRevisionId ?? undefined);
-    return fulfillment;
-  });
-  return ok(req, res, updated);
 });
 
 app.post('/api/v1/subscriptions/:id/change', authenticate, requireModule('subscriptions'), requireRole('ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
@@ -1747,6 +1640,19 @@ app.patch('/api/v1/policies/:id', authenticate, requireModule('policies'), requi
   return ok(req, res, policy);
 });
 
+app.get('/api/v1/settings/rfq-handling', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res) => {
+  const organization = await db.organization.findUnique({ where: { id: req.user!.organizationId }, select: { rfqHandlingMode: true } });
+  if (!organization) return fail(req, res, 404, 'NOT_FOUND', 'Organization not found.');
+  return ok(req, res, { mode: organization.rfqHandlingMode, defaultClassification: 'PROPOSED' });
+});
+
+app.put('/api/v1/settings/rfq-handling', authenticate, requireRole('ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = rfqHandlingSettingSchema.safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Choose Lead first or Direct draft.', parsed.error.flatten());
+  const updated = await db.$transaction((tx) => updateRfqHandlingMode(tx, req.user!, parsed.data.mode, parsed.data.reason));
+  return ok(req, res, { mode: updated.mode, changed: updated.changed, defaultClassification: 'PROPOSED' });
+});
+
 app.use((error: unknown, req: AuthRequest, res: Response, _next: NextFunction) => {
   if (error instanceof PortalInvitationError) {
     if (error.retryAfter) res.setHeader('Retry-After', error.retryAfter);
@@ -1758,6 +1664,10 @@ app.use((error: unknown, req: AuthRequest, res: Response, _next: NextFunction) =
   if (error instanceof BillingError) return fail(req, res, error.status, error.code, error.message);
   if (error instanceof FulfillmentError) return fail(req, res, error.status, error.code, error.message, error.details);
   if (error instanceof CustomerRelationshipError) return fail(req, res, error.status, error.code, error.message);
+  if (error instanceof PortalRequestError) {
+    if (error.retryAfter) res.setHeader('Retry-After', error.retryAfter);
+    return fail(req, res, error.status, error.code, error.message);
+  }
   if (error instanceof DomainError) return fail(req, res, error.status, error.code, error.message);
   console.error(JSON.stringify({ level: 'error', requestId: req.requestId, route: req.path, error: error instanceof Error ? error.name : 'UnknownError' }));
   return fail(req, res, 500, 'INTERNAL_ERROR', 'The request could not be completed.');

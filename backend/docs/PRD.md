@@ -1,6 +1,6 @@
 # DealOS — Product requirements
 
-Status: architecture baseline, 2026-09-05. Application implementation is not yet claimed.
+Status: living product contract. Implemented behavior is called out explicitly; proposed defaults still require business confirmation.
 
 ## Source precedence and evidence
 
@@ -84,21 +84,24 @@ Confidence means confidence in the interpretation, not implementation status. C 
 | R-044 | Separate one-time/recurring invoices, due-period scheduler, automated proration/cancellation credits and customer self-payment remain explicit GAP/TARGET/future capabilities | C | Supplied diagram labels and Architecture no-payment-provider boundary | High |
 | R-045 | Confirmed Order hardware lines drive live on-hand-minus-reserved previews, deterministic suggested or reasoned manual splits, atomic row-locked idempotent reservations, persisted backorders, stock receipts and consolidation | C | Supplied section 6A implementation prompt, 2026-09-06 | High |
 | R-046 | `FULFILLED` currently means every hardware quantity is reserved; it does not prove pick, dispatch, tracking, delivery, or physical on-hand consumption | I | Explicitly identified semantic limitation in the supplied section 6A diagram; dispatch remains a later phase | High |
+| R-047 | An accepted portal customer with a current active primary Rep may submit a raw quotation request; every submission is retained and becomes either a Lead or a private Draft according to an Admin-configured organization mode | C | User-directed portal RFQ implementation prompt, 2026-09-06 | High |
+| R-048 | `LEAD_FIRST` is the initial `RfqHandlingMode` default and five requests per customer/user/hour is the initial limit | P | Safer human-review default and bounded anti-automation control; both require explicit business confirmation | Medium |
+| R-049 | Portal request processing is synchronous in the submission transaction; valid catalog lines alone may become priced lines, unmatched input remains internal context, and the assigned Rep receives a recipient-scoped in-app alert | I | Preserves one-draft/one-lead atomicity without an unrequired queue or email provider | High |
 
 ## Actors, outcomes and access
 
-- Sales Rep: see customers with an active account assignment, create quotations only for those customers, own and mutate their own quotations, and inspect teammates' quotations read-only. Cannot approve own exceptions or manage stock/payments.
-- Sales Manager: reassign customers and eligible open quotations for teams they manage, review team quotes, manage discount chains, and see team deal health/reports. Account reassignment never silently rewrites deal history.
+- Sales Rep: see customers with an active account assignment, create quotations only for those customers, own and mutate their own quotations, inspect teammates' quotations read-only, and qualify/convert/dismiss only Leads assigned to them. Cannot approve own exceptions or manage stock/payments.
+- Sales Manager: reassign customers and eligible open quotations for teams they manage, inspect/dismiss their teams' Leads, review team quotes, manage discount chains, and see team deal health/reports. Account reassignment never silently rewrites deal history.
 - Finance/Operations: second-level discount approval, stock allocation, invoice reconciliation and payment recording. The subscription module is not visible or callable.
-- Customer: only quotations/orders/invoices associated with their linked customer account; see commercial prices but not internal costs, margins, risk or reviewer notes.
-- Admin: activate identities, manage configuration and organization reporting, and exclusively manage subscription plans, proration previews, lifecycle changes, cancellations and related credits. Admin status alone does not bypass approval segregation; a separately assigned reviewer role is required.
+- Customer: only quotations/orders/invoices and raw request-status projections associated with their linked customer account; may submit requirements after assignment revalidation, but cannot see private Drafts, internal costs, margins, risk, owner IDs, degradation reasons or dismissal notes.
+- Admin: activate identities, manage configuration and organization reporting, choose the audited organization RFQ handling mode, and exclusively manage subscription plans, proration previews, lifecycle changes, cancellations and related credits. Admin status alone does not bypass approval segregation; a separately assigned reviewer role is required.
 - Platform Super Admin / Platform Owner: authenticate only at `/login/super-admin` with server environment credentials, administer all organizations from a separate global control plane, and enter explicitly read-only tenant/user contexts. This identity is never an organization user or role.
 
 Multi-role internal users are supported; permissions compose, but self-approval restrictions still apply.
 
 ## Principal workflows
 
-W-01 Identity and role activation → W-02 commercial/inventory setup → W-03 quote preparation → W-04 approval → W-05 customer negotiation and acceptance → W-06 order/allocation → W-07 subscription billing → W-08 invoice/payment. W-09 deal health and W-10 reporting operate across those workflows. Full triggers, transactions and recovery appear in [Domain.md](Domain.md).
+W-01 Identity and role activation → W-02 commercial/inventory setup → W-03 quote preparation or W-03A portal request intake → W-04 approval → W-05 customer negotiation and acceptance → W-06 order/allocation → W-07 subscription billing → W-08 invoice/payment. W-09 deal health and W-10 reporting operate across those workflows. Full triggers, transactions and recovery appear in [Domain.md](Domain.md).
 
 ## Workflow interpretation decisions
 
@@ -110,11 +113,19 @@ The PDF describes aggregate margin erosion even when individual limits appear ac
 
 MVP demo: authenticated configuration, saved quotations, discounts and sequential approval, real recommendations, restricted negotiation, version-safe acceptance, stock splitting/backorder, hybrid invoice/schedule and recorded payments. Deal-health rules and reporting complete the specified release. Optional pairing-rule UI and multi-currency conversion/multi-company are not MVP gates.
 
-Future scope: customer-originated RFQ/requirements intake and automatic lead/draft creation, email delivery integration, real payment gateway, recurring-period scheduler, hybrid one-time/recurring invoice separation, proration/credit automation, multi-company, exchange-rate conversion, sophisticated warehouse optimization and statistical recommendation training. These are not secretly included as dependencies. The RFQ path was explicitly dotted/future in the supplied intake diagram and has no route, placeholder, or disabled UI in this release. The customer portal likewise exposes no payment-processing route or Pay button until a real compliant provider is selected.
+Future scope: email delivery integration, real payment gateway, recurring-period scheduler, hybrid one-time/recurring invoice separation, proration/credit automation, multi-company, exchange-rate conversion, sophisticated warehouse optimization and statistical recommendation training. These are not secretly included as dependencies. The former dotted “Future portal intake” RFQ branch is no longer a gap: it is implemented as described below. The customer portal still exposes no payment-processing route or Pay button until a real compliant provider is selected.
 
 ## Confirmed customer intake and portal onboarding — 2026-09-05
 
 The solid-line flow is organization setup → Manager/Admin customer profile → primary team/Rep assignment → manual-share portal invitation → assigned Rep quotation draft for that configured customer. Customer profiles already include billing/shipping addresses and payment terms, so no duplicate address model or optional origination note was added. Invitation issuance is blocked until the current primary assignment exists. Portal users link to `customerId` only, never a sales representative. The invitation token is single-use, hashed at rest, expires after seven days, can be revoked, and is returned only in the creation response as a copyable frontend link. No email service or delivery success is claimed.
+
+## Implemented customer-originated RFQ intake — 2026-09-06
+
+The formerly dotted optional branch is now an implemented extension of the accepted portal identity and customer-assignment boundary. A portal customer submits requirements, optional delivery date and up to 50 catalog/free-text lines. The server locks and revalidates the active primary team/Rep, removes unresolved, inactive or cross-organization product references while retaining the customer's wording with a visible internal degradation marker, and limits each customer/user to five submissions per rolling hour. The raw `PortalRequest` is always retained.
+
+`Organization.rfqHandlingMode` explicitly chooses the processing branch. `LEAD_FIRST` creates a deliberately simple assigned Lead (`NEW → CONVERTED | DISMISSED`); only the assigned Rep converts it through the shared `quotations.createDraft` service, and retries return the same quotation. The managed-team Manager can inspect/dismiss but cannot convert. `DIRECT_DRAFT` invokes that same service synchronously and server-derives customer, team, owner, catalog prices, costs, taxes, policy and risk. Only resolved positive whole-quantity catalog lines are priced; all other text remains an internal revision note. Both paths create a recipient-scoped in-app alert and no email.
+
+Customer history projects only `Received`, `In progress` or `Declined`, the original customer text and safe catalog labels. It never includes owner IDs, Lead dismissal reason, draft links/pricing, internal notes or degradation reasons. The setting change is Admin-only and audited. **Proposed pending explicit confirmation:** `LEAD_FIRST` remains the default and the rolling limit remains five requests per customer/user/hour.
 
 ## Acceptance scenarios
 

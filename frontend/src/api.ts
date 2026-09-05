@@ -1,6 +1,6 @@
 export type Workspace = {
   user: { id: string; name: string; email: string; loginId?: string; role: string; customerId?:string|null; moduleAccess: string[]; actorType:'USER'|'PLATFORM_OWNER'; platformSuperAdmin:boolean; viewContext:{readOnly:true;organizationId:string;organizationName:string;simulatedUserId:string|null;realActor:{id:string;name:string}}|null };
-  organization: { id: string; name: string };
+  organization: { id: string; name: string; rfqHandlingMode?:'LEAD_FIRST'|'DIRECT_DRAFT' };
   users: Array<{ id:string; name:string; email:string; loginId?:string; role:string; status:string; membershipStatus?:string; accessRole?:string; moduleAccess:string[]; createdAt:string; joinedAt?:string }>;
   customers: Customer[];
   quotes: Quote[];
@@ -88,7 +88,7 @@ export type Invoice = {
   notes?:Array<{id:string;kind:string;message:string;requestedDueAt?:string|null;createdAt:string}>;
   credits?:Array<{id:string;number:string;amount:number|string;reason:string;createdAt:string}>;
 };
-export type Alert = {id:string;kind:string;title:string;detail:string;severity:string;resourceId:string;resolved:boolean;nudged:boolean;acknowledgedAt?:string|null;acknowledgedById?:string|null;resolvedAt?:string|null;lastEvaluatedAt?:string|null;createdAt:string};
+export type Alert = {id:string;kind:string;title:string;detail:string;severity:string;resourceType?:'QUOTE'|'LEAD'|string;resourceId:string;recipientId?:string|null;resolved:boolean;nudged:boolean;acknowledgedAt?:string|null;acknowledgedById?:string|null;resolvedAt?:string|null;lastEvaluatedAt?:string|null;createdAt:string};
 export type Audit = {id:string;action:string;resource:string;resourceId:string;reason?:string;createdAt:string};
 
 export type QuotationStage = 'DRAFT'|'PENDING_APPROVAL'|'APPROVED'|'NEGOTIATION'|'CONFIRMED'|'REJECTED';
@@ -105,6 +105,7 @@ export type QuotationSummary = {
   currentRevisionId:string|null;
   version:number;
   lastActivityAt:string;
+  origin?:{type:'INTERNAL'|'PORTAL_REQUEST';portalRequestId?:string};
 };
 export type CustomerOption = {id:string;name:string;tier:string;currency:string;primaryTeam?:{id:string;name:string}|null;primaryRepresentative?:{id:string;name:string;assignedAt:string}|null;collaborators?:Array<{id:string;name:string;assignedAt:string}>;assignmentVersion?:number;openQuotationCount?:number;lastActivity?:string;openQuotations?:Array<{id:string;number:string;stage:string;version:number;ownerId:string;canReassign:boolean}>};
 export type QuotationsResponse = {
@@ -130,7 +131,7 @@ export type QuotationDetail = QuotationSummary & {
   totalsByCadence:Record<string,{subtotal:number;tax:number;total:number;margin:number}>;
   margin?:string;
   capabilities:QuotationCapabilities;
-  currentRevision:{id:string;revisionNumber:number;state:string;currency:string;validUntil:string|null;promisedDeliveryAt:string|null;terms:string|null;submittedBy:{id:string;name:string}|null}|null;
+  currentRevision:{id:string;revisionNumber:number;state:string;currency:string;validUntil:string|null;promisedDeliveryAt:string|null;terms:string|null;internalNote?:string|null;submittedBy:{id:string;name:string}|null}|null;
   lines:Array<{id:string;productId:string;quantity:number;unitPrice:string;unitCost?:string;discount:string;allowedDiscount:string;product:{id:string;name:string;sku:string;category:string;description:string;unit:string;price:string;cost?:string;taxRate:string;recurring:boolean;cadence:string|null;active:boolean}}>;
   approval:{caseId:string|null;caseVersion:number|null;route:'NONE'|'MANAGER'|'MANAGER_FINANCE';state:string|null;explanation:string;riskBreakdown:RiskBreakdown;violations:Array<{productId:string;product:string;discount:string;limit:string;excess:number}>;currentStep:string|null;timeline:Array<{id:string;step:string;sequence:number;cycle:number;state:string;reason:string|null;reviewer:{id:string;name:string}|null;decidedAt:string|null;createdAt:string}>};
   revisions:Array<{id:string;revisionNumber:number;state:string;total:string;margin?:string;riskScore:string;createdAt:string;lines:Array<Record<string,unknown>>;comparedWithRevision:number|null;changes:Array<{kind:string;productId?:string;name:string;fields?:string[]}>}>;
@@ -141,7 +142,13 @@ export type QuotationDetail = QuotationSummary & {
   negotiation:Array<{id:string;revisionId:string;author:string;message:string;messageType?:string;counterDiscount?:string|null;requestedDeliveryAt?:string|null;kind:'COMMENT'|'PROPOSAL';state:'OPEN'|'ADOPTED'|'DECLINED';responseReason?:string|null;respondedAt?:string|null;adoptedRevisionId?:string|null;createdAt:string}>;
   order:{id:string;number:string;state:string}|null;
   invoices:Array<{id:string;number:string;state:string}>;
+  origin?:{type:'INTERNAL'|'PORTAL_REQUEST';request?:PortalRequestInternal};
 };
+
+export type PortalRequestLine = {id:string;product:{id:string;name:string;sku:string}|null;description:string|null;quantity:string|null;catalogMatch:boolean};
+export type PortalRequest = {id:string;requirementsText:string;preferredDeliveryDate:string|null;status:'RECEIVED'|'IN_PROGRESS'|'DECLINED';createdAt:string;lines:PortalRequestLine[]};
+export type PortalRequestInternal = {id:string;requirementsText:string;preferredDeliveryDate:string|null;status:string;createdAt:string;lines:Array<{id:string;product:{id:string;name:string;sku:string;active?:boolean}|null;freeTextDescription:string|null;quantity:string|null;degraded:boolean;degradedReason:string|null}>};
+export type Lead = {id:string;status:'NEW'|'CONVERTED'|'DISMISSED';requirementsSummary:string;dismissReason:string|null;customer:{id:string;name:string};team:{id:string;name:string}|null;assignedRep:{id:string;name:string};request:PortalRequestInternal;convertedQuotation:{id:string;number:string}|null;createdAt:string;updatedAt:string};
 
 export type ApprovalStepDto={id:string;name:string;sequence:number;state:string;reviewer:{id:string;name:string}|null;reason:string|null;decidedAt:string|null;createdAt:string};
 export type ApprovalCaseSummary={id:string;version:number;state:'PENDING'|'RETURNED'|'APPROVED'|'REJECTED'|'SUPERSEDED';route:'NONE'|'MANAGER'|'MANAGER_FINANCE';revisionId:string;createdAt:string;completedAt:string|null;quotation:{id:string;number:string;customer:string;customerTier:string;total:string;currency:string;owner:{id:string;name:string};team:{id:string;name:string}|null};submittedBy:{id:string;name:string};currentStep:ApprovalStepDto|null;managerStep:ApprovalStepDto|null;financeStep?:ApprovalStepDto|null;risk:{components:Record<string,unknown>;flags:Array<{scope:string;code:string;message:string;productId?:string;cadence?:string;actual:number;threshold:number}>;reasons:string[];policy:Record<string,unknown>}};
