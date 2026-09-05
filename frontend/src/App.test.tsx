@@ -14,6 +14,7 @@ const fetchMock = vi.fn();
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   window.scrollTo = vi.fn();
+  window.localStorage.clear();
   fetchMock.mockReset();
   fetchMock.mockResolvedValue({
     ok: false,
@@ -99,6 +100,18 @@ describe("DealOS public routes", () => {
     fireEvent.click(screen.getByRole("button", { name: "View reports" }));
     expect(screen.getByRole("heading", { name: "Sales reporting" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Overview" }));
+    expect(screen.queryByText(/^Live$/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(document.querySelector(".app-shell")).toHaveClass("sidebar-collapsed");
+    expect(screen.getByRole("button", { name: "Expand sidebar" })).toHaveAttribute("aria-expanded", "false");
+    expect(window.localStorage.getItem("dealos.sidebar.collapsed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Quotations" }));
+    expect(screen.getByRole("heading", { name: "Quotation pipeline" })).toBeInTheDocument();
+    const requestsBeforeBrandClick = fetchMock.mock.calls.length;
+    fireEvent.click(screen.getByRole("link", { name: "DealOS home" }));
+    expect(screen.getByRole("heading", { name: "Sales dashboard" })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/app");
+    expect(fetchMock).toHaveBeenCalledTimes(requestsBeforeBrandClick);
     fireEvent.click(screen.getByRole("button", { name: "New quotation" }));
     expect(screen.getByRole("heading", { name: "New quotation" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
@@ -121,7 +134,7 @@ describe("DealOS public routes", () => {
       await screen.findByRole("heading", { name: "Welcome back." }),
     ).toBeInTheDocument();
   });
-it("filters the approval queue by pending, returned, and approved state", async () => {
+  it("filters the approval queue by pending, returned, and approved state", async () => {
     window.history.replaceState({}, "", "/app");
     const quote = (id:string, stage:string, state:string) => ({ id, number:`Q-${id}`, customer:`${id} Customer`, customerTier:'Gold', stage, version:1, orderDiscount:0, total:100, margin:20, riskScore:1, updatedAt:'2026-09-05T00:00:00.000Z', lines:[], approvals:[{id:`approval-${id}`,step:'Sales Manager',sequence:1,state}], negotiation:[], invoices:[] });
     const workspace = { user:{id:'admin',name:'Admin User',email:'admin@example.com',role:'ADMIN',moduleAccess:[],actorType:'USER',platformSuperAdmin:false,viewContext:null}, organization:{id:'org',name:'Acme'}, users:[], quotes:[quote('PENDING','PENDING_APPROVAL','PENDING'),quote('RETURNED','DRAFT','RETURNED'),quote('APPROVED','APPROVED','APPROVED'),quote('REJECTED','REJECTED','REJECTED')], products:[], policies:[], warehouses:[], subscriptions:[], invoices:[], alerts:[], audits:[] };
@@ -142,7 +155,7 @@ it("filters the approval queue by pending, returned, and approved state", async 
     expect(screen.getByRole("button", {name:"Approved"})).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByText("Q-REJECTED")).not.toBeInTheDocument();
   });
-it("edits and publishes every discount ceiling with an audit reason", async () => {
+  it("edits and publishes every discount ceiling with an audit reason", async () => {
     window.history.replaceState({}, "", "/app");
     const policy = { id: "p1", tier: "Gold", maxDiscount: 15, hardwareLimit: 15, servicesLimit: 10, subscriptionLimit: 10, financeThreshold: 5, version: 2, publishedAt: "2026-09-05T08:00:00.000Z" };
     const workspace = { user: { id: "a", name: "Admin", email: "admin@acme.test", role: "ADMIN", moduleAccess: [], actorType: "USER", platformSuperAdmin: false, viewContext: null }, organization: { id: "o", name: "Acme" }, users: [], quotes: [], products: [], policies: [policy], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] };

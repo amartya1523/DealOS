@@ -1,13 +1,12 @@
 import { Layers } from "lucide-react";
 
-export function Brand() {
+export function Brand({ href = "/", onActivate }: { href?: string; onActivate?: () => void }) {
   return (
-    <a className="wordmark" href="/" aria-label="DealOS home">
+    <a className="wordmark" href={href} aria-label="DealOS home" onClick={onActivate ? (event) => { event.preventDefault(); onActivate(); } : undefined}>
       <span className="brand-symbol">
         <Layers />
       </span>
-      deal<span>os</span>
-      <sup>®</sup>
+      <span className="brand-name">deal<span>os</span><sup>®</sup></span>
     </a>
   );
 }
