@@ -16,14 +16,21 @@ export type Quote = { id:string; number:string; customer:string; customerTier:st
 export type Product = { id:string;name:string;sku:string;category:string;description:string;unit:string;price:number|string;cost:number|string;taxRate:number|string;recurring:boolean;cadence?:string;active:boolean;stocks:Array<{onHand:number;reserved:number;warehouse:{name:string}}> };
 export type Policy = {id:string;tier:string;maxDiscount:number|string;hardwareLimit:number|string;servicesLimit:number|string;subscriptionLimit:number|string;financeThreshold:number|string};
 export type Warehouse = {id:string;name:string;priority:number;shippingCost:number|string;stocks:Array<{onHand:number;reserved:number;product:Product}>};
-export type Subscription = {id:string;customer:string;productName:string;cadence:string;amount:number|string;nextBillAt:string;state:string};
+export type Subscription = {id:string;customer:string;productName:string;cadence:string;amount:number|string;nextBillAt:string;state:string;schedule?:string[]};
 export type Invoice = {id:string;number:string;customer:string;amount:number|string;paidAmount:number|string;state:string;dueAt:string;lines:Array<{description:string;amount:number}>;payments:Array<{id:string;amount:number|string;reference:string;paidAt:string}>};
 export type Alert = {id:string;kind:string;title:string;detail:string;severity:string;resourceId:string;resolved:boolean;nudged:boolean};
 export type Audit = {id:string;action:string;resource:string;resourceId:string;reason?:string;createdAt:string};
 
+let csrfToken = '';
+
 export async function request<T>(path:string, options:RequestInit = {}):Promise<T> {
-  const response = await fetch(`/api/v1${path}`, { ...options, credentials:'include', headers:{'Content-Type':'application/json', ...(options.headers ?? {})} });
+  const method = (options.method ?? 'GET').toUpperCase();
+  const mutating = !['GET','HEAD','OPTIONS'].includes(method);
+  const response = await fetch(`/api/v1${path}`, { ...options, credentials:'include', headers:{'Content-Type':'application/json', ...(mutating && csrfToken ? {'X-CSRF-Token':csrfToken} : {}), ...(mutating && !options.headers ? {'Idempotency-Key':crypto.randomUUID()} : {}), ...(options.headers ?? {})} });
   const body = await response.json();
   if (!response.ok || !body.success) throw new Error(body.error?.message ?? 'Request failed');
+  if (body.data?.csrfToken) csrfToken = body.data.csrfToken;
+  if (body.data?.user?.csrfToken) csrfToken = body.data.user.csrfToken;
+  if (path==='/auth/logout') csrfToken = '';
   return body.data as T;
 }

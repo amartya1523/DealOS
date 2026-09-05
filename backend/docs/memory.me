@@ -7,14 +7,14 @@ Repository documentation is the source of truth. Do not depend on previous chat 
 ## Current State
 
 - **Product name:** DealOS.
-- **Current objective:** Completed the user-requested repository organization on 2026-09-05. Continue application work from the existing implementation, not the historical P0 scaffold plan below.
+- **Current objective:** Completed the reproducible backend audit repair and preserved-case QA gate on 2026-09-05. Continue from the revision/order/concurrency-safe implementation.
 - **Repository:** Independent `frontend/` and `backend/` npm projects; only `README.md`, `compose.yaml`, and `.gitignore` are root files. Shared documentation and original references live in `backend/docs/`.
-- **Existing implementation:** React UI, Express API, Prisma schema, initial migration, seed, backend rules tests, and frontend component test were already present when this restructuring began. Existing uncommitted work was preserved.
-- **Database/API changes this session:** None. No migration, seed, or business-data writes were performed.
-- **Validation:** Clean `npm ci` in both applications; backend Prisma generation and build; frontend build; 3 backend tests and 1 frontend test; Docker Compose configuration; compiled backend liveness HTTP 200; root layout and diff whitespace checks passed.
+- **Existing implementation:** React UI, Express API, Prisma/PostgreSQL with Customer/Revision/Acceptance/Order provenance, decimal cadence/tax calculation, revision-bound approvals, restricted portal DTOs, retry-safe stock/payment posting, generated billing, and hardened session mutations.
+- **Database/API changes this session:** Added migration `20260905190000_audit_backend_hardening` and hardened compatibility endpoints. After disposable validation, the migration was deployed to the local development schema without reseeding; five demo users and three demo quotes were preserved.
+- **Validation:** 44/44 isolated PostgreSQL workflow checks; preserved QA cases 24/24; backend tests 9/9 and build; frontend tests 5/5 and production build; Prisma client generation; three-migration deploy on a disposable schema.
 - **Local configuration:** Existing backend `.env` preserved. Former root `.env` preserved as ignored `backend/.env.root-backup`; missing backend keys were copied from it. No environment values were printed.
-- **Limits:** No full end-to-end or database integration suite was run. Historical design sections below describe intended domain guarantees, not verified completion.
-- **Next safe task:** Continue application hardening against the documented contracts, inspecting current code and existing changes first.
+- **Limits:** Manual browser journeys were not rerun. Team configuration, operational shipment/receipt flows, billing proration/credits, alert tasks, and report exports remain product-expansion work requiring the documented open decisions.
+- **Next safe task:** Decide the open team-scope, proration/cancellation, and XLS format policies, then implement the remaining vertical expansion listed in `docs/audit/REPAIR-REPORT.md`.
 
 ## Authoritative Inputs
 
@@ -190,6 +190,19 @@ Harden the current vertical flow without replacing it:
 - **Validation:** Frontend tests 5/5; backend tests 5/5; frontend TypeScript/Vite and backend TypeScript builds passed after final changes. Prisma generate and migrate deploy passed. Live HTTP verification passed pending signup, duplicate signup, pending-login refusal without cookie, role injection rejection, invalid login, active demo login, persisted workspace read and logout. Browser checked 1280px desktop landing, product parallax, 390px mobile landing/menu/auth, and successful demo sign-in to `/app` with real data.
 - **Limitations:** Administrator activation UI/endpoints still unimplemented; requesters must be activated by administrator-controlled provisioning. Existing rate limiting/CSRF/revision/concurrency/export debt remains. No production deployment requested or performed.
 - **Next safe task:** Add audited administrator identity activation and production auth hardening, then continue revision/idempotency/concurrency work.
+
+### SESSION: Backend audit repair and preserved-case QA — 2026-09-05
+
+- **Objective:** Repair the reproducible backend findings in `docs/audit/REPORT.md` while preserving the 24 previously passing QA cases supplied by the user.
+- **Completed:** Real Customer ownership and safe portal DTOs; sent-revision boundary; Decimal tax/cadence calculation; policy-driven review plan; immutable revision/approval cycles; comment/proposal separation and adoption recalculation; return/reject pending-step closure; Rep owner scope; acceptance/order/order-line provenance; generated invoice/subscriptions; locked retry-safe allocation; locked ledger-derived idempotent payments; Admin activation; CSRF/Origin/request-ID/login-rate hardening; server quarterly schedules; reconciled calculator-driven seeds; product creation/update API.
+- **Files added:** hardening migration, `docs/audit/REPAIR-REPORT.md`, and `docs/audit/QA-REGRESSION-RESULTS.md`.
+- **Files modified:** Prisma schema/seed; backend app/rules/tests/audit harness; API/Database/Domain/PRD/audit/memory docs; frontend API/App/MotionLanding/test integration.
+- **Database:** Migration successfully deployed from baseline in a disposable schema and that schema was dropped. API harness also created/dropped its own disposable schema. The reviewed migration was then applied to local `public` without reseeding; post-migration counts remained five users and three quotes, with three customers and three backfilled revisions.
+- **API evidence:** `node --import tsx docs/audit/workflow-audit.mjs` passed 44/44, with `docs/audit/api-results.json` containing named actual results. The user-supplied 24-case table is in `QA-REGRESSION-RESULTS.md`.
+- **Tests/builds:** Prisma generate passed; backend Vitest 9/9 and TypeScript build passed; frontend Vitest 5/5 and Vite production build passed after removing an unhandled jsdom scroll exception. Final rerun still required after documentation-only edits.
+- **Decisions:** Inferred foreign-key customer isolation, proposal adoption boundary, revision-bound authorization, idempotent order/billing creation, and payment reference semantics. Existing proposed 12% margin floor and UTC cadence anchor retained. Initial generated invoice due date is proposed at acceptance +14 days.
+- **Remaining work:** Team membership/scope, full product/variant/price-list lifecycle, allocation preview/manual override/receipt/dispatch/consolidation, proration/credit notes, alert task/escalation, and scoped PDF/XLS exports remain unimplemented vertical features; business decisions are still open.
+- **Next safe task:** Obtain/record those open policy decisions, then implement remaining verticals in dependency order with new isolated integration tests.
 
 ### SESSION: Cinematic landing revision and stronger parallax
 

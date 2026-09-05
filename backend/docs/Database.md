@@ -404,3 +404,7 @@ No server started, database created, extension enabled, schema migrated, fixture
 ## Implemented identity delta — 2026-09-05
 
 Migration `20260905120000_pending_accounts` adds PostgreSQL `AccountStatus` (PENDING, ACTIVE, DISABLED) and `User.status`. Existing identities are backfilled ACTIVE; future inserts default PENDING. Seed users explicitly set ACTIVE. Public signup stores a bcrypt hash and nonprivileged REP role with PENDING status; both login and session middleware require ACTIVE. No other schema or records are reset.
+
+## Implemented audit-hardening delta — 2026-09-05
+
+Migration `20260905190000_audit_backend_hardening` adds Customer foreign keys, QuoteRevision snapshots, revision/cycle-bound approvals, proposal classification, CustomerAcceptance, Order/OrderLine, downstream order/customer/product provenance, IdempotencyRecord, request/revision audit context, and stock/invoice/payment CHECK constraints. Existing quote/customer text is backfilled without deleting business history. Payment references are unique per invoice. Quote current-revision circular integrity is established after revision backfill. The migration was validated from the initial migrations in a disposable PostgreSQL schema.

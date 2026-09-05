@@ -1,5 +1,5 @@
 {
-  "date": "2026-09-05T05:34:43.651Z",
+  "date": "2026-09-05T08:20:09.452Z",
   "environment": "isolated PostgreSQL schema; synthetic fixtures",
   "results": [
     {
@@ -77,83 +77,77 @@
     },
     {
       "name": "Customer DTO excludes internal data",
-      "status": "FAIL",
+      "status": "PASS",
       "actual": {
-        "margin": true,
-        "riskScore": true,
-        "lineCost": true,
-        "productCost": true,
-        "approvalReasons": [
-          "Audit manager approved",
-          "Audit finance approved"
-        ]
+        "margin": false,
+        "riskScore": false,
+        "lineCost": false,
+        "productCost": false,
+        "approvalReasons": []
       }
     },
     {
       "name": "Customer cannot confirm another customer quote",
-      "status": "FAIL",
-      "actual": 200
+      "status": "PASS",
+      "actual": 404
     },
     {
       "name": "Customer cannot modify another customer quote",
-      "status": "FAIL",
-      "actual": 201
+      "status": "PASS",
+      "actual": 404
     },
     {
       "name": "Unsent draft hidden from customer",
-      "status": "FAIL",
-      "actual": true
+      "status": "PASS",
+      "actual": false
     },
     {
       "name": "Counteroffer recalculates totals and risk",
-      "status": "FAIL",
+      "status": "PASS",
       "actual": {
-        "storedTotal": 164,
-        "expectedTotal": 82,
-        "storedRisk": 8,
+        "storedTotal": 96.76,
+        "expectedTotal": 96.76,
+        "storedRisk": 49,
         "expectedRisk": 49
       }
     },
     {
       "name": "Prior approval decisions remain immutable",
-      "status": "FAIL",
+      "status": "PASS",
       "actual": [
         {
-          "state": "PENDING",
-          "reason": null
+          "state": "APPROVED",
+          "reason": "Audit manager approved"
         },
         {
-          "state": "PENDING",
-          "reason": null
+          "state": "APPROVED",
+          "reason": "Audit finance approved"
         }
       ]
     },
     {
       "name": "Within-policy quote avoids unnecessary approval",
-      "status": "FAIL",
-      "actual": [
-        "Sales Manager"
-      ]
+      "status": "PASS",
+      "actual": []
     },
     {
       "name": "Low margin routes Finance",
-      "status": "FAIL",
+      "status": "PASS",
       "actual": {
         "marginPercent": 5,
         "steps": [
-          "Sales Manager"
+          "Finance"
         ]
       }
     },
     {
       "name": "Published Finance threshold affects routing",
-      "status": "FAIL",
+      "status": "PASS",
       "actual": {
         "configuredThreshold": 99,
         "excess": 8,
         "steps": [
-          "Sales Manager",
-          "Finance"
+          "Sales Manager"
         ]
       }
     },
@@ -169,13 +163,13 @@
     },
     {
       "name": "Resubmit preserves prior approval cycle",
-      "status": "FAIL",
-      "actual": 2
+      "status": "PASS",
+      "actual": 4
     },
     {
       "name": "Rep cannot edit another owner quote",
-      "status": "FAIL",
-      "actual": 200
+      "status": "PASS",
+      "actual": 404
     },
     {
       "name": "Approved customer quote can confirm",
@@ -184,10 +178,10 @@
     },
     {
       "name": "Allocation retry does not double reserve",
-      "status": "FAIL",
+      "status": "PASS",
       "actual": {
         "first": 2,
-        "retry": 4
+        "retry": 2
       }
     },
     {
@@ -205,25 +199,43 @@
     },
     {
       "name": "Payment retry does not duplicate ledger",
-      "status": "FAIL",
+      "status": "PASS",
       "actual": {
-        "payments": 2,
-        "paid": 200
+        "payments": 1,
+        "paid": 100
       }
     },
     {
       "name": "One-time and recurring totals stay separate",
-      "status": "FAIL",
+      "status": "PASS",
       "actual": {
-        "total": 140,
-        "cadenceTotals": null
+        "total": 165.2,
+        "cadenceTotals": {
+          "One-time": {
+            "subtotal": 100,
+            "tax": 18,
+            "total": 118,
+            "cost": 50,
+            "margin": 50
+          },
+          "Monthly": {
+            "subtotal": 40,
+            "tax": 7.2,
+            "total": 47.2,
+            "cost": 12,
+            "margin": 28
+          }
+        }
       }
     },
     {
       "name": "Tax included as explicit calculated amount",
-      "status": "FAIL",
+      "status": "PASS",
       "actual": [
         "lines",
+        "subtotal",
+        "tax",
+        "taxTotal",
         "total",
         "cost",
         "margin",
@@ -232,31 +244,32 @@
         "weightedExcess",
         "riskScore",
         "needsManager",
-        "needsFinance"
+        "needsFinance",
+        "totalsByCadence"
       ]
     },
     {
       "name": "Duplicate SKU lines cannot overreserve stock",
-      "status": "FAIL",
+      "status": "PASS",
       "actual": {
         "onHand": 100,
-        "reserved": 124
+        "reserved": 100
       }
     },
     {
-      "name": "Signup creates pending account",
+      "name": "Signup creates active organization admin",
       "status": "PASS",
       "actual": {
-        "http": 202,
-        "status": "PENDING"
+        "http": 201,
+        "status": "ACTIVE"
       }
     },
     {
-      "name": "Pending signup cannot log in",
+      "name": "Organization admin can log in",
       "status": "PASS",
       "actual": {
-        "http": 403,
-        "code": "ACCOUNT_INACTIVE"
+        "http": 200,
+        "role": "ADMIN"
       }
     },
     {
@@ -266,30 +279,30 @@
     },
     {
       "name": "Reject clears actionable pending steps",
-      "status": "FAIL",
+      "status": "PASS",
       "actual": [
         "REJECTED",
-        "PENDING"
+        "SUPERSEDED"
       ]
     },
     {
       "name": "Manager return clears actionable pending steps",
-      "status": "FAIL",
+      "status": "PASS",
       "actual": {
         "stage": "DRAFT",
         "steps": [
           "RETURNED",
-          "PENDING"
+          "SUPERSEDED"
         ]
       }
     },
     {
       "name": "Concurrent payments respect balance and ledger",
-      "status": "FAIL",
+      "status": "PASS",
       "actual": {
-        "ledger": 1400,
+        "ledger": 700,
         "paid": 700,
-        "payments": 2
+        "payments": 1
       }
     },
     {
@@ -299,10 +312,9 @@
     },
     {
       "name": "Confirmed deal connects to generated billing",
-      "status": "FAIL",
+      "status": "PASS",
       "actual": {
-        "invoices": 0,
-        "note": "No invoice-generation endpoint is implemented"
+        "invoices": 1
       }
     },
     {
