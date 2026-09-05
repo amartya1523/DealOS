@@ -173,9 +173,9 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 - **Purpose:** Find accessible buying businesses.
 - **Actor / authorization:** Rep, Manager, Finance/Operations, Admin; resource scope and global restrictions above apply.
 - **Authentication:** Active database-backed session required.
-- **Request:** `query: search?, tierId?, cursor?, limit?`.
-- **Validation:** scope by team for Rep/Manager; bounded search.
-- **Response:** 200 Page<CustomerDTO>.
+- **Request:** `query: search?, limit?` in the implemented quotation-list slice; `tierId?` and cursor paging remain planned.
+- **Validation:** organization scope and active customers only; bounded search and result size.
+- **Response:** 200 `{items: Array<{id,name,tier,currency}>}`.
 - **Errors:** common error contract above; validation, permission, lifecycle and concurrency conditions are enforced before commit.
 - **Business rules:** R-005, BR-008.
 
@@ -401,9 +401,9 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 - **Purpose:** List pipeline or table quotation summaries.
 - **Actor / authorization:** Rep, Manager, Finance/Operations, Admin; resource scope and global restrictions above apply.
 - **Authentication:** Active database-backed session required.
-- **Request:** `query: stage?, customerId?, ownerId?, search?, cursor?, limit?`.
-- **Validation:** role/team scope first; stage derived from current revision/approval/acceptance.
-- **Response:** 200 Page<QuotationSummaryDTO>.
+- **Request:** `query: stage?, customerId?, ownerId?, search?, activityPeriod?:7d|30d|90d|all, sort?:activity_desc|activity_asc|amount_desc|amount_asc|quotation_asc|quotation_desc, cursor?, limit?`.
+- **Validation:** organization/module/role scope first; Reps are always restricted to their own quotations; stage is projected from the current revision, active approval/proposal and order records.
+- **Response:** 200 `{items: QuotationSummaryDTO[], pagination:{total,nextCursor}, stageCounts, owners, primaryStages}`. Money is a decimal string and the DTO includes customer, owner, currency, risk indicator, active approval step, exact current revision ID/version, and last activity.
 - **Errors:** common error contract above; validation, permission, lifecycle and concurrency conditions are enforced before commit.
 - **Business rules:** R-014, BR-005.
 
@@ -411,11 +411,11 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 
 - **Method/path:** `POST /api/v1/quotations`
 - **Purpose:** Create customer quotation draft.
-- **Actor / authorization:** Rep; resource scope and global restrictions above apply.
+- **Actor / authorization:** Rep; the current organization-admin compatibility role may also create while retaining server scope and View As write denial.
 - **Authentication:** Active database-backed session required.
-- **Request:** `{customerId, validUntil, promisedDeliveryAt?, terms?}`.
-- **Validation:** customer in rep scope; future expiry; owner is authenticated rep.
-- **Response:** 201 QuotationDTO.
+- **Request:** `{customerId, validUntil?, promisedDeliveryAt?, terms?}`.
+- **Validation:** selected customer must be active in the actor's organization; tier and currency are resolved server-side; supplied validity must be future-dated; owner is the authenticated actor.
+- **Response:** 201 QuotationSummaryDTO for the new exact Draft revision.
 - **Errors:** common error contract above; validation, permission, lifecycle and concurrency conditions are enforced before commit.
 - **Business rules:** BR-001, BR-017.
 
@@ -1060,6 +1060,8 @@ This inventory is approved as architecture scope, not as deployed functionality.
 ## Implementation update — 2026-09-05
 
 AUTH-01 is implemented as organization onboarding: `POST /api/v1/auth/signup` accepts only `{organizationName,displayName,email,password}`, validates and normalizes the values, creates an isolated organization with its first ACTIVE administrator, starts a server-managed session, and returns HTTP 201. Duplicate email, validation, and role/access injection are rejected. AUTH-01A and AUTH-01B expose runtime Google configuration and verified Google organization signup; the exact OAuth audience and verified email are checked server-side. Google and email/password login both issue the same CSRF-bound session. AUTH-02 accepts either an email address or generated `DL-…` user ID and requires an ACTIVE account. Administrators can create audited module-scoped user access with generated credentials; every user and workspace query remains organization-scoped.
+
+CAT-01, QUO-01, QUO-02, QUO-03, and QUO-04 now back the quotation-list and draft-pricing vertical slices. The list endpoint provides one scoped read model for Board and Table views with search, stage/customer/owner/activity filters, sorting, counts and bounded cursor pagination. Creation no longer accepts a caller-supplied customer name/tier or silently creates a customer; it selects an active configured customer and snapshots that customer's tier/currency into the initial revision. Quotation-detail navigation carries the exact current revision ID and version. QUO-04 calculates unsaved draft lines through the same authoritative product, tier-policy, tax, margin and risk engine used by Save Draft without persisting changes or exposing direct line costs. Customer actors are rejected from the internal endpoints, and Platform Owner View As remains read-only.
 
 ## Audit repair implementation update — 2026-09-05
 

@@ -130,6 +130,8 @@ model User {
   customer          Customer?                @relation(fields: [customerId], references: [id], onDelete: Restrict)
   sessions          Session[]
   quotes            Quote[]                  @relation("QuoteOwner")
+  managedSalesTeams SalesTeam[]              @relation("SalesTeamManager")
+  salesTeamMemberships SalesTeamMember[]
   approvals         Approval[]               @relation("ApprovalReviewer")
   auditEvents       AuditEvent[]
   memberships       OrganizationMembership[]
@@ -152,6 +154,7 @@ model Organization {
   products         Product[]
   policies         DiscountPolicy[]
   quotes           Quote[]
+  salesTeams       SalesTeam[]
   warehouses       Warehouse[]
   subscriptions    Subscription[]
   invoices         Invoice[]
@@ -295,6 +298,8 @@ model Quote {
   customerTier      String
   ownerId           String
   owner             User                @relation("QuoteOwner", fields: [ownerId], references: [id])
+  teamId            String?
+  team              SalesTeam?          @relation(fields: [teamId], references: [id], onDelete: SetNull)
   stage             QuoteStage          @default(DRAFT)
   version           Int                 @default(1)
   orderDiscount     Decimal             @default(0) @db.Decimal(5, 2)
@@ -317,6 +322,38 @@ model Quote {
   order             Order?
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
+
+  @@index([organizationId, stage, lastActivity, id])
+  @@index([organizationId, ownerId, lastActivity, id])
+  @@index([organizationId, teamId, lastActivity, id])
+}
+
+model SalesTeam {
+  id             String            @id @default(uuid())
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  managerId      String?
+  manager        User?             @relation("SalesTeamManager", fields: [managerId], references: [id], onDelete: SetNull)
+  members        SalesTeamMember[]
+  quotes         Quote[]
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@unique([organizationId, name])
+  @@index([organizationId, managerId])
+}
+
+model SalesTeamMember {
+  id        String    @id @default(uuid())
+  teamId    String
+  team      SalesTeam @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+
+  @@unique([teamId, userId])
+  @@index([userId, teamId])
 }
 
 model QuoteRevision {
@@ -326,6 +363,10 @@ model QuoteRevision {
   currentFor      Quote?              @relation("CurrentQuoteRevision")
   revisionNumber  Int
   state           RevisionState       @default(DRAFT)
+  currency        String              @default("INR")
+  validUntil      DateTime?
+  promisedDeliveryAt DateTime?
+  terms           String?
   orderDiscount   Decimal             @db.Decimal(5, 2)
   subtotal        Decimal             @db.Decimal(14, 2)
   taxTotal        Decimal             @db.Decimal(14, 2)

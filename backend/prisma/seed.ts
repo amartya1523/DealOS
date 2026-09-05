@@ -26,6 +26,8 @@ async function main() {
   await db.quoteRevision.deleteMany();
   await db.quoteLine.deleteMany();
   await db.quote.deleteMany();
+  await db.salesTeamMember.deleteMany();
+  await db.salesTeam.deleteMany();
   await db.stockBalance.deleteMany();
   await db.warehouse.deleteMany();
   await db.product.deleteMany();
@@ -65,6 +67,17 @@ async function main() {
   const northstarAdmin = users[5]!;
   const northstarRep = users[6]!;
 
+  const [enterpriseTeam, northstarTeam] = await Promise.all([
+    db.salesTeam.create({ data: { organizationId, name: 'Enterprise Sales', managerId: users[1]!.id } }),
+    db.salesTeam.create({ data: { organizationId: northstarOrganizationId, name: 'Distribution Sales', managerId: northstarAdmin.id } }),
+  ]);
+  await db.salesTeamMember.createMany({ data: [
+    { teamId: enterpriseTeam.id, userId: rep.id },
+    { teamId: enterpriseTeam.id, userId: users[1]!.id },
+    { teamId: northstarTeam.id, userId: northstarRep.id },
+    { teamId: northstarTeam.id, userId: northstarAdmin.id },
+  ] });
+
   await Promise.all([
     ...users.slice(0, 5).map((user) => db.organizationMembership.create({ data: { organizationId: primaryOrganization.id, userId: user.id, accessRole: user.role === Role.ADMIN ? 'ORGANIZATION_ADMIN' : user.role === Role.CUSTOMER ? 'PORTAL_USER' : 'ORGANIZATION_MEMBER', businessRole: user.role } })),
     db.organizationMembership.create({ data: { organizationId: northstarOrganization.id, userId: northstarAdmin.id, accessRole: 'ORGANIZATION_ADMIN', businessRole: Role.ADMIN } }),
@@ -99,8 +112,8 @@ async function main() {
     { product: care, quantity: 30, discount: 5, allowedDiscount: 10, cadence: 'Monthly' },
   ];
   const q102Calc = calculateQuote(q102Lines.map((line) => ({ quantity: line.quantity, unitPrice: line.product.price, unitCost: line.product.cost, discount: line.discount, allowedDiscount: line.allowedDiscount, taxRate: line.product.taxRate, cadence: line.cadence })), 0);
-  const q102 = await db.quote.create({ data: { organizationId, number: 'Q-0102', customer: acme.name, customerId: acme.id, customerTier: acme.tier, ownerId: rep.id, stage: 'PENDING_APPROVAL', total: q102Calc.total, taxTotal: q102Calc.taxTotal, totalsByCadence: json(q102Calc.totalsByCadence), margin: q102Calc.margin, riskScore: q102Calc.riskScore, lines: { create: q102Lines.map((line) => ({ productId: line.product.id, quantity: line.quantity, unitPrice: line.product.price, unitCost: line.product.cost, discount: line.discount, allowedDiscount: line.allowedDiscount })) } } });
-  const q102Revision = await db.quoteRevision.create({ data: { quoteId: q102.id, revisionNumber: 1, state: 'SUBMITTED', orderDiscount: 0, subtotal: q102Calc.subtotal, taxTotal: q102Calc.taxTotal, total: q102Calc.total, margin: q102Calc.margin, riskScore: q102Calc.riskScore, totalsByCadence: json(q102Calc.totalsByCadence), linesSnapshot: json(q102Calc.lines), policySnapshot: { tier: 'Gold', financeThreshold: '5.00' }, termsHash: hash({ quote: q102.id, calculation: q102Calc }), submittedById: rep.id } });
+  const q102 = await db.quote.create({ data: { organizationId, number: 'Q-0102', customer: acme.name, customerId: acme.id, customerTier: acme.tier, ownerId: rep.id, teamId: enterpriseTeam.id, stage: 'PENDING_APPROVAL', total: q102Calc.total, taxTotal: q102Calc.taxTotal, totalsByCadence: json(q102Calc.totalsByCadence), margin: q102Calc.margin, riskScore: q102Calc.riskScore, lines: { create: q102Lines.map((line) => ({ productId: line.product.id, quantity: line.quantity, unitPrice: line.product.price, unitCost: line.product.cost, discount: line.discount, allowedDiscount: line.allowedDiscount })) } } });
+  const q102Revision = await db.quoteRevision.create({ data: { quoteId: q102.id, revisionNumber: 1, state: 'SUBMITTED', currency: 'INR', validUntil: new Date('2026-10-05'), terms: 'Net 30. Prices include the governed commercial discounts shown.', orderDiscount: 0, subtotal: q102Calc.subtotal, taxTotal: q102Calc.taxTotal, total: q102Calc.total, margin: q102Calc.margin, riskScore: q102Calc.riskScore, totalsByCadence: json(q102Calc.totalsByCadence), linesSnapshot: json(q102Lines.map((line, index) => ({ ...q102Calc.lines[index], productId: line.product.id, name: line.product.name, sku: line.product.sku, category: line.product.category }))), policySnapshot: { tier: 'Gold', financeThreshold: '5.00' }, termsHash: hash({ quote: q102.id, calculation: q102Calc }), submittedById: rep.id } });
   await db.quote.update({ where: { id: q102.id }, data: { currentRevisionId: q102Revision.id } });
   await db.approval.createMany({ data: [
     { quoteId: q102.id, revisionId: q102Revision.id, cycle: 1, step: 'Sales Manager', sequence: 1, state: 'PENDING' },
@@ -108,12 +121,12 @@ async function main() {
   ] });
 
   for (const [number, customer, stage] of [['Q-0103', beta, 'DRAFT'], ['Q-0104', northstar, 'DRAFT']] as const) {
-    const quote = await db.quote.create({ data: { organizationId, number, customer: customer.name, customerId: customer.id, customerTier: customer.tier, ownerId: rep.id, stage } });
+    const quote = await db.quote.create({ data: { organizationId, number, customer: customer.name, customerId: customer.id, customerTier: customer.tier, ownerId: rep.id, teamId: enterpriseTeam.id, stage } });
     const revision = await db.quoteRevision.create({ data: { quoteId: quote.id, revisionNumber: 1, state: 'DRAFT', orderDiscount: 0, subtotal: 0, taxTotal: 0, total: 0, margin: 0, riskScore: 0, totalsByCadence: {}, linesSnapshot: [], policySnapshot: {}, termsHash: hash({ quote: quote.id, nonce: number }) } });
     await db.quote.update({ where: { id: quote.id }, data: { currentRevisionId: revision.id } });
   }
 
-  const northstarQuote = await db.quote.create({ data: { organizationId: northstarOrganization.id, number: 'NS-Q-0001', customer: orion.name, customerId: orion.id, customerTier: orion.tier, ownerId: northstarRep.id, stage: 'PENDING_APPROVAL', total: 5400, margin: 2040, riskScore: 6, lines: { create: [{ productId: northstarProduct.id, quantity: 3, unitPrice: 1800, unitCost: 1120, discount: 0, allowedDiscount: 12 }] } } });
+  const northstarQuote = await db.quote.create({ data: { organizationId: northstarOrganization.id, number: 'NS-Q-0001', customer: orion.name, customerId: orion.id, customerTier: orion.tier, ownerId: northstarRep.id, teamId: northstarTeam.id, stage: 'PENDING_APPROVAL', total: 5400, margin: 2040, riskScore: 6, lines: { create: [{ productId: northstarProduct.id, quantity: 3, unitPrice: 1800, unitCost: 1120, discount: 0, allowedDiscount: 12 }] } } });
   const northstarRevision = await db.quoteRevision.create({ data: { quoteId: northstarQuote.id, revisionNumber: 1, state: 'SUBMITTED', orderDiscount: 0, subtotal: 5400, taxTotal: 972, total: 6372, margin: 2040, riskScore: 6, totalsByCadence: { 'One-time': { subtotal: 5400, tax: 972, total: 6372 } }, linesSnapshot: [{ productId: northstarProduct.id, quantity: 3, unitPrice: 1800 }], policySnapshot: { tier: 'Enterprise' }, termsHash: hash({ quote: northstarQuote.id, revision: 1 }), submittedById: northstarRep.id } });
   await db.quote.update({ where: { id: northstarQuote.id }, data: { currentRevisionId: northstarRevision.id } });
   await db.approval.create({ data: { quoteId: northstarQuote.id, revisionId: northstarRevision.id, cycle: 1, step: 'Sales Manager', sequence: 1, state: 'PENDING' } });

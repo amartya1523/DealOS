@@ -94,6 +94,13 @@ describe("DealOS public routes", () => {
     );
     expect(await screen.findByRole("heading", {name:"Sales dashboard"})).toBeInTheDocument();
     expect(window.location.pathname).toBe("/app");
+    expect(screen.getByRole("button", { name: "New quotation" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View reports" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View reports" }));
+    expect(screen.getByRole("heading", { name: "Sales reporting" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Overview" }));
+    fireEvent.click(screen.getByRole("button", { name: "New quotation" }));
+    expect(screen.getByRole("heading", { name: "New quotation" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/auth/signup",
       expect.objectContaining({
@@ -113,6 +120,27 @@ describe("DealOS public routes", () => {
     expect(
       await screen.findByRole("heading", { name: "Welcome back." }),
     ).toBeInTheDocument();
+  });
+  it("filters the approval queue by pending, returned, and approved state", async () => {
+    window.history.replaceState({}, "", "/app");
+    const quote = (id:string, stage:string, state:string) => ({ id, number:`Q-${id}`, customer:`${id} Customer`, customerTier:'Gold', stage, version:1, orderDiscount:0, total:100, margin:20, riskScore:1, updatedAt:'2026-09-05T00:00:00.000Z', lines:[], approvals:[{id:`approval-${id}`,step:'Sales Manager',sequence:1,state}], negotiation:[], invoices:[] });
+    const workspace = { user:{id:'admin',name:'Admin User',email:'admin@example.com',role:'ADMIN',moduleAccess:[],actorType:'USER',platformSuperAdmin:false,viewContext:null}, organization:{id:'org',name:'Acme'}, users:[], quotes:[quote('PENDING','PENDING_APPROVAL','PENDING'),quote('RETURNED','DRAFT','RETURNED'),quote('APPROVED','APPROVED','APPROVED'),quote('REJECTED','REJECTED','REJECTED')], products:[], policies:[], warehouses:[], subscriptions:[], invoices:[], alerts:[], audits:[] };
+    fetchMock.mockImplementation((url:string) => Promise.resolve({ok:true,json:async()=>({success:true,data:url.endsWith('/workspace')?workspace:{}})}));
+    render(<App/>);
+    expect(await screen.findByRole("heading", {name:"Sales dashboard"})).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name:"Approvals"}));
+    expect(screen.getByText("Q-PENDING")).toBeInTheDocument();
+    expect(screen.queryByText("Q-RETURNED")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", {name:"Pending"})).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", {name:"Returned"}));
+    expect(screen.getByText("Q-RETURNED")).toBeInTheDocument();
+    expect(screen.queryByText("Q-PENDING")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", {name:"Returned"})).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", {name:"Approved"}));
+    expect(screen.getByText("Q-APPROVED")).toBeInTheDocument();
+    expect(screen.queryByText("Q-RETURNED")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", {name:"Approved"})).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("Q-REJECTED")).not.toBeInTheDocument();
   });
   it("uses the dedicated Platform Owner login and opens global control", async () => {
     window.history.replaceState({}, "", "/login/super-admin");

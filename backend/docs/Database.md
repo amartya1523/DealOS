@@ -412,3 +412,7 @@ Migration `20260905120000_pending_accounts` adds PostgreSQL `AccountStatus` (PEN
 ## Implemented audit-hardening delta — 2026-09-05
 
 Migration `20260905190000_audit_backend_hardening` adds Customer foreign keys, QuoteRevision snapshots, revision/cycle-bound approvals, proposal classification, CustomerAcceptance, Order/OrderLine, downstream order/customer/product provenance, IdempotencyRecord, request/revision audit context, and stock/invoice/payment CHECK constraints. Existing quote/customer text is backfilled without deleting business history. Payment references are unique per invoice. Quote current-revision circular integrity is established after revision backfill. The migration was validated from the initial migrations in a disposable PostgreSQL schema.
+
+## Implemented quotation-list read model — 2026-09-05
+
+Migration `20260905223000_quotation_list_read_model` adds initial-revision `currency`, optional `validUntil`, `promisedDeliveryAt`, and `terms`, plus organization/stage/activity and organization/owner/activity indexes for the scoped quotation list. The migration uses additive `IF NOT EXISTS` guards because an earlier local development database contained a drifted `QuoteRevision.currency` column; it performs no destructive rewrite. Board/Table display stages are projected by the backend from current lifecycle records while the existing `Quote.stage` remains a compatibility cache used by established workflow mutations.
