@@ -14,6 +14,7 @@ const fetchMock = vi.fn();
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   window.scrollTo = vi.fn();
+  window.localStorage.clear();
   fetchMock.mockReset();
   fetchMock.mockResolvedValue({
     ok: false,
@@ -94,6 +95,18 @@ describe("DealOS public routes", () => {
     );
     expect(await screen.findByRole("heading", {name:"Sales dashboard"})).toBeInTheDocument();
     expect(window.location.pathname).toBe("/app");
+    expect(screen.queryByText(/^Live$/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(document.querySelector(".app-shell")).toHaveClass("sidebar-collapsed");
+    expect(screen.getByRole("button", { name: "Expand sidebar" })).toHaveAttribute("aria-expanded", "false");
+    expect(window.localStorage.getItem("dealos.sidebar.collapsed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Quotations" }));
+    expect(screen.getByRole("heading", { name: "Quotation pipeline" })).toBeInTheDocument();
+    const requestsBeforeBrandClick = fetchMock.mock.calls.length;
+    fireEvent.click(screen.getByRole("link", { name: "DealOS home" }));
+    expect(screen.getByRole("heading", { name: "Sales dashboard" })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/app");
+    expect(fetchMock).toHaveBeenCalledTimes(requestsBeforeBrandClick);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/auth/signup",
       expect.objectContaining({
