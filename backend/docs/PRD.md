@@ -4,9 +4,9 @@ Status: architecture baseline, 2026-09-05. Application implementation is not yet
 
 ## Source precedence and evidence
 
-1. The user's explicit instructions: English throughout; separate `frontend/`, `backend/`, `docs/`; professional repository configuration and persistent project context.
-2. `docs/references/master-prompt.txt`: architecture-first sequence and fixed React/TypeScript, Express/TypeScript, PostgreSQL boundaries.
-3. `docs/references/problem-statement.pdf`: the 13-page DealFlow360 brief (original source name), especially modules A1–A7/B1–B9 and the eight-step acceptance walkthrough.
+1. The user's explicit instructions: English throughout; independent `frontend/` and `backend/`, with shared documentation in `backend/docs/`; professional repository configuration and persistent project context.
+2. `backend/docs/references/master-prompt.txt`: architecture-first sequence and fixed React/TypeScript, Express/TypeScript, PostgreSQL boundaries.
+3. `backend/docs/references/problem-statement.pdf`: the 13-page DealFlow360 brief (original source name), especially modules A1–A7/B1–B9 and the eight-step acceptance walkthrough.
 4. [Excalidraw reference](https://app.excalidraw.com/l/65VNwvy7c4X/7Fb5SR3WKu2): reviewed with read-only guest access; 18 numbered screens. The board communicates screen navigation, not a complete transactional specification.
 
 **Product naming:** the user selected **DealOS** on 2026-09-05. DealFlow360 is the original reference name only; user-facing product copy, package names and future application branding use DealOS.
@@ -129,3 +129,11 @@ Future scope: email delivery integration, real payment gateway, multi-company, e
 - Keyboard access, explicit labels, readable tabular money, useful loading/empty/error states.
 - No exposed secrets, cost/margin in customer payloads, or production seed credentials.
 - README commands are verified at the phase where they become runnable; planned commands are not presented as existing functionality.
+
+## Repository organization update — 2026-09-05 [Confirmed]
+
+The user requires application content inside `frontend/` and `backend/`. Each owns its npm manifest, lockfile, dependencies, and configuration; there is no root workspace. Backend environment examples and local configuration live in `backend/`. Shared project documentation lives in `backend/docs/`. Only README.md, compose.yaml, and .gitignore remain as root files. This supersedes the original root documentation/workspace layout.
+
+## Confirmed visual expansion — 2026-09-05
+
+The user explicitly requested an English landing page, polished site-wide visuals, parallax and scroll animation inspired by the supplied GSAP reference, and sign-in/sign-up routes. This adds the public landing page alongside the existing application. Confirmed: retain all business screens. Inferred design choices: forest green, lime and warm paper, Manrope typography, original product illustrations, GSAP ScrollTrigger, reduced-motion support, and mobile layouts. Public preview values are illustrative, never live workspace metrics.

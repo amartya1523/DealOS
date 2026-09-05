@@ -53,7 +53,7 @@ DealOS
 └── Reporting and exports
 ```
 
-No chatbot, social messaging, mobile application, marketing site or unrelated analytics platform is included.
+No chatbot, social messaging, mobile application or unrelated analytics platform is included. A public marketing landing page was explicitly added by the user on 2026-09-05.
 
 ## 8. Architecture Goals
 
@@ -234,46 +234,41 @@ Ten dependency-driven phases, including this architecture baseline, are specifie
 
 ## 20. Final Repository Structure
 
-### Materialized in this task
+### Current repository layout
+
+Confirmed by the user on 2026-09-05: frontend and backend are independent npm projects. Each owns its manifest, lockfile, dependencies, Node version, build output, and configuration. Backend environment files live under `backend/`; frontend environment files, if needed, live under `frontend/` and contain only public values. Shared contracts and references live under `backend/docs/` and apply to both applications.
 
 ```text
 DealOS/
 ├── frontend/
-│   ├── package.json                 # workspace metadata; runtime not implemented
-│   ├── tsconfig.json                # planned browser compiler boundary
+│   ├── src/
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── node_modules/                # ignored
+│   ├── .nvmrc
+│   ├── vite.config.ts
+│   ├── tsconfig*.json
+│   ├── index.html
 │   └── README.md
 ├── backend/
-│   ├── package.json                 # workspace metadata; runtime not implemented
-│   ├── tsconfig.json                # planned Node compiler boundary
+│   ├── src/
+│   ├── tests/
+│   ├── prisma/
+│   ├── docs/                        # contracts, references, agent.md, memory.me
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── node_modules/                # ignored; includes generated Prisma client
+│   ├── .env                        # ignored
+│   ├── .env.example
+│   ├── .nvmrc
+│   ├── tsconfig.json
 │   └── README.md
-├── docs/
-│   ├── PRD.md
-│   ├── Architecture.md
-│   ├── Domain.md
-│   ├── Database.md
-│   ├── API.md
-│   ├── Rules.md
-│   ├── Phases.md
-│   ├── Design.md
-│   ├── Memory.md
-│   ├── TestPlan.md
-│   ├── Traceability.md
-│   ├── ArchitectureDiagram.md
-│   └── references/
-├── scripts/check-repository.mjs      # documentation/configuration validation
-├── .github/workflows/repository.yml
-├── .editorconfig
-├── .gitattributes
+├── compose.yaml                     # local PostgreSQL only
 ├── .gitignore
-├── .env.example
-├── .nvmrc
-├── AGENTS.md
-├── compose.yaml                     # opt-in local PostgreSQL only
-├── package.json
-├── package-lock.json
-├── tsconfig.base.json
 └── README.md
 ```
+
+Use `npm ci --prefix backend` and `npm ci --prefix frontend` from the root, or `npm ci` within either application. Root npm workspace scripts have been replaced by application-scoped commands documented in the root README. The backend build currently emits `dist/src/server.js`, which is the `start` script entry point.
 
 ### Target application structure, added only as phases require
 
@@ -314,7 +309,7 @@ Do not materialize empty speculative folders. No frontend imports from backend i
 
 ## 21. Documentation Plan
 
-PRD owns what/why/classification; Domain owns vocabulary/rules/workflows; Architecture owns boundaries/decisions; Database owns persistence contract; API owns HTTP contract; Design owns screen/interaction contract; Phases owns implementation gates; Rules owns engineering constraints; Memory owns current evidence and next safe task. Traceability cross-checks scope; TestPlan defines verification; ArchitectureDiagram gives the one-page deliverable. Root AGENTS requires future agents to read Memory/Rules and inspect current code before changes.
+PRD owns what/why/classification; Domain owns vocabulary/rules/workflows; Architecture owns boundaries/decisions; Database owns persistence contract; API owns HTTP contract; Design owns screen/interaction contract; Phases owns implementation gates; Rules owns engineering constraints; Memory owns current evidence and next safe task. Traceability cross-checks scope; TestPlan defines verification; ArchitectureDiagram gives the one-page deliverable. `backend/docs/agent.md` requires future agents to read project memory and contracts and inspect current code before changes.
 
 Product branding is **DealOS**, explicitly selected by the user. Preserve original source files unchanged even though they say DealFlow360.
 
@@ -342,3 +337,7 @@ Current reusable context is project-specific. For the next problem, follow the s
 5. Portal invoice visibility is inferred from quotation-to-payment context; document any customer-account access changes.
 
 These do not block the architecture package. They must not be silently represented as sourced requirements. No external deployment, payment-provider integration, source export or business-data mutation has occurred in this phase.
+
+## Public frontend routes — 2026-09-05
+
+`/` renders the public landing page; `/sign-in` and `/sign-up` render authentication. `/signin`, `/login`, and `/signup` are supported aliases. `/app` loads the existing protected workspace; missing sessions show sign-in, and unknown paths show a recovery page. Browser history handles transitions into/out of the workspace. Hosting must rewrite non-API frontend paths to `index.html`. Vite already supports this locally. REST remains under `/api/v1`. GSAP animations clean up on unmount and respect reduced-motion. Public.tsx owns marketing and identity presentation; business screens remain in App.tsx.

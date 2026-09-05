@@ -1,0 +1,314 @@
+{
+  "date": "2026-09-05T05:34:43.651Z",
+  "environment": "isolated PostgreSQL schema; synthetic fixtures",
+  "results": [
+    {
+      "name": "REP login",
+      "status": "PASS",
+      "actual": 200
+    },
+    {
+      "name": "MANAGER login",
+      "status": "PASS",
+      "actual": 200
+    },
+    {
+      "name": "FINANCE login",
+      "status": "PASS",
+      "actual": 200
+    },
+    {
+      "name": "ADMIN login",
+      "status": "PASS",
+      "actual": 200
+    },
+    {
+      "name": "CUSTOMER login",
+      "status": "PASS",
+      "actual": 200
+    },
+    {
+      "name": "Unauthenticated workspace denied",
+      "status": "PASS",
+      "actual": 401
+    },
+    {
+      "name": "High excess routes Manager then Finance",
+      "status": "PASS",
+      "actual": [
+        "Sales Manager",
+        "Finance"
+      ]
+    },
+    {
+      "name": "Finance blocked before Manager",
+      "status": "PASS",
+      "actual": "APPROVAL_STEP_BLOCKED"
+    },
+    {
+      "name": "Rep cannot approve",
+      "status": "PASS",
+      "actual": 403
+    },
+    {
+      "name": "Approval requires reason",
+      "status": "PASS",
+      "actual": 422
+    },
+    {
+      "name": "Customer cannot confirm pending quote",
+      "status": "PASS",
+      "actual": 409
+    },
+    {
+      "name": "Allocation blocked before confirmation",
+      "status": "PASS",
+      "actual": 409
+    },
+    {
+      "name": "Manager approval leaves Finance pending",
+      "status": "PASS",
+      "actual": "PENDING_APPROVAL"
+    },
+    {
+      "name": "Final approval produces approved stage",
+      "status": "PASS",
+      "actual": "APPROVED"
+    },
+    {
+      "name": "Customer DTO excludes internal data",
+      "status": "FAIL",
+      "actual": {
+        "margin": true,
+        "riskScore": true,
+        "lineCost": true,
+        "productCost": true,
+        "approvalReasons": [
+          "Audit manager approved",
+          "Audit finance approved"
+        ]
+      }
+    },
+    {
+      "name": "Customer cannot confirm another customer quote",
+      "status": "FAIL",
+      "actual": 200
+    },
+    {
+      "name": "Customer cannot modify another customer quote",
+      "status": "FAIL",
+      "actual": 201
+    },
+    {
+      "name": "Unsent draft hidden from customer",
+      "status": "FAIL",
+      "actual": true
+    },
+    {
+      "name": "Counteroffer recalculates totals and risk",
+      "status": "FAIL",
+      "actual": {
+        "storedTotal": 164,
+        "expectedTotal": 82,
+        "storedRisk": 8,
+        "expectedRisk": 49
+      }
+    },
+    {
+      "name": "Prior approval decisions remain immutable",
+      "status": "FAIL",
+      "actual": [
+        {
+          "state": "PENDING",
+          "reason": null
+        },
+        {
+          "state": "PENDING",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "Within-policy quote avoids unnecessary approval",
+      "status": "FAIL",
+      "actual": [
+        "Sales Manager"
+      ]
+    },
+    {
+      "name": "Low margin routes Finance",
+      "status": "FAIL",
+      "actual": {
+        "marginPercent": 5,
+        "steps": [
+          "Sales Manager"
+        ]
+      }
+    },
+    {
+      "name": "Published Finance threshold affects routing",
+      "status": "FAIL",
+      "actual": {
+        "configuredThreshold": 99,
+        "excess": 8,
+        "steps": [
+          "Sales Manager",
+          "Finance"
+        ]
+      }
+    },
+    {
+      "name": "Self approval blocked",
+      "status": "PASS",
+      "actual": "SELF_APPROVAL_NOT_ALLOWED"
+    },
+    {
+      "name": "Return sends quotation to draft",
+      "status": "PASS",
+      "actual": "DRAFT"
+    },
+    {
+      "name": "Resubmit preserves prior approval cycle",
+      "status": "FAIL",
+      "actual": 2
+    },
+    {
+      "name": "Rep cannot edit another owner quote",
+      "status": "FAIL",
+      "actual": 200
+    },
+    {
+      "name": "Approved customer quote can confirm",
+      "status": "PASS",
+      "actual": 200
+    },
+    {
+      "name": "Allocation retry does not double reserve",
+      "status": "FAIL",
+      "actual": {
+        "first": 2,
+        "retry": 4
+      }
+    },
+    {
+      "name": "Overpayment rejected",
+      "status": "PASS",
+      "actual": 422
+    },
+    {
+      "name": "Partial payment updates invoice",
+      "status": "PASS",
+      "actual": {
+        "state": "PARTIAL",
+        "paid": "100"
+      }
+    },
+    {
+      "name": "Payment retry does not duplicate ledger",
+      "status": "FAIL",
+      "actual": {
+        "payments": 2,
+        "paid": 200
+      }
+    },
+    {
+      "name": "One-time and recurring totals stay separate",
+      "status": "FAIL",
+      "actual": {
+        "total": 140,
+        "cadenceTotals": null
+      }
+    },
+    {
+      "name": "Tax included as explicit calculated amount",
+      "status": "FAIL",
+      "actual": [
+        "lines",
+        "total",
+        "cost",
+        "margin",
+        "marginPercent",
+        "worstExcess",
+        "weightedExcess",
+        "riskScore",
+        "needsManager",
+        "needsFinance"
+      ]
+    },
+    {
+      "name": "Duplicate SKU lines cannot overreserve stock",
+      "status": "FAIL",
+      "actual": {
+        "onHand": 100,
+        "reserved": 124
+      }
+    },
+    {
+      "name": "Signup creates pending account",
+      "status": "PASS",
+      "actual": {
+        "http": 202,
+        "status": "PENDING"
+      }
+    },
+    {
+      "name": "Pending signup cannot log in",
+      "status": "PASS",
+      "actual": {
+        "http": 403,
+        "code": "ACCOUNT_INACTIVE"
+      }
+    },
+    {
+      "name": "Reject moves quote to rejected",
+      "status": "PASS",
+      "actual": "REJECTED"
+    },
+    {
+      "name": "Reject clears actionable pending steps",
+      "status": "FAIL",
+      "actual": [
+        "REJECTED",
+        "PENDING"
+      ]
+    },
+    {
+      "name": "Manager return clears actionable pending steps",
+      "status": "FAIL",
+      "actual": {
+        "stage": "DRAFT",
+        "steps": [
+          "RETURNED",
+          "PENDING"
+        ]
+      }
+    },
+    {
+      "name": "Concurrent payments respect balance and ledger",
+      "status": "FAIL",
+      "actual": {
+        "ledger": 1400,
+        "paid": 700,
+        "payments": 2
+      }
+    },
+    {
+      "name": "Draft to approval to customer confirmation",
+      "status": "PASS",
+      "actual": "CONFIRMED"
+    },
+    {
+      "name": "Confirmed deal connects to generated billing",
+      "status": "FAIL",
+      "actual": {
+        "invoices": 0,
+        "note": "No invoice-generation endpoint is implemented"
+      }
+    },
+    {
+      "name": "Logout invalidates session",
+      "status": "PASS",
+      "actual": 401
+    }
+  ]
+}

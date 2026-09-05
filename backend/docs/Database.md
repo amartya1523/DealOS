@@ -400,3 +400,7 @@ List queries constrain team/customer/state/date and use stable `(created_at,id)`
 ## Current database state
 
 No server started, database created, extension enabled, schema migrated, fixture seeded or persistent business data written by this architecture task. `compose.yaml` is opt-in local infrastructure configuration. The table inventory is a contract for phased implementation, not an assertion that tables exist.
+
+## Implemented identity delta — 2026-09-05
+
+Migration `20260905120000_pending_accounts` adds PostgreSQL `AccountStatus` (PENDING, ACTIVE, DISABLED) and `User.status`. Existing identities are backfilled ACTIVE; future inserts default PENDING. Seed users explicitly set ACTIVE. Public signup stores a bcrypt hash and nonprivileged REP role with PENDING status; both login and session middleware require ACTIVE. No other schema or records are reset.

@@ -1056,3 +1056,7 @@ No endpoint edits an issued invoice, deletes audit history or directly patches o
 ## Contract lifecycle
 
 This inventory is approved as architecture scope, not as deployed functionality. Implement only the phase's endpoints; record implemented IDs and test evidence in Memory.md. Generate OpenAPI 3.1 from runtime validators or maintain it alongside code in P1 onward; do not ship two diverging contracts. Until then this document is the canonical design contract. Breaking production changes require a documented compatibility plan and, when necessary, a new API version.
+
+## Implementation update — 2026-09-05
+
+AUTH-01 is implemented: `POST /api/v1/auth/signup` accepts only `{displayName,email,password}`, trims and normalizes email/name, validates name 1–120 and password 12–128, hashes with bcrypt, persists PENDING, and returns HTTP 202 `{success:true,data:{status:"PENDING",message}}`. Existing emails receive the same public result without account changes. Extra fields (including role) are rejected with 422. AUTH-02 and session authentication now require ACTIVE; valid credentials for a pending/disabled account return 403 ACCOUNT_INACTIVE and no cookie. Administrator activation UI/endpoints, rate limiting and CSRF remain future hardening work. Existing active demo accounts remain available.

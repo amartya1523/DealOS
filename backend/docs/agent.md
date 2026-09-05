@@ -7,13 +7,13 @@ This file is the operating contract for every coding agent working in this repos
 Build **DealOS**, a professional browser-based B2B quotation-to-cash platform, using the exact functional flow shown in the reference board:
 
 - Reference board: https://app.excalidraw.com/l/65VNwvy7c4X/7Fb5SR3WKu2
-- Original problem statement: `docs/references/problem-statement.pdf`
-- Product requirements: `docs/PRD.md`
-- Domain workflows and business rules: `docs/Domain.md`
-- Technical architecture: `docs/Architecture.md`
-- PostgreSQL design: `docs/Database.md`
-- REST API contracts: `docs/API.md`
-- Persistent project status: `memory.me`
+- Original problem statement: `backend/docs/references/problem-statement.pdf`
+- Product requirements: `backend/docs/PRD.md`
+- Domain workflows and business rules: `backend/docs/Domain.md`
+- Technical architecture: `backend/docs/Architecture.md`
+- PostgreSQL design: `backend/docs/Database.md`
+- REST API contracts: `backend/docs/API.md`
+- Persistent project status: `backend/docs/memory.me`
 
 The original reference calls the product DealFlow360. The selected product name is **DealOS**. Use DealOS in application copy, package names, documentation updates, page titles, database seed labels, and tests. Preserve original reference files unchanged.
 
@@ -21,12 +21,12 @@ The original reference calls the product DealFlow360. The selected product name 
 
 Before changing code:
 
-1. Read `memory.me` completely.
+1. Read `backend/docs/memory.me` completely.
 2. Read this file completely.
-3. Read `docs/PRD.md`, `docs/Domain.md`, and `docs/Architecture.md`.
-4. Read the relevant sections of `docs/Database.md` and `docs/API.md` for the requested feature.
+3. Read `backend/docs/PRD.md`, `backend/docs/Domain.md`, and `backend/docs/Architecture.md`.
+4. Read the relevant sections of `backend/docs/Database.md` and `backend/docs/API.md` for the requested feature.
 5. Inspect the existing implementation, package scripts, migrations, tests, and Git status.
-6. Confirm that the requested work belongs to the current implementation phase recorded in `memory.me`.
+6. Confirm that the requested work belongs to the current implementation phase recorded in `backend/docs/memory.me`.
 
 Do not depend on previous chat history. Repository files are the permanent project context.
 
@@ -36,16 +36,15 @@ The repository has only these major application areas:
 
 ```text
 DealOS/
-├── frontend/
-├── backend/
-├── docs/
-├── agent.md
-├── memory.me
+├── frontend/              # own package, lockfile, dependencies, config, source/tests
+├── backend/               # own package, lockfile, dependencies, env, Prisma, source/tests
+│   └── docs/              # shared contracts, references, agent.md, memory.me
+├── compose.yaml
 ├── .gitignore
-├── .env.example
-├── README.md
-└── supporting root configuration
+└── README.md
 ```
+
+Confirmed by the user: no root npm workspace, dependencies, or environment files. Run npm within the owning application or with `--prefix frontend` / `--prefix backend`. Documentation paths are repository-relative unless expressed as Markdown links. Read `backend/docs/agent.md` and `backend/docs/memory.me` for either application.
 
 Do not create a mobile application, React Native project, Expo configuration, Android or iOS folders, microservices, or a second primary datastore.
 
@@ -67,7 +66,7 @@ Do not upload repository files, source material, secrets, customer data, logs, o
 
 ## Exact product flow
 
-Implement the following screens and navigation in the same business sequence as the reference board. Visual styling may be polished, but do not remove, rename, merge, or reorder a required business step without updating the architecture documents and recording the decision in `memory.me`.
+Implement the following screens and navigation in the same business sequence as the reference board. Visual styling may be polished, but do not remove, rename, merge, or reorder a required business step without updating the architecture documents and recording the decision in `backend/docs/memory.me`.
 
 ### 1. Login / Signup
 
@@ -232,10 +231,10 @@ These invariants are non-negotiable:
 9. Apply optimistic versions to editable aggregates and idempotency keys to consequential retryable mutations.
 10. Apply database foreign keys, unique constraints, checks, and indexes; application validation alone is insufficient.
 11. Never use SQLite, JSON files, localStorage, fixtures, or in-memory objects as the completed feature’s primary persistence.
-12. No schema change without a migration and `docs/Database.md` update.
-13. No API contract change without `docs/API.md` update.
-14. No business-rule change without `docs/Domain.md` update.
-15. No silent assumptions. Mark new decisions Confirmed, Inferred, or Proposed in `docs/PRD.md`.
+12. No schema change without a migration and `backend/docs/Database.md` update.
+13. No API contract change without `backend/docs/API.md` update.
+14. No business-rule change without `backend/docs/Domain.md` update.
+15. No silent assumptions. Mark new decisions Confirmed, Inferred, or Proposed in `backend/docs/PRD.md`.
 16. No secrets or production credentials in source, seed data, logs, screenshots, or documentation.
 17. Do not expose stack traces, SQL errors, password hashes, sessions, cookies, costs, or internal notes.
 18. Do not install packages unless the current feature requires them.
@@ -282,12 +281,12 @@ A feature is complete only when:
 - UI, REST workflow, service logic, PostgreSQL persistence, authorization, error states, and meaningful tests work together.
 - Data survives a process restart.
 - Negative permission and stale-state cases have been exercised.
-- The relevant documentation and `memory.me` are updated in the same task.
+- The relevant documentation and `backend/docs/memory.me` are updated in the same task.
 - Commands reported as passing were actually run after the final change.
 
 ## Required memory update
 
-After every substantial coding session, update `memory.me` with:
+After every substantial coding session, update `backend/docs/memory.me` with:
 
 - current phase and objective;
 - completed behavior, not just files touched;
@@ -303,4 +302,4 @@ Do not mark a phase or feature complete because its folders exist. Record eviden
 
 ## Current instruction
 
-The repository is currently at architecture setup. The next agent must inspect `memory.me` before deciding whether to scaffold or implement. Follow the dependency order recorded there and build the smallest complete vertical slice rather than generating every screen as disconnected static markup.
+The repository is currently at architecture setup. The next agent must inspect `backend/docs/memory.me` before deciding whether to scaffold or implement. Follow the dependency order recorded there and build the smallest complete vertical slice rather than generating every screen as disconnected static markup.

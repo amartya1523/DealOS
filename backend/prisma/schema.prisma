@@ -7,19 +7,67 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Role { REP MANAGER FINANCE ADMIN CUSTOMER }
-enum QuoteStage { DRAFT PENDING_APPROVAL APPROVED NEGOTIATION CONFIRMED REJECTED }
-enum ApprovalState { PENDING APPROVED RETURNED REJECTED }
-enum FulfillmentState { SPLIT_PENDING RESERVED PARTIAL FULFILLED BACKORDER }
-enum SubscriptionState { ACTIVE CANCELLED }
-enum InvoiceState { UNPAID PARTIAL PAID }
-enum AlertKind { STALLED DISCOUNT_ANOMALY DELIVERY_SLIPPAGE }
+enum AccountStatus {
+  PENDING
+  ACTIVE
+  DISABLED
+}
+
+enum Role {
+  REP
+  MANAGER
+  FINANCE
+  ADMIN
+  CUSTOMER
+}
+
+enum QuoteStage {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  NEGOTIATION
+  CONFIRMED
+  REJECTED
+}
+
+enum ApprovalState {
+  PENDING
+  APPROVED
+  RETURNED
+  REJECTED
+}
+
+enum FulfillmentState {
+  SPLIT_PENDING
+  RESERVED
+  PARTIAL
+  FULFILLED
+  BACKORDER
+}
+
+enum SubscriptionState {
+  ACTIVE
+  CANCELLED
+}
+
+enum InvoiceState {
+  UNPAID
+  PARTIAL
+  PAID
+}
+
+enum AlertKind {
+  STALLED
+  DISCOUNT_ANOMALY
+  DELIVERY_SLIPPAGE
+}
 
 model User {
   id           String    @id @default(uuid())
   name         String
   email        String    @unique
   passwordHash String
+  status       AccountStatus @default(PENDING)
   role         Role
   customerId   String?
   sessions     Session[]
