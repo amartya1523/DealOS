@@ -153,11 +153,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           children: [
                             Expanded(child: Divider()),
                             Flexible(
+                              flex: 4,
                               child: Padding(
                                 padding: EdgeInsets.symmetric(horizontal: 12),
-                                child: Text(
-                                  'or continue with email',
-                                  textAlign: TextAlign.center,
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    'or continue with email',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                    textAlign: TextAlign.center,
+                                  ),
                                 ),
                               ),
                             ),

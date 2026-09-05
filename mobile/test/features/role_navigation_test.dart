@@ -75,6 +75,11 @@ void main() {
 
     expect(find.text('Sign in with Google'), findsOneWidget);
     expect(find.text('or continue with email'), findsOneWidget);
+    final emailSeparator = tester.widget<Text>(
+      find.text('or continue with email'),
+    );
+    expect(emailSeparator.maxLines, 1);
+    expect(emailSeparator.softWrap, isFalse);
     await tester.tap(find.text('Customer portal'));
     await tester.pump();
 
