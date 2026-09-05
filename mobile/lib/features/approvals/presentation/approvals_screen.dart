@@ -40,9 +40,7 @@ class ApprovalsScreen extends StatelessWidget {
                   '${money(quote.total)} · risk ${quote.riskScore.toStringAsFixed(1)}\n${current == null ? 'Review complete' : 'Current: ${current.step}'}',
                 ),
                 isThreeLine: true,
-                trailing: StatusPill(
-                  current?.state ?? quote.approvals.last.state,
-                ),
+                trailing: StatusPill(current?.state ?? quote.stage),
                 onTap: () => context.push('/approval/${quote.id}'),
               ),
             ),
