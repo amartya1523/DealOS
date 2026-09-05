@@ -11,6 +11,7 @@ import '../features/auth/presentation/login_screen.dart';
 import '../features/billing/presentation/billing_screen.dart';
 import '../features/fulfillment/presentation/fulfillment_screen.dart';
 import '../features/quotations/presentation/quotations_screen.dart';
+import '../features/workspace/domain/models.dart';
 import '../features/workspace/presentation/app_shell.dart';
 import 'providers.dart';
 
@@ -181,10 +182,22 @@ class _SessionGate extends ConsumerWidget {
     return DealOsShell(workspace: workspace, section: section ?? fallback);
   }
 
-  dynamic _findQuote(dynamic workspace, String? id) =>
-      workspace.quotes.where((dynamic item) => item.id == id).firstOrNull;
-  dynamic _findInvoice(dynamic workspace, String? id) =>
-      workspace.invoices.where((dynamic item) => item.id == id).firstOrNull;
+  Quote? _findQuote(Workspace workspace, String? id) {
+    if (id == null) return null;
+    for (final quote in workspace.quotes) {
+      if (quote.id == id) return quote;
+    }
+    return null;
+  }
+
+  Invoice? _findInvoice(Workspace workspace, String? id) {
+    if (id == null) return null;
+    for (final invoice in workspace.invoices) {
+      if (invoice.id == id) return invoice;
+    }
+    return null;
+  }
+
   Widget _denied(BuildContext context) => Scaffold(
     appBar: AppBar(),
     body: EmptyState(

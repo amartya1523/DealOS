@@ -1,3 +1,4 @@
+import 'package:dealos_mobile/app/app.dart';
 import 'package:dealos_mobile/app/providers.dart';
 import 'package:dealos_mobile/features/auth/application/session_controller.dart';
 import 'package:dealos_mobile/features/quotations/presentation/quotations_screen.dart';
@@ -6,6 +7,7 @@ import 'package:dealos_mobile/features/workspace/presentation/app_shell.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 
 import '../fixtures.dart';
 
@@ -78,5 +80,34 @@ void main() {
     expect(find.text('Approvals'), findsWidgets);
     expect(find.text('Approval inbox'), findsOneWidget);
     addTearDown(() => tester.binding.setSurfaceSize(null));
+  });
+
+  testWidgets('opening a quote route resolves a typed workspace record', (
+    tester,
+  ) async {
+    final workspace = fixtureWorkspace();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sessionControllerProvider.overrideWith(
+            () => StubSessionController(
+              SessionState(
+                status: SessionStatus.authenticated,
+                workspace: workspace,
+              ),
+            ),
+          ),
+        ],
+        child: const DealOsApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final shellContext = tester.element(find.byType(DealOsShell));
+    GoRouter.of(shellContext).go('/quote/quote-1');
+    await tester.pumpAndSettle();
+
+    expect(find.text('Q-1001'), findsWidgets);
+    expect(find.text('Record unavailable'), findsNothing);
   });
 }
