@@ -195,6 +195,13 @@ export function quotationCapabilities(actor: QuotationActor, quote: CapabilitySo
   return { ...values, reasons };
 }
 
+export function approvedDeliveryTransition(sentAt = new Date()) {
+  return {
+    revision: { state: 'SENT' as const, sentAt },
+    quote: { stage: 'APPROVED' as const, sentAt, version: { increment: 1 }, lastActivity: sentAt },
+  };
+}
+
 type SnapshotLine = { productId?: string; name?: string; sku?: string; quantity?: number; discount?: number|string; unitPrice?: number|string; net?: number|string };
 type RevisionSource = { id: string; revisionNumber: number; state: string; total: {toString():string}|string|number; margin: {toString():string}|string|number; riskScore: {toString():string}|string|number; createdAt: Date; linesSnapshot: unknown };
 

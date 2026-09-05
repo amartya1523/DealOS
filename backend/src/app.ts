@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { db } from './db.js';
 import { acceptCustomerGoogleInvitation, createGoogleOrganizationAdmin, createOrganizationAdmin, findOrLinkGoogleLoginUser, googleSignupSchema, signupSchema, verifyGoogleSignupCredential } from './identity.js';
 import { allocateStock, allocationMetrics, billingSchedule, calculateQuote, FulfillmentRuleError, manualAllocation } from './rules.js';
-import { allowedDiscountForCategory, buildQuotationWhere, createQuotationSchema, customerListQuerySchema, primaryQuotationStages, quotationCapabilities, quotationListQuerySchema, quotationOrderBy, quotationRecordScope, quotationStages, quotationSummaryDto, quoteDraftSchema, quotePreviewSchema, revisionHistory } from './quotations.js';
+import { allowedDiscountForCategory, approvedDeliveryTransition, buildQuotationWhere, createQuotationSchema, customerListQuerySchema, primaryQuotationStages, quotationCapabilities, quotationListQuerySchema, quotationOrderBy, quotationRecordScope, quotationStages, quotationSummaryDto, quoteDraftSchema, quotePreviewSchema, revisionHistory } from './quotations.js';
 import { renderQuotationPdf, type CustomerQuotationPreview } from './quotation-pdf.js';
 import { authenticate as authenticatePlatform, csrfCookieName, hashToken as hashPlatformToken, identityDto, platformSessionCookieName } from './authorization.js';
 import { platformRouter } from './platform.js';
@@ -898,7 +898,7 @@ app.put('/api/v1/quotations/:id/draft', authenticate, requireModule('quotations'
 });
 
 app.post('/api/v1/quotations/:id/submit', authenticate, requireModule('quotations'), requireRole('REP', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
-  const quote = await db.quote.findUnique({ where: { id: routeParam(req, 'id') }, include: { currentRevision: true, lines: { include: { product: true } } } });
+  const quote = await db.quote.findUnique({ where: { id: routeParam(req, 'id') }, include: { currentRevision: true, customerRecord: true, lines: { include: { product: true } } } });
   if (!quote || !(await canAccessInternalQuote(req.user!, quote))) return fail(req, res, 404, 'NOT_FOUND', 'Quotation not found.');
   if (quote.stage !== 'DRAFT' || quote.currentRevision?.state !== 'DRAFT' || !quote.lines.length) return fail(req, res, 409, 'INVALID_STATE', 'Only a complete draft can be submitted.');
   const policy = await db.discountPolicy.findFirst({ where: { organizationId: req.user!.organizationId, tier: quote.customerTier } });
@@ -913,10 +913,16 @@ app.post('/api/v1/quotations/:id/submit', authenticate, requireModule('quotation
     const steps: Array<{ step: string; sequence: number; state: 'PENDING' | 'WAITING' }> = [];
     if (calculation.needsManager) steps.push({ step: 'Sales Manager', sequence: 1, state: 'PENDING' });
     if (calculation.needsFinance) steps.push({ step: 'Finance', sequence: steps.length + 1, state: steps.length ? 'WAITING' : 'PENDING' });
-    await tx.quoteRevision.update({ where: { id: quote.currentRevisionId! }, data: { state: 'SUBMITTED', submittedById: req.user!.id, policySnapshot: asJson({ id: policy.id, version: policy.version, tier: policy.tier, financeThreshold: policy.financeThreshold.toString(), minimumMarginPercent: '12', calculation: { worstExcess: calculation.worstExcess, weightedExcess: calculation.weightedExcess, marginPercent: calculation.marginPercent } }) } });
+    const approvedAt = steps.length ? null : new Date();
+    const delivery = approvedAt ? approvedDeliveryTransition(approvedAt) : null;
+    await tx.quoteRevision.update({ where: { id: quote.currentRevisionId! }, data: { state: steps.length ? 'SUBMITTED' : delivery!.revision.state, sentAt: delivery?.revision.sentAt, submittedById: req.user!.id, policySnapshot: asJson({ id: policy.id, version: policy.version, tier: policy.tier, financeThreshold: policy.financeThreshold.toString(), minimumMarginPercent: '12', calculation: { worstExcess: calculation.worstExcess, weightedExcess: calculation.weightedExcess, marginPercent: calculation.marginPercent } }) } });
     if (steps.length) await tx.approval.createMany({ data: steps.map((step) => ({ quoteId: quote.id, revisionId: quote.currentRevisionId!, cycle, ...step })) });
-    const updated = await tx.quote.update({ where: { id: quote.id }, data: { stage: steps.length ? 'PENDING_APPROVAL' : 'APPROVED', version: { increment: 1 }, lastActivity: new Date() } });
+    const updated = await tx.quote.update({ where: { id: quote.id }, data: steps.length ? { stage: 'PENDING_APPROVAL', version: { increment: 1 }, lastActivity: new Date() } : delivery!.quote });
     await audit(tx, req, 'QUOTE_SUBMITTED', 'Quote', quote.id, steps.length ? steps.map((step) => step.step).join(' then ') : 'Within policy; auto-approved', quote.currentRevisionId!);
+    if (!steps.length) {
+      await ensureCustomerPortalInvite(tx, req, quote.customerRecord);
+      await audit(tx, req, 'QUOTE_SENT', 'Quote', quote.id, 'Automatically sent after policy auto-approval.', quote.currentRevisionId!);
+    }
     return updated;
   });
   return ok(req, res, result);
@@ -928,7 +934,7 @@ app.post('/api/v1/approvals/:id/decision', authenticate, requireModule('approval
   const approvalId = routeParam(req, 'id');
   const result = await db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "Approval" WHERE "id" = ${approvalId} FOR UPDATE`;
-    const approval = await tx.approval.findUnique({ where: { id: approvalId }, include: { quote: true, revision: true } });
+    const approval = await tx.approval.findUnique({ where: { id: approvalId }, include: { quote: { include: { customerRecord: true } }, revision: true } });
     if (!approval || approval.quote.organizationId !== req.user!.organizationId) throw new DomainError(404, 'NOT_FOUND', 'Approval not found.');
     if (approval.state === 'WAITING') throw new DomainError(409, 'APPROVAL_STEP_BLOCKED', 'The previous approval step is incomplete.');
     if (approval.state !== 'PENDING') throw new DomainError(409, 'INVALID_STATE', 'This approval is no longer pending.');
@@ -937,10 +943,17 @@ app.post('/api/v1/approvals/:id/decision', authenticate, requireModule('approval
     if (approval.quote.ownerId === req.user!.id || approval.revision.submittedById === req.user!.id) throw new DomainError(409, 'SELF_APPROVAL_NOT_ALLOWED', 'The quotation owner cannot approve their own deal.');
     const state = parsed.data.decision === 'APPROVE' ? 'APPROVED' : parsed.data.decision === 'RETURN' ? 'RETURNED' : 'REJECTED';
     const step = await tx.approval.update({ where: { id: approval.id }, data: { state, reviewerId: req.user!.id, reason: parsed.data.reason, decidedAt: new Date() } });
+    await audit(tx, req, `APPROVAL_${parsed.data.decision}`, 'Quote', approval.quoteId, parsed.data.reason, approval.revisionId);
     if (state === 'APPROVED') {
       const next = await tx.approval.findFirst({ where: { quoteId: approval.quoteId, cycle: approval.cycle, state: 'WAITING' }, orderBy: { sequence: 'asc' } });
       if (next) await tx.approval.update({ where: { id: next.id }, data: { state: 'PENDING' } });
-      else await tx.quote.update({ where: { id: approval.quoteId }, data: { stage: 'APPROVED', version: { increment: 1 }, lastActivity: new Date() } });
+      else {
+        const delivery = approvedDeliveryTransition();
+        await tx.quoteRevision.update({ where: { id: approval.revisionId }, data: delivery.revision });
+        await tx.quote.update({ where: { id: approval.quoteId }, data: delivery.quote });
+        await ensureCustomerPortalInvite(tx, req, approval.quote.customerRecord);
+        await audit(tx, req, 'QUOTE_SENT', 'Quote', approval.quoteId, 'Automatically sent after final approval.', approval.revisionId);
+      }
     } else {
       await tx.approval.updateMany({ where: { quoteId: approval.quoteId, cycle: approval.cycle, id: { not: approval.id }, state: { in: ['PENDING', 'WAITING'] } }, data: { state: 'SUPERSEDED' } });
       if (state === 'RETURNED') {
@@ -949,7 +962,6 @@ app.post('/api/v1/approvals/:id/decision', authenticate, requireModule('approval
         await tx.quote.update({ where: { id: approval.quoteId }, data: { stage: 'DRAFT', currentRevisionId: revision.id, sentAt: null, version: { increment: 1 }, lastActivity: new Date() } });
       } else await tx.quote.update({ where: { id: approval.quoteId }, data: { stage: 'REJECTED', version: { increment: 1 }, lastActivity: new Date() } });
     }
-    await audit(tx, req, `APPROVAL_${parsed.data.decision}`, 'Quote', approval.quoteId, parsed.data.reason, approval.revisionId);
     return step;
   });
   return ok(req, res, result);
