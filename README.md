@@ -23,7 +23,8 @@ All monetary values are represented in Indian rupees (INR) and displayed using I
 
 | Layer | Technology |
 | --- | --- |
-| Frontend | React 19, TypeScript, Vite, GSAP, Lucide React |
+| Web frontend | React 19, TypeScript, Vite, GSAP, Lucide React |
+| Mobile | Flutter, Dart, Riverpod, Dio, GoRouter |
 | Backend | Node.js 22, Express 5, TypeScript, Zod |
 | Database | PostgreSQL 17, Prisma ORM |
 | Testing | Vitest, Testing Library, API workflow audit |
@@ -39,6 +40,10 @@ DealOS/
 │   └── tests/                # Backend unit and integration tests
 ├── frontend/
 │   └── src/                  # React application and frontend tests
+├── mobile/
+│   ├── lib/                  # Flutter feature-first application
+│   ├── test/                 # Unit and widget tests
+│   └── integration_test/     # Opt-in real-backend device test
 ├── compose.yaml              # Local PostgreSQL service
 └── README.md
 ```
@@ -48,6 +53,7 @@ DealOS/
 - Node.js 22 or later
 - npm
 - Docker Desktop or a locally available PostgreSQL 17 instance
+- Flutter 3.41.9 or a compatible newer stable release for the mobile client
 
 ## Local setup
 
@@ -111,6 +117,19 @@ npm run dev
 ```
 
 Open [http://localhost:5173](http://localhost:5173). The API runs at [http://localhost:4000](http://localhost:4000).
+
+Mobile, in another terminal with an emulator or simulator running:
+
+```bash
+cd mobile
+flutter pub get
+flutter run --flavor development \
+  --dart-define=DEALOS_ENV=development \
+  --dart-define=DEALOS_API_BASE_URL=http://10.0.2.2:4000/api/v1 \
+  --dart-define=DEALOS_ALLOWED_ORIGIN=http://localhost:5173
+```
+
+Use `http://localhost:4000/api/v1` instead on the iOS simulator. See [`mobile/README.md`](mobile/README.md) for environment, security, testing, and release details.
 
 ## Environment variables
 

@@ -16,3 +16,9 @@ backend/prisma/generated/
 .cache/
 .turbo/
 
+# Mobile build outputs and signing material
+mobile/release-artifacts/
+*.jks
+*.keystore
+*.p12
+*.mobileprovision
