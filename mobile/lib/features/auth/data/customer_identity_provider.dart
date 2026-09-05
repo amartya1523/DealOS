@@ -13,7 +13,7 @@ class CustomerGoogleCredential {
 abstract interface class CustomerIdentityProvider {
   Future<CustomerGoogleCredential> authenticate({
     required String serverClientId,
-    required String expectedEmail,
+    String? expectedEmail,
   });
 }
 
@@ -32,12 +32,12 @@ class GoogleCustomerIdentityProvider implements CustomerIdentityProvider {
   @override
   Future<CustomerGoogleCredential> authenticate({
     required String serverClientId,
-    required String expectedEmail,
+    String? expectedEmail,
   }) async {
     if (kIsWeb) {
       throw const AppException(
         code: 'GOOGLE_MOBILE_ONLY',
-        message: 'Open the customer portal in the DealOS mobile app.',
+        message: 'Google sign-in is available in the DealOS mobile app.',
       );
     }
 
@@ -45,7 +45,7 @@ class GoogleCustomerIdentityProvider implements CustomerIdentityProvider {
     if (normalizedServerClientId.isEmpty) {
       throw const AppException(
         code: 'GOOGLE_NOT_CONFIGURED',
-        message: 'Customer Google sign-in is not configured on the server.',
+        message: 'Google sign-in is not configured on the server.',
       );
     }
 
@@ -76,9 +76,11 @@ class GoogleCustomerIdentityProvider implements CustomerIdentityProvider {
       // lets the customer explicitly choose the account matching the invite.
       await _googleSignIn.signOut();
       final account = await _googleSignIn.authenticate();
-      final normalizedExpected = expectedEmail.trim().toLowerCase();
       final normalizedActual = account.email.trim().toLowerCase();
-      if (normalizedActual != normalizedExpected) {
+      final normalizedExpected = expectedEmail?.trim().toLowerCase();
+      if (normalizedExpected != null &&
+          normalizedExpected.isNotEmpty &&
+          normalizedActual != normalizedExpected) {
         await _googleSignIn.signOut();
         throw AppException(
           code: 'GOOGLE_EMAIL_MISMATCH',

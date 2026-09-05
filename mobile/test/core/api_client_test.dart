@@ -153,54 +153,65 @@ void main() {
     },
   );
 
-  test(
-    'customer Google auth uses the website contract and stores session',
-    () async {
-      final store = MemorySessionStore();
-      RequestOptions? customerLogin;
-      final dio = Dio()
-        ..httpClientAdapter = StubAdapter((options) {
-          if (options.path.endsWith('/auth/google/config')) {
-            return jsonBody({
-              'success': true,
-              'data': {
-                'enabled': true,
-                'clientId': 'web-client.apps.googleusercontent.com',
-              },
-            }, 200);
-          }
+  test('Google auth uses the website contracts and stores session', () async {
+    final store = MemorySessionStore();
+    RequestOptions? customerLogin;
+    RequestOptions? organizationLogin;
+    final dio = Dio()
+      ..httpClientAdapter = StubAdapter((options) {
+        if (options.path.endsWith('/auth/google/config')) {
+          return jsonBody({
+            'success': true,
+            'data': {
+              'enabled': true,
+              'clientId': 'web-client.apps.googleusercontent.com',
+            },
+          }, 200);
+        }
+        if (options.path.endsWith('/auth/google/customer')) {
           customerLogin = options;
-          return jsonBody(
-            {
-              'success': true,
-              'data': {'role': 'CUSTOMER', 'csrfToken': 'customer-csrf'},
-            },
-            200,
-            headers: {
-              'set-cookie': ['dealos_session=customer-session; HttpOnly'],
-            },
-          );
-        });
-      final repository = AuthRepository(
-        ApiClient(config: config, sessionStore: store, dio: dio),
-      );
-
-      final google = await repository.googleAuthConfig();
-      expect(google.enabled, isTrue);
-      expect(google.clientId, 'web-client.apps.googleusercontent.com');
-      await repository.loginCustomerWithGoogle(
-        email: ' Buyer@Vertex.Test ',
-        credential: 'signed-google-id-token',
-      );
-
-      expect(customerLogin?.path, endsWith('/auth/google/customer'));
-      expect(customerLogin?.method, 'POST');
-      expect(customerLogin?.data, {
-        'email': 'buyer@vertex.test',
-        'credential': 'signed-google-id-token',
+        }
+        if (options.path.endsWith('/auth/google/login')) {
+          organizationLogin = options;
+        }
+        return jsonBody(
+          {
+            'success': true,
+            'data': {'role': 'CUSTOMER', 'csrfToken': 'customer-csrf'},
+          },
+          200,
+          headers: {
+            'set-cookie': ['dealos_session=customer-session; HttpOnly'],
+          },
+        );
       });
-      expect(store.cookies['dealos_session'], 'customer-session');
-      expect(store.csrf, 'customer-csrf');
-    },
-  );
+    final repository = AuthRepository(
+      ApiClient(config: config, sessionStore: store, dio: dio),
+    );
+
+    final google = await repository.googleAuthConfig();
+    expect(google.enabled, isTrue);
+    expect(google.clientId, 'web-client.apps.googleusercontent.com');
+    await repository.loginCustomerWithGoogle(
+      email: ' Buyer@Vertex.Test ',
+      credential: 'signed-google-id-token',
+    );
+
+    expect(customerLogin?.path, endsWith('/auth/google/customer'));
+    expect(customerLogin?.method, 'POST');
+    expect(customerLogin?.data, {
+      'email': 'buyer@vertex.test',
+      'credential': 'signed-google-id-token',
+    });
+    await repository.loginWithGoogle(
+      credential: 'organization-google-id-token',
+    );
+    expect(organizationLogin?.path, endsWith('/auth/google/login'));
+    expect(organizationLogin?.method, 'POST');
+    expect(organizationLogin?.data, {
+      'credential': 'organization-google-id-token',
+    });
+    expect(store.cookies['dealos_session'], 'customer-session');
+    expect(store.csrf, 'customer-csrf');
+  });
 }

@@ -55,6 +55,12 @@ class AuthRepository {
     data: {'email': email.trim().toLowerCase(), 'credential': credential},
   );
 
+  Future<void> loginWithGoogle({required String credential}) => _api.request(
+    '/auth/google/login',
+    method: 'POST',
+    data: {'credential': credential},
+  );
+
   Future<void> signUp({
     required String organizationName,
     required String displayName,

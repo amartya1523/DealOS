@@ -132,6 +132,45 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ),
                         const SizedBox(height: 16),
                       ],
+                      if (_mode == _LoginMode.organization) ...[
+                        OutlinedButton(
+                          onPressed: session.busy
+                              ? null
+                              : () => ref
+                                    .read(sessionControllerProvider.notifier)
+                                    .loginWithGoogle(),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(52),
+                          ),
+                          child: session.busy
+                              ? const SizedBox.square(
+                                  dimension: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const _GoogleButtonContent(
+                                  label: 'Sign in with Google',
+                                ),
+                        ),
+                        const SizedBox(height: 18),
+                        const Row(
+                          children: [
+                            Expanded(child: Divider()),
+                            Flexible(
+                              child: Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 12),
+                                child: Text(
+                                  'or continue with email',
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                            ),
+                            Expanded(child: Divider()),
+                          ],
+                        ),
+                        const SizedBox(height: 18),
+                      ],
                       Form(
                         key: _formKey,
                         child: Column(
@@ -221,15 +260,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                       ),
                                     )
                                   : _customer
-                                  ? const Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        _GoogleMark(),
-                                        SizedBox(width: 12),
-                                        Text('Continue with Google'),
-                                      ],
+                                  ? const _GoogleButtonContent(
+                                      label: 'Continue with Google',
                                     )
                                   : const Text('Sign in'),
                             ),
@@ -328,6 +360,29 @@ class _GoogleMark extends StatelessWidget {
       fontSize: 20,
       fontWeight: FontWeight.w900,
     ),
+  );
+}
+
+class _GoogleButtonContent extends StatelessWidget {
+  const _GoogleButtonContent({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      const _GoogleMark(),
+      const SizedBox(width: 12),
+      Expanded(
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+        ),
+      ),
+      const SizedBox(width: 32),
+    ],
   );
 }
 

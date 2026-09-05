@@ -58,6 +58,8 @@ void main() {
   testWidgets('login exposes the website customer invitation doorway', (
     tester,
   ) async {
+    await tester.binding.setSurfaceSize(const Size(430, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -71,6 +73,8 @@ void main() {
       ),
     );
 
+    expect(find.text('Sign in with Google'), findsOneWidget);
+    expect(find.text('or continue with email'), findsOneWidget);
     await tester.tap(find.text('Customer portal'));
     await tester.pump();
 

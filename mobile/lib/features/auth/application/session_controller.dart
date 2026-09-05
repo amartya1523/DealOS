@@ -153,6 +153,35 @@ class SessionController extends Notifier<SessionState> {
     }
   }
 
+  Future<void> loginWithGoogle() async {
+    state = const SessionState(
+      status: SessionStatus.unauthenticated,
+      busy: true,
+    );
+    try {
+      await ref.read(workspaceRepositoryProvider).clearCache();
+      final auth = ref.read(authRepositoryProvider);
+      final config = await auth.googleAuthConfig();
+      final clientId = config.clientId?.trim() ?? '';
+      if (!config.enabled || clientId.isEmpty) {
+        throw const AppException(
+          code: 'GOOGLE_NOT_CONFIGURED',
+          message: 'Google sign-in is not enabled on the server.',
+        );
+      }
+      final identity = await ref
+          .read(customerIdentityProvider)
+          .authenticate(serverClientId: clientId);
+      await auth.loginWithGoogle(credential: identity.idToken);
+      await _loadAuthorized();
+    } on AppException catch (error) {
+      state = SessionState(
+        status: SessionStatus.unauthenticated,
+        error: error.message,
+      );
+    }
+  }
+
   Future<void> signUp({
     required String organization,
     required String name,
