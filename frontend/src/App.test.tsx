@@ -13,6 +13,7 @@ vi.mock("gsap/ScrollTrigger", () => ({ ScrollTrigger: {} }));
 const fetchMock = vi.fn();
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
+  window.scrollTo = vi.fn();
   fetchMock.mockReset();
   fetchMock.mockResolvedValue({
     ok: false,
@@ -47,7 +48,7 @@ describe("DealOS public routes", () => {
   it("shows a failed login without losing entered email", async () => {
     window.history.replaceState({}, "", "/sign-in");
     render(<App />);
-    fireEvent.change(screen.getByLabelText("Work email"), {
+    fireEvent.change(screen.getByLabelText("Email or user ID"), {
       target: { value: "test@example.com" },
     });
     fireEvent.change(screen.getByLabelText("Password"), {
@@ -59,17 +60,19 @@ describe("DealOS public routes", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Please sign in",
     );
-    expect(screen.getByLabelText("Work email")).toHaveValue("test@example.com");
+    expect(screen.getByLabelText("Email or user ID")).toHaveValue("test@example.com");
   });
-  it("onboards an organization admin, saves user access, then opens login", async () => {
+  it("creates an organization admin and opens the isolated admin dashboard", async () => {
     window.history.replaceState({}, "", "/sign-up");
     fetchMock.mockImplementation((url: string) =>
       Promise.resolve({
-        ok: url.endsWith("/signup"),
+        ok: url.endsWith("/signup") || url.endsWith("/workspace"),
         json: async () =>
           url.endsWith("/signup")
             ? { success: true, data: { status: "ACTIVE", role: "ADMIN" } }
-            : { success: false },
+            : url.endsWith("/workspace")
+              ? { success:true, data:{user:{id:'a',name:'Test Person',email:'test@example.com',role:'ADMIN',moduleAccess:[]},organization:{id:'o',name:'Acme'},users:[],quotes:[],products:[],policies:[],warehouses:[],subscriptions:[],invoices:[],alerts:[],audits:[]} }
+              : { success: false },
       }),
     );
     render(<App />);
@@ -77,29 +80,20 @@ describe("DealOS public routes", () => {
       target: { value: "Acme" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    fireEvent.change(screen.getByLabelText("User email"), {
-      target: { value: "rep@example.com" },
-    });
-    fireEvent.change(screen.getByLabelText("Access"), {
-      target: { value: "MANAGER" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     fireEvent.change(screen.getByLabelText("Admin full name"), {
       target: { value: "Test Person" },
     });
-    fireEvent.change(screen.getByLabelText("Work email"), {
+    fireEvent.change(screen.getByLabelText("Admin email"), {
       target: { value: "test@example.com" },
     });
     fireEvent.change(screen.getByLabelText("Password"), {
       target: { value: "TestPassword12!" },
     });
     fireEvent.click(
-      screen.getByRole("button", { name: "Create admin account" }),
+      screen.getByRole("button", { name: "Create organization" }),
     );
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "Organization created",
-    );
-    expect(window.location.pathname).toBe("/sign-in");
+    expect(await screen.findByRole("heading", {name:"Sales dashboard"})).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/app");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/auth/signup",
       expect.objectContaining({
@@ -109,7 +103,6 @@ describe("DealOS public routes", () => {
           email: "test@example.com",
           password: "TestPassword12!",
           displayName: "Test Person",
-          users: [{ email: "rep@example.com", role: "MANAGER" }],
         }),
       }),
     );

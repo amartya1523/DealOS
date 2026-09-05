@@ -73,7 +73,7 @@ function GoogleAuth({ mode, organizationName = "", onComplete, onError }: { mode
         text: mode === "signup" ? "signup_with" : "signin_with",
         shape: "rectangular",
         logo_alignment: "left",
-        width: Math.min(400, buttonRef.current.clientWidth || 400),
+        width: buttonRef.current.clientWidth || 400,
       });
     };
     const existing = document.querySelector<HTMLScriptElement>('script[data-dealos-google-identity]');
@@ -118,7 +118,9 @@ function GoogleAuth({ mode, organizationName = "", onComplete, onError }: { mode
   );
   return (
     <>
-      <div className="google-signup" ref={buttonRef} aria-label={`Google ${mode}`} />
+      <div className="google-signup" ref={buttonRef} aria-label={`Google ${mode}`}>
+        <span className="google-loading">Loading Google…</span>
+      </div>
       <div className="auth-divider"><span>or continue with work email</span></div>
     </>
   );
@@ -303,6 +305,7 @@ export function AuthPage({
                 </small>
                 </>
               )}
+              {!signup && <GoogleAuth mode="login" onComplete={onSuccess} onError={setError} />}
               {!signup && <>
                 <label>
                   Email or user ID
@@ -316,7 +319,6 @@ export function AuthPage({
                   </div>
                 </label>
               </>}
-              {!signup && <GoogleAuth mode="login" onComplete={onSuccess} onError={setError} />}
               <div className="onboarding-actions">
                 {signup && step > 1 && <button className="back-step" type="button" onClick={() => setStep(step - 1)}>Back</button>}
               <button className="cta" disabled={busy}>

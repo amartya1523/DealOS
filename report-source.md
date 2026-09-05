@@ -29,6 +29,17 @@ The supplied problem statement defines the core problem as disconnected approval
 
 Visual thesis: **the living deal file**. Use warm paper, carbon-black ink, and signal orange with restrained steel-blue information accents. Avoid glossy 3D sculpture, green, purple, and gradient-heavy hero art. The hero visual is an actual DealOS quote interface composed as layered document frames. Scroll depth peels those frames apart, then recombines them into a single governed record. A pinned vertical sequence replaces the previous horizontal flavor-style carousel. Parallax affects only background grids, frame layers, and non-essential labels; content remains stationary enough to read.
 
+## 2026-09-05 enhancement research: cross-surface DealOS
+
+The established theme is best described as **editorial industrialism with neo-brutalist structure**: Swiss-scale typography, visible rules and coordinates, paper/document metaphors, hard-edged panels, and a limited signal palette. The appropriate evolution is not a new decorative style but a wider operating-system metaphor. Mobile, voice, and assistant surfaces should look like different apertures into the same governed deal record.
+
+- GSAP documents `scrub`, pinning, responsive media-query setups, resize recalculation, and native scrolling as first-class ScrollTrigger behaviors. The enhanced page therefore uses parallax only on nested decorative/image layers and keeps the content sections in normal document flow. Source: GSAP, “ScrollTrigger,” https://gsap.com/docs/v3/Plugins/ScrollTrigger/
+- W3C notes that scroll-caused movement can trigger vestibular symptoms and documents `prefers-reduced-motion` as the mechanism for suppressing nonessential motion. Every new moving layer has a static reduced-motion state, and the existing global pause control remains available. Source: W3C WAI, “Technique C39: Using the CSS prefers-reduced-motion query to prevent motion,” updated 2026-01-12, https://www.w3.org/WAI/WCAG21/Techniques/css/C39.html
+- Apple’s design principles recommend supporting multiple inputs including voice, touch, and keyboard, while maintaining consistent behavior and clear feedback. The voice control is explicit and reversible, and the chatbot also supports text input. Source: Apple, “Design principles,” updated 2026-06-08, https://developer.apple.com/design/human-interface-guidelines/design-principles
+- Apple’s Live Activities guidance recommends showing essential information at a glance, linking directly to the relevant detail, preserving visual identity across devices, and updating only when state changes. The mobile chapter therefore shows approval state, fulfillment progress, revision identity, and direct continuation rather than reproducing the desktop dashboard. Source: Apple, “Live Activities,” updated 2025-12-16, https://developer.apple.com/design/human-interface-guidelines/live-activities
+
+Implementation decision: add one generated mobile product photograph, a three-layer synchronization story, an interactive voice-agent demonstration, and a persistent contextual assistant. Keep all responses tied to Q-1048 so the experience proves continuity instead of making generic AI claims. Use the same DealOS layered mark in public navigation, authenticated modules, chatbot chrome, and the browser favicon.
+
 ## New public flow
 
 1. Hero: one deal record, already useful and visible.
