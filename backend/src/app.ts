@@ -9,6 +9,8 @@ import { z } from 'zod';
 import { db } from './db.js';
 import { acceptCustomerGoogleInvitation, createGoogleOrganizationAdmin, createOrganizationAdmin, findOrLinkGoogleLoginUser, googleSignupSchema, signupSchema, verifyGoogleSignupCredential } from './identity.js';
 import { allocateStock, allocationMetrics, billingSchedule, calculateQuote, FulfillmentRuleError, manualAllocation } from './rules.js';
+import { allowedDiscountForCategory, buildQuotationWhere, createQuotationSchema, customerListQuerySchema, primaryQuotationStages, quotationCapabilities, quotationListQuerySchema, quotationOrderBy, quotationRecordScope, quotationStages, quotationSummaryDto, quoteDraftSchema, quotePreviewSchema, revisionHistory } from './quotations.js';
+import { renderQuotationPdf, type CustomerQuotationPreview } from './quotation-pdf.js';
 import { authenticate as authenticatePlatform, csrfCookieName, hashToken as hashPlatformToken, identityDto, platformSessionCookieName } from './authorization.js';
 import { platformRouter } from './platform.js';
 import { clearPlatformLoginFailures, platformLoginAllowed, platformOwnerCredentialsMatch, readPlatformOwnerCredentials, recordPlatformLoginFailure } from './platform-owner.js';
@@ -42,6 +44,87 @@ const parseCookies = (header = '') => Object.fromEntries(header.split(';').map((
 const csrfForToken = (token: string) => hash(`dealos-csrf:${token}`);
 const termsHash = (value: unknown) => hash(JSON.stringify(value));
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+
+const numeric = (value: unknown, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+const formatPercent = (value: number) => `${Number(value.toFixed(2))}%`;
+const formatPoints = (value: number) => `${Number(value.toFixed(2))} pts`;
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+function approvalRiskBreakdown(quote: any) {
+  const revision = quote.currentRevision;
+  const snapshot = isRecord(revision?.policySnapshot) ? revision.policySnapshot : {};
+  const calculation = isRecord(snapshot.calculation) ? snapshot.calculation : {};
+  const orderDiscount = numeric(revision?.orderDiscount ?? quote.orderDiscount);
+  const grossLines = (quote.lines ?? []).map((line: any) => {
+    const discount = numeric(line.discount);
+    const allowed = numeric(line.allowedDiscount);
+    const effectiveDiscount = 100 - ((100 - discount) * (100 - orderDiscount)) / 100;
+    const excess = Math.max(0, effectiveDiscount - allowed);
+    return {
+      productId: line.productId,
+      product: line.product?.name ?? 'Line item',
+      gross: numeric(line.unitPrice) * numeric(line.quantity, 1),
+      discount,
+      effectiveDiscount,
+      allowed,
+      excess,
+    };
+  });
+  const grossTotal = grossLines.reduce((sum: number, line: any) => sum + line.gross, 0);
+  const lineWeightedExcess = grossTotal ? grossLines.reduce((sum: number, line: any) => sum + line.gross * line.excess, 0) / grossTotal : 0;
+  const worstLine = [...grossLines].sort((left, right) => right.excess - left.excess)[0] ?? null;
+  const worstExcess = numeric(calculation.worstExcess, worstLine?.excess ?? 0);
+  const weightedExcess = numeric(calculation.weightedExcess, lineWeightedExcess);
+  const subtotal = numeric(revision?.subtotal, Math.max(0, numeric(quote.total) - numeric(quote.taxTotal)));
+  const margin = numeric(revision?.margin ?? quote.margin);
+  const marginPercent = numeric(calculation.marginPercent, subtotal ? (margin / subtotal) * 100 : 0);
+  const financeThreshold = numeric(snapshot.financeThreshold, 5);
+  const minimumMarginPercent = numeric(snapshot.minimumMarginPercent, 12);
+  const version = Number.isInteger(numeric(snapshot.version, NaN)) ? numeric(snapshot.version) : null;
+  const tier = String(snapshot.tier ?? quote.customerTier ?? 'Customer');
+  const steps = (quote.approvals ?? [])
+    .filter((approval: any) => approval.revisionId === quote.currentRevisionId)
+    .sort((left: any, right: any) => numeric(left.sequence) - numeric(right.sequence));
+  const requiredSteps = [...new Set(steps.map((approval: any) => approval.step))];
+  const managerReasons = [
+    worstExcess > 0 ? `worst line excess is ${formatPoints(worstExcess)}` : '',
+    weightedExcess > 0 ? `value-weighted excess is ${formatPoints(weightedExcess)}` : '',
+  ].filter(Boolean);
+  const financeReasons = [
+    worstExcess > financeThreshold ? `worst line excess ${formatPoints(worstExcess)} exceeds ${formatPoints(financeThreshold)}` : '',
+    weightedExcess > financeThreshold ? `weighted excess ${formatPoints(weightedExcess)} exceeds ${formatPoints(financeThreshold)}` : '',
+    marginPercent < minimumMarginPercent ? `margin ${formatPercent(marginPercent)} is below ${formatPercent(minimumMarginPercent)}` : '',
+  ].filter(Boolean);
+  const approvalReason = [
+    requiredSteps.includes('Sales Manager') ? `Manager: ${managerReasons.join('; ') || 'line or blended excess requires manager review'}.` : '',
+    requiredSteps.includes('Finance') ? `Finance: ${financeReasons.join('; ') || 'finance review is required by the routed policy snapshot'}.` : '',
+  ].filter(Boolean).join(' ') || 'No manager or finance approval is required for this revision.';
+  const worstLabel = worstLine && worstLine.excess > 0 ? `${worstLine.product}: effective ${formatPercent(worstLine.effectiveDiscount)} vs ${formatPercent(worstLine.allowed)} limit` : 'No individual line exceeds its policy limit.';
+
+  return {
+    worstExcess,
+    weightedExcess,
+    orderDiscount,
+    marginPercent,
+    financeThreshold,
+    minimumMarginPercent,
+    policyVersion: version,
+    policyTier: tier,
+    managerReason: requiredSteps.includes('Sales Manager') ? (managerReasons.join('; ') || 'Line or blended excess requires manager review.') : 'Manager approval was not required.',
+    financeReason: requiredSteps.includes('Finance') ? (financeReasons.join('; ') || 'Finance review is required by the routed policy snapshot.') : 'Finance approval was not required.',
+    cards: [
+      { key: 'worst-line-excess', label: 'Worst individual line excess', value: formatPoints(worstExcess), detail: worstLabel, tone: worstExcess > 0 ? 'warn' : 'ok' },
+      { key: 'weighted-excess', label: 'Value-weighted excess', value: formatPoints(weightedExcess), detail: 'Weighted by each line gross value so larger lines influence routing more.', tone: weightedExcess > 0 ? 'warn' : 'ok' },
+      { key: 'order-discount', label: 'Order discount', value: formatPercent(orderDiscount), detail: 'Applied across the order after line discounts.', tone: orderDiscount > 0 ? 'warn' : 'ok' },
+      { key: 'margin-percentage', label: 'Margin percentage', value: formatPercent(marginPercent), detail: `Minimum margin floor is ${formatPercent(minimumMarginPercent)}.`, tone: marginPercent < minimumMarginPercent ? 'danger' : 'ok' },
+      { key: 'approval-threshold', label: 'Approval threshold and policy version', value: `${formatPoints(financeThreshold)} / ${version ? `v${version}` : 'unversioned'}`, detail: `${tier} tier policy used for this revision.`, tone: 'neutral' },
+      { key: 'required-review', label: 'Exact required review reason', value: requiredSteps.join(' + ') || 'None', detail: approvalReason, tone: requiredSteps.length ? 'danger' : 'ok' },
+    ],
+  };
+}
 
 const fulfillmentSplitSchema = z.object({
   split: z.array(z.object({ productId: z.string(), warehouseId: z.string(), warehouseName: z.string(), quantity: z.number().int().positive() })),
@@ -126,8 +209,22 @@ const requireCsrf = (req: AuthRequest, res: Response, next: NextFunction) => {
   return next();
 };
 const audit = (tx: Tx, req: AuthRequest, action: string, resource: string, resourceId: string, reason?: string, revisionId?: string) => tx.auditEvent.create({ data: { organizationId: req.user!.organizationId, actorId: req.user?.id, action, resource, resourceId, reason, revisionId, requestId: req.requestId } });
-const canAccessInternalQuote = (actor: Actor, quote: { ownerId: string; organizationId: string }) => quote.organizationId === actor.organizationId && (actor.role !== 'REP' || quote.ownerId === actor.id);
-const internalQuoteWhere = (actor: Actor) => ({ organizationId: actor.organizationId, ...(actor.role === 'REP' ? { ownerId: actor.id } : {}) });
+async function canAccessInternalQuote(actor: Actor, quote: { ownerId: string; organizationId: string; teamId?: string | null }) {
+  if (quote.organizationId !== actor.organizationId) return false;
+  if (actor.role === 'REP') return quote.ownerId === actor.id;
+  if (actor.role !== 'MANAGER' || !quote.teamId) return true;
+  return Boolean(await db.salesTeam.findFirst({ where: { id: quote.teamId, organizationId: actor.organizationId, OR: [{ managerId: actor.id }, { members: { some: { userId: actor.id } } }] }, select: { id: true } }));
+}
+const internalQuoteWhere = (actor: Actor):Prisma.QuoteWhereInput => ({ organizationId: actor.organizationId, ...quotationRecordScope(actor) });
+const quotationListInclude = {
+  owner: { select: { id: true, name: true } },
+  customerRecord: { select: { currency: true } },
+  team: { select: { id: true, name: true } },
+  currentRevision: { select: { id: true, state: true, currency: true } },
+  approvals: { select: { revisionId: true, state: true, step: true, sequence: true, cycle: true }, orderBy: [{ cycle: 'desc' }, { sequence: 'asc' }] },
+  negotiation: { select: { revisionId: true, kind: true, state: true } },
+  order: { select: { id: true } },
+} satisfies Prisma.QuoteInclude;
 
 async function ensureCustomerPortalInvite(tx: Tx, req: AuthRequest, customer: { id: string; email: string | null; name: string }, force = false) {
   if (!customer.email) return null;
@@ -388,7 +485,7 @@ app.get('/api/v1/workspace', authenticate, async (req: AuthRequest, res) => {
     db.organization.findUnique({ where: { id: req.user!.organizationId }, select: { id: true, name: true } }),
     req.user!.role === 'ADMIN' ? db.organizationMembership.findMany({ where: { organizationId: req.user!.organizationId }, select: { accessRole: true, businessRole: true, status: true, createdAt: true, user: { select: { id: true, name: true, email: true, loginId: true, status: true, moduleAccess: true, createdAt: true } } }, orderBy: { createdAt: 'desc' } }).then((memberships) => memberships.map(({ user, ...membership }) => ({ ...user, role: membership.businessRole, membershipStatus: membership.status, accessRole: membership.accessRole, joinedAt: membership.createdAt }))) : [],
     !portal && (hasModule(req.user, 'customers') || hasModule(req.user, 'invoices')) ? db.customer.findMany({ where: { organizationId: req.user!.organizationId }, include: { quotes: { select: { id: true, number: true, stage: true, total: true, updatedAt: true }, orderBy: { updatedAt: 'desc' }, take: 5 }, invoices: { select: { id: true, number: true, state: true, amount: true, paidAmount: true, dueAt: true }, orderBy: { createdAt: 'desc' }, take: 5 }, users: { where: { role: 'CUSTOMER' }, select: { id: true, email: true, status: true, googleSubject: true } }, invitations: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true, email: true, status: true, expiresAt: true, createdAt: true } } }, orderBy: { updatedAt: 'desc' } }) : [],
-    db.quote.findMany({ where: quoteWhere, include: { owner: { select: { id: true, name: true } }, lines: { include: { product: true } }, approvals: { orderBy: [{ cycle: 'desc' }, { sequence: 'asc' }] }, fulfillment: true, order: true, negotiation: { orderBy: { createdAt: 'desc' } }, invoices: true }, orderBy: { updatedAt: 'desc' } }),
+    db.quote.findMany({ where: quoteWhere, include: { currentRevision: true, owner: { select: { id: true, name: true } }, lines: { include: { product: true } }, approvals: { orderBy: [{ cycle: 'desc' }, { sequence: 'asc' }] }, fulfillment: true, order: true, negotiation: { orderBy: { createdAt: 'desc' } }, invoices: true }, orderBy: { updatedAt: 'desc' } }),
     !portal && (hasModule(req.user, 'products') || hasModule(req.user, 'invoices')) ? db.product.findMany({ where: { organizationId: req.user!.organizationId }, include: { stocks: { include: { warehouse: true } } }, orderBy: { name: 'asc' } }) : [],
     !portal && hasModule(req.user, 'policies') ? db.discountPolicy.findMany({ where: { organizationId: req.user!.organizationId }, orderBy: { tier: 'asc' } }) : [],
     !portal && hasModule(req.user, 'fulfillment') ? db.warehouse.findMany({ where: { organizationId: req.user!.organizationId }, include: { stocks: { include: { product: true } } }, orderBy: { priority: 'asc' } }) : [],
@@ -397,7 +494,7 @@ app.get('/api/v1/workspace', authenticate, async (req: AuthRequest, res) => {
     !portal && hasModule(req.user, 'health') ? db.alert.findMany({ where: { organizationId: req.user!.organizationId }, orderBy: { createdAt: 'desc' } }) : [],
     !portal && (hasModule(req.user, 'reports') || hasModule(req.user, 'health')) ? db.auditEvent.findMany({ where: { organizationId: req.user!.organizationId, ...(req.user!.role === 'REP' ? { actorId: req.user!.id } : {}) }, orderBy: { createdAt: 'desc' }, take: 60 }) : [],
   ]);
-  const quotes = portal ? rawQuotes.map(portalQuoteDto) : rawQuotes;
+  const quotes = portal ? rawQuotes.map(portalQuoteDto) : rawQuotes.map((quote) => ({ ...quote, riskBreakdown: approvalRiskBreakdown(quote) }));
   const invoices = portal ? rawInvoices.map(portalInvoiceDto) : rawInvoices;
   const subscriptions = rawSubscriptions.map((subscription) => ({ ...subscription, schedule: billingSchedule(subscription.nextBillAt, subscription.cadence) }));
   const warehouseDtos = warehouses.map((warehouse) => ({ ...warehouse, stocks: warehouse.stocks.map((stock) => ({ ...stock, available: stock.onHand - stock.reserved })) }));
@@ -472,44 +569,264 @@ app.post('/api/v1/customers/:id/portal-invite', authenticate, requireModule('cus
   return ok(req, res, { id: invitation!.id, email: invitation!.email, status: invitation!.status, expiresAt: invitation!.expiresAt }, 201);
 });
 
-const quoteCreateSchema = z.object({ customer: z.string().trim().min(2).optional(), customerId: z.string().uuid().optional(), customerTier: z.string().trim().min(2).optional() }).strict().refine((value) => value.customer || value.customerId, { message: 'Customer is required.' });
-app.post('/api/v1/quotations', authenticate, requireModule('quotations'), requireRole('REP', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
-  const parsed = quoteCreateSchema.safeParse(req.body);
-  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Customer and tier are required.', parsed.error.flatten());
-  let customer = parsed.data.customerId ? await db.customer.findFirst({ where: { id: parsed.data.customerId, organizationId: req.user!.organizationId, active: true } }) : await db.customer.findFirst({ where: { organizationId: req.user!.organizationId, name: { equals: parsed.data.customer!, mode: 'insensitive' }, active: true } });
-  if (!customer && parsed.data.customer) customer = await db.customer.create({ data: { organizationId: req.user!.organizationId, name: parsed.data.customer, tier: parsed.data.customerTier ?? 'Bronze', currency: 'INR' } });
-  if (!customer) return fail(req, res, 422, 'CONFIGURATION_REQUIRED', 'Select an active customer.');
-  const number = `Q-${Date.now().toString().slice(-8)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
-  const quote = await db.$transaction(async (tx) => {
-    const created = await tx.quote.create({ data: { organizationId: req.user!.organizationId, number, customer: customer!.name, customerId: customer!.id, customerTier: parsed.data.customerTier ?? customer!.tier, ownerId: req.user!.id } });
-    const revision = await tx.quoteRevision.create({ data: { quoteId: created.id, revisionNumber: 1, state: 'DRAFT', orderDiscount: 0, subtotal: 0, taxTotal: 0, total: 0, margin: 0, riskScore: 0, totalsByCadence: {}, linesSnapshot: [], policySnapshot: {}, termsHash: termsHash({ quoteId: created.id, revision: 1, nonce: crypto.randomUUID() }) } });
-    const result = await tx.quote.update({ where: { id: created.id }, data: { currentRevisionId: revision.id } });
-    await audit(tx, req, 'QUOTE_CREATED', 'Quote', created.id, undefined, revision.id);
-    return result;
+app.get('/api/v1/customers', authenticate, requireModule('quotations'), requireRole('REP', 'MANAGER', 'FINANCE', 'ADMIN'), async (req: AuthRequest, res) => {
+  const parsed = customerListQuerySchema.safeParse(req.query);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Use valid customer filters.', parsed.error.flatten());
+  const customers = await db.customer.findMany({
+    where: {
+      organizationId: req.user!.organizationId,
+      active: true,
+      ...(parsed.data.search ? { name: { contains: parsed.data.search, mode: 'insensitive' as const } } : {}),
+    },
+    select: { id: true, name: true, tier: true, currency: true },
+    orderBy: [{ name: 'asc' }, { id: 'asc' }],
+    take: parsed.data.limit,
   });
-  return ok(req, res, quote, 201);
+  return ok(req, res, { items: customers });
 });
 
-const draftSchema = z.object({ version: z.number().int(), orderDiscount: z.number().min(0).max(100), lines: z.array(z.object({ productId: z.string().uuid(), quantity: z.number().int().positive(), discount: z.number().min(0).max(100) }).strict()).min(1).max(200) }).strict();
+app.post('/api/v1/sales-teams',authenticate,requireModule('quotations'),requireRole('ADMIN'),requireCsrf,async(req:AuthRequest,res)=>{
+  const parsed=z.object({name:z.string().trim().min(2).max(120),managerId:z.string().uuid().nullable(),memberIds:z.array(z.string().uuid()).max(200).default([])}).strict().safeParse(req.body);
+  if(!parsed.success)return fail(req,res,422,'VALIDATION_ERROR','Enter a team name and valid organization members.',parsed.error.flatten());
+  const ids=[...new Set([...(parsed.data.managerId?[parsed.data.managerId]:[]),...parsed.data.memberIds])];
+  const people=ids.length?await db.user.findMany({where:{id:{in:ids},organizationId:req.user!.organizationId,status:'ACTIVE',role:{in:['REP','MANAGER','ADMIN']}},select:{id:true,role:true}}):[];
+  if(people.length!==ids.length)return fail(req,res,422,'VALIDATION_ERROR','One or more selected team members are unavailable.');
+  const manager=parsed.data.managerId?people.find(person=>person.id===parsed.data.managerId):null;
+  if(manager&&!['MANAGER','ADMIN'].includes(manager.role))return fail(req,res,422,'VALIDATION_ERROR','A sales team manager must have the Manager or Administrator role.');
+  const duplicate=await db.salesTeam.findFirst({where:{organizationId:req.user!.organizationId,name:{equals:parsed.data.name,mode:'insensitive'}},select:{id:true}});
+  if(duplicate)return fail(req,res,409,'DUPLICATE_TEAM','A sales team with this name already exists.');
+  const team=await db.$transaction(async(tx)=>{const created=await tx.salesTeam.create({data:{organizationId:req.user!.organizationId,name:parsed.data.name,managerId:parsed.data.managerId,members:{create:ids.map(userId=>({userId}))}}});await audit(tx,req,'SALES_TEAM_CREATED','SalesTeam',created.id,parsed.data.name);return created});
+  return ok(req,res,{id:team.id,name:team.name,managerId:team.managerId,memberIds:ids},201);
+});
+
+app.get('/api/v1/quotations', authenticate, requireModule('quotations'), requireRole('REP', 'MANAGER', 'FINANCE', 'ADMIN'), async (req: AuthRequest, res) => {
+  const parsed = quotationListQuerySchema.safeParse(req.query);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Use valid quotation filters.', parsed.error.flatten());
+  const actor = req.user!;
+  const where = buildQuotationWhere(actor, parsed.data);
+  const facetFilters = { ...parsed.data, stage: undefined, cursor: undefined };
+  const ownerWhere = actor.role === 'REP'
+    ? { id: actor.id }
+    : { organizationId: actor.organizationId, quotes: { some: { organizationId: actor.organizationId } } };
+  const [rows, total, owners, stageCountEntries] = await Promise.all([
+    db.quote.findMany({
+      where,
+      include: quotationListInclude,
+      orderBy: quotationOrderBy(parsed.data.sort),
+      ...(parsed.data.cursor ? { cursor: { id: parsed.data.cursor }, skip: 1 } : {}),
+      take: parsed.data.limit + 1,
+    }),
+    db.quote.count({ where }),
+    db.user.findMany({ where: ownerWhere, select: { id: true, name: true }, orderBy: [{ name: 'asc' }, { id: 'asc' }] }),
+    Promise.all(quotationStages.map(async (stage) => [stage, await db.quote.count({ where: buildQuotationWhere(actor, { ...facetFilters, stage }) })] as const)),
+  ]);
+  const hasMore = rows.length > parsed.data.limit;
+  const page = hasMore ? rows.slice(0, parsed.data.limit) : rows;
+  return ok(req, res, {
+    items: page.map(quotationSummaryDto),
+    pagination: { total, nextCursor: hasMore ? page.at(-1)?.id ?? null : null },
+    stageCounts: Object.fromEntries(stageCountEntries),
+    owners,
+    primaryStages: primaryQuotationStages,
+  });
+});
+
+app.get('/api/v1/quotations/:id', authenticate, requireModule('quotations'), requireRole('REP', 'MANAGER', 'FINANCE', 'ADMIN'), async (req: AuthRequest, res) => {
+  const quote = await db.quote.findUnique({
+    where: { id: routeParam(req, 'id') },
+    include: {
+      owner: { select: { id: true, name: true } },
+      customerRecord: { select: { id: true, name: true, tier: true, currency: true } },
+      team: { select: { id: true, name: true, managerId: true } },
+      currentRevision: true,
+      revisions: { orderBy: { revisionNumber: 'desc' } },
+      lines: { include: { product: true } },
+      approvals: { include: { reviewer: { select: { id: true, name: true } }, revision: { select: { submittedById: true } } }, orderBy: [{ cycle: 'desc' }, { sequence: 'asc' }] },
+      negotiation: { orderBy: { createdAt: 'desc' } },
+      order: { select: { id: true, number: true, state: true } },
+      invoices: { select: { id: true, number: true, state: true } },
+    },
+  });
+  if (!quote || !(await canAccessInternalQuote(req.user!, quote))) return fail(req, res, 404, 'NOT_FOUND', 'Quotation not found.');
+  const capabilities = quotationCapabilities(req.user!, quote);
+  const [activity, teams, owners, managers, submittedBy, catalog] = await Promise.all([
+    db.auditEvent.findMany({ where: { organizationId: req.user!.organizationId, resource: 'Quote', resourceId: quote.id }, include: { actor: { select: { id: true, name: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }),
+    db.salesTeam.findMany({ where: { organizationId: req.user!.organizationId }, select: { id: true, name: true, managerId: true, members: { select: { userId: true } } }, orderBy: { name: 'asc' } }),
+    db.user.findMany({ where: { organizationId: req.user!.organizationId, status: 'ACTIVE', role: { in: ['REP','ADMIN'] } }, select: { id: true, name: true, role: true }, orderBy: { name: 'asc' } }),
+    db.user.findMany({ where: { organizationId: req.user!.organizationId, status: 'ACTIVE', role: { in: ['MANAGER','ADMIN'] } }, select: { id: true, name: true, role: true }, orderBy: { name: 'asc' } }),
+    quote.currentRevision?.submittedById ? db.user.findUnique({ where: { id: quote.currentRevision.submittedById }, select: { id: true, name: true } }) : Promise.resolve(null),
+    db.product.findMany({where:{organizationId:req.user!.organizationId,active:true},select:{id:true,name:true,sku:true,category:true,description:true,unit:true,price:true,cost:true,taxRate:true,recurring:true,cadence:true,active:true},orderBy:{name:'asc'}}),
+  ]);
+  const lines = quote.lines.map((line) => ({
+    id: line.id, productId: line.productId, quantity: line.quantity, unitPrice: line.unitPrice.toString(),
+    ...(capabilities.viewCost ? { unitCost: line.unitCost.toString() } : {}), discount: line.discount.toString(), allowedDiscount: line.allowedDiscount.toString(),
+    product: { id: line.product.id, name: line.product.name, sku: line.product.sku, category: line.product.category, description: line.product.description, unit: line.product.unit, price: line.product.price.toString(), ...(capabilities.viewCost ? { cost: line.product.cost.toString() } : {}), taxRate: line.product.taxRate.toString(), recurring: line.product.recurring, cadence: line.product.cadence, active: line.product.active },
+  }));
+  const currentCalculation=calculateQuote(quote.lines.map((line)=>({quantity:line.quantity,unitPrice:line.unitPrice,unitCost:line.unitCost,discount:line.discount,allowedDiscount:line.allowedDiscount,taxRate:line.product.taxRate,cadence:line.product.recurring?line.product.cadence:'One-time'})),quote.orderDiscount);
+  const riskBreakdown = approvalRiskBreakdown(quote);
+  const violations = lines.map((line) => ({ productId: line.productId, product: line.product.name, discount: line.discount, limit: line.allowedDiscount, excess: Math.max(0, Number(line.discount)-Number(line.allowedDiscount)) })).filter((line) => line.excess > 0).sort((a,b)=>b.excess-a.excess);
+  const currentApproval = quote.approvals.find((approval) => approval.revisionId === quote.currentRevisionId && approval.state === 'PENDING');
+  const explanation = violations.length
+    ? `${violations[0]!.product} is discounted ${violations[0]!.excess.toFixed(2)} points above its ${Number(violations[0]!.limit).toFixed(2)}% policy limit.${currentApproval ? ` ${currentApproval.step} approval is currently required.` : ''}`
+    : currentApproval ? `${currentApproval.step} review is required by the active margin and aggregate discount policy.` : 'All persisted lines are within their line-level discount limits.';
+  return ok(req, res, {
+    ...quotationSummaryDto(quote), team: quote.team ? { id: quote.team.id, name: quote.team.name } : null,
+    sentAt: quote.sentAt?.toISOString() ?? null, orderDiscount: quote.orderDiscount.toString(), subtotal:String(currentCalculation.subtotal), taxTotal:String(currentCalculation.taxTotal), total:String(currentCalculation.total),
+    ...(capabilities.viewMargin ? { margin:String(currentCalculation.margin) } : {}), capabilities,
+    currentRevision: quote.currentRevision ? { id: quote.currentRevision.id, revisionNumber: quote.currentRevision.revisionNumber, state: quote.currentRevision.state, currency: quote.currentRevision.currency, validUntil: quote.currentRevision.validUntil?.toISOString()??null, promisedDeliveryAt: quote.currentRevision.promisedDeliveryAt?.toISOString()??null, terms: quote.currentRevision.terms, submittedBy } : null,
+    lines,
+    approval: { explanation, riskBreakdown, violations, currentStep: currentApproval?.step??null, timeline: quote.approvals.filter((approval)=>approval.revisionId===quote.currentRevisionId).map((approval)=>({ id:approval.id, step:approval.step, sequence:approval.sequence, cycle:approval.cycle, state:approval.state, reason:approval.reason, reviewer:approval.reviewer, decidedAt:approval.decidedAt?.toISOString()??null, createdAt:approval.createdAt.toISOString() })) },
+    revisions: revisionHistory(quote.revisions, capabilities.viewMargin, capabilities.viewCost),
+    activity: activity.map((event)=>({ id:event.id, action:event.action, reason:event.reason, revisionId:event.revisionId, actor:event.actor??{id:'system',name:'System'}, createdAt:event.createdAt.toISOString() })),
+    assignmentOptions: { teams: teams.map((team)=>({id:team.id,name:team.name,managerId:team.managerId,memberIds:team.members.map((member)=>member.userId)})), owners, managers, canCreateTeam:req.user!.role==='ADMIN'&&!req.user!.readOnlyView },
+    catalog:catalog.map((product)=>({id:product.id,name:product.name,sku:product.sku,category:product.category,description:product.description,unit:product.unit,price:product.price.toString(),...(capabilities.viewCost?{cost:product.cost.toString()}:{}),taxRate:product.taxRate.toString(),recurring:product.recurring,cadence:product.cadence,active:product.active})),
+    negotiation: quote.negotiation, order: quote.order, invoices: quote.invoices,
+  });
+});
+
+app.patch('/api/v1/quotations/:id/assignment', authenticate, requireModule('quotations'), requireRole('MANAGER', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = z.object({ version:z.number().int().nonnegative(), ownerId:z.string().uuid(), teamId:z.string().uuid().nullable(), reason:z.string().trim().min(2).max(500) }).strict().safeParse(req.body);
+  if(!parsed.success)return fail(req,res,422,'VALIDATION_ERROR','Select a valid owner and team and enter an assignment reason.',parsed.error.flatten());
+  const quote=await db.quote.findUnique({where:{id:routeParam(req,'id')},include:{currentRevision:true,approvals:true,negotiation:true,order:true}});
+  if(!quote||!(await canAccessInternalQuote(req.user!,quote)))return fail(req,res,404,'NOT_FOUND','Quotation not found.');
+  if(!quotationCapabilities(req.user!,quote).assign)return fail(req,res,409,'INVALID_STATE','This quotation cannot be reassigned in its current state.');
+  const [owner,team]=await Promise.all([
+    db.user.findFirst({where:{id:parsed.data.ownerId,organizationId:req.user!.organizationId,status:'ACTIVE',role:{in:['REP','ADMIN']}}}),
+    parsed.data.teamId?db.salesTeam.findFirst({where:{id:parsed.data.teamId,organizationId:req.user!.organizationId},include:{members:true}}):Promise.resolve(null),
+  ]);
+  if(!owner||parsed.data.teamId&&!team)return fail(req,res,422,'VALIDATION_ERROR','The selected owner or team is unavailable.');
+  if(team&&!team.members.some((member)=>member.userId===owner.id)&&team.managerId!==owner.id)return fail(req,res,422,'OWNER_NOT_ON_TEAM','Select an owner who belongs to the assigned team.');
+  if(req.user!.role==='MANAGER'&&team&&team.managerId!==req.user!.id&&!team.members.some((member)=>member.userId===req.user!.id))return fail(req,res,403,'FORBIDDEN','Managers can only assign quotations within their own teams.');
+  const updated=await db.$transaction(async(tx)=>{
+    const won=await tx.quote.updateMany({where:{id:quote.id,version:parsed.data.version},data:{ownerId:owner.id,teamId:team?.id??null,version:{increment:1},lastActivity:new Date()}});
+    if(won.count!==1)throw new DomainError(409,'STALE_VERSION','Refresh the quotation before changing its assignment.');
+    await audit(tx,req,'QUOTE_ASSIGNED','Quote',quote.id,`${owner.name}${team?` / ${team.name}`:' / Unassigned'}: ${parsed.data.reason}`,quote.currentRevisionId??undefined);
+    return {owner:{id:owner.id,name:owner.name},team:team?{id:team.id,name:team.name}:null};
+  });
+  return ok(req,res,updated);
+});
+
+async function customerQuotationPreview(actor:Actor, quoteId:string):Promise<CustomerQuotationPreview|null> {
+  const quote=await db.quote.findUnique({where:{id:quoteId},include:{organization:{select:{name:true}},currentRevision:true,lines:{include:{product:true}}}});
+  if(!quote||!(await canAccessInternalQuote(actor,quote))||!quote.currentRevision)return null;
+  const calculation=calculateQuote(quote.lines.map((line)=>({quantity:line.quantity,unitPrice:line.unitPrice,unitCost:line.unitCost,discount:line.discount,allowedDiscount:line.allowedDiscount,taxRate:line.product.taxRate,cadence:line.product.recurring?line.product.cadence:'One-time'})),quote.orderDiscount);
+  return {
+    organization:quote.organization,
+    quotation:{number:quote.number,customer:quote.customer,customerTier:quote.customerTier,revisionNumber:quote.currentRevision.revisionNumber,state:quote.stage,currency:quote.currentRevision.currency,validUntil:quote.currentRevision.validUntil?.toISOString()??null,promisedDeliveryAt:quote.currentRevision.promisedDeliveryAt?.toISOString()??null,terms:quote.currentRevision.terms,subtotal:String(calculation.subtotal),taxTotal:String(calculation.taxTotal),total:String(calculation.total),sentAt:quote.sentAt?.toISOString()??null},
+    lines:calculation.lines.map((line,index)=>{const source=quote.lines[index]!;return{name:source.product.name,sku:source.product.sku,description:source.product.description,quantity:source.quantity,unitPrice:source.unitPrice.toString(),discount:source.discount.toString(),net:String(line.net),cadence:source.product.recurring?source.product.cadence:null}}),
+  };
+}
+
+app.get('/api/v1/quotations/:id/customer-preview',authenticate,requireModule('quotations'),requireRole('REP','MANAGER','FINANCE','ADMIN'),async(req:AuthRequest,res)=>{
+  const preview=await customerQuotationPreview(req.user!,routeParam(req,'id'));
+  if(!preview)return fail(req,res,404,'NOT_FOUND','Quotation not found.');
+  return ok(req,res,preview);
+});
+
+app.get('/api/v1/quotations/:id/pdf',authenticate,requireModule('quotations'),requireRole('REP','MANAGER','FINANCE','ADMIN'),async(req:AuthRequest,res)=>{
+  const preview=await customerQuotationPreview(req.user!,routeParam(req,'id'));
+  if(!preview)return fail(req,res,404,'NOT_FOUND','Quotation not found.');
+  const pdf=await renderQuotationPdf(preview);
+  res.setHeader('Content-Type','application/pdf');res.setHeader('Content-Disposition',`attachment; filename="${preview.quotation.number}.pdf"`);res.setHeader('Content-Length',pdf.length);return res.status(200).send(pdf);
+});
+
+app.post('/api/v1/quotations', authenticate, requireModule('quotations'), requireRole('REP', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = createQuotationSchema.safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Select an active customer and enter valid quotation details.', parsed.error.flatten());
+  const customer = await db.customer.findFirst({ where: { id: parsed.data.customerId, organizationId: req.user!.organizationId, active: true } });
+  if (!customer) return fail(req, res, 422, 'CONFIGURATION_REQUIRED', 'Select an active customer.');
+  const number = `Q-${Date.now().toString().slice(-8)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+  const quoteId = await db.$transaction(async (tx) => {
+    const membership=await tx.salesTeamMember.findFirst({where:{userId:req.user!.id,team:{organizationId:req.user!.organizationId}},orderBy:{createdAt:'asc'}});
+    const created = await tx.quote.create({ data: { organizationId: req.user!.organizationId, number, customer: customer.name, customerId: customer.id, customerTier: customer.tier, ownerId: req.user!.id,teamId:membership?.teamId??null } });
+    const revision = await tx.quoteRevision.create({ data: { quoteId: created.id, revisionNumber: 1, state: 'DRAFT', currency: customer.currency, validUntil: parsed.data.validUntil ? new Date(parsed.data.validUntil) : null, promisedDeliveryAt: parsed.data.promisedDeliveryAt ? new Date(parsed.data.promisedDeliveryAt) : null, terms: parsed.data.terms || null, orderDiscount: 0, subtotal: 0, taxTotal: 0, total: 0, margin: 0, riskScore: 0, totalsByCadence: {}, linesSnapshot: [], policySnapshot: {}, termsHash: termsHash({ quoteId: created.id, revision: 1, nonce: crypto.randomUUID() }) } });
+    const result = await tx.quote.update({ where: { id: created.id }, data: { currentRevisionId: revision.id } });
+    await audit(tx, req, 'QUOTE_CREATED', 'Quote', created.id, undefined, revision.id);
+    return result.id;
+  });
+  const quote = await db.quote.findUniqueOrThrow({ where: { id: quoteId }, include: quotationListInclude });
+  return ok(req, res, quotationSummaryDto(quote), 201);
+});
+
+type CommercialLine = { productId: string; quantity: number; discount: number };
+
+async function prepareQuoteCalculation(organizationId: string, customerTier: string, lines: CommercialLine[], orderDiscount: number) {
+  const productIds = [...new Set(lines.map((line) => line.productId))];
+  const products = await db.product.findMany({ where: { id: { in: productIds }, organizationId, active: true } });
+  if (products.length !== productIds.length) throw new DomainError(422, 'CONFIGURATION_REQUIRED', 'One or more products are unavailable.');
+  const policy = await db.discountPolicy.findFirst({ where: { organizationId, tier: customerTier } });
+  if (!policy) throw new DomainError(422, 'CONFIGURATION_REQUIRED', 'Configure this customer tier before pricing the quotation.');
+  const inputs = lines.map((line) => {
+    const product = products.find((item) => item.id === line.productId)!;
+    return {
+      ...line,
+      unitPrice: product.price,
+      unitCost: product.cost,
+      taxRate: product.taxRate,
+      cadence: product.recurring ? product.cadence : 'One-time',
+      allowedDiscount: allowedDiscountForCategory(product.category, policy),
+    };
+  });
+  return { inputs, products, policy, calculation: calculateQuote(inputs, orderDiscount, { financeThreshold: policy.financeThreshold }) };
+}
+
+function quoteCalculationDto(prepared: Awaited<ReturnType<typeof prepareQuoteCalculation>>) {
+  const { calculation } = prepared;
+  const { lines: _lines, cost: _cost, totalsByCadence, ...summary } = calculation;
+  return {
+    ...summary,
+    totalsByCadence: Object.fromEntries(Object.entries(totalsByCadence).map(([cadence, totals]) => [cadence, {
+      subtotal: totals.subtotal,
+      tax: totals.tax,
+      total: totals.total,
+      margin: totals.margin,
+    }])),
+    lines: calculation.lines.map((line, index) => ({
+      productId: prepared.inputs[index]!.productId,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice.toString(),
+      discount: line.discount,
+      allowedDiscount: line.allowedDiscount.toString(),
+      gross: line.gross,
+      net: line.net,
+      tax: line.tax,
+      effectiveDiscount: line.effectiveDiscount,
+      excess: line.excess,
+      cadence: line.cadence,
+    })),
+  };
+}
+
+app.post('/api/v1/quotations/:id/preview', authenticate, requireModule('quotations'), requireRole('REP', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = quotePreviewSchema.safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Add valid quotation lines to calculate a preview.', parsed.error.flatten());
+  const quote = await db.quote.findUnique({ where: { id: routeParam(req, 'id') }, include: { currentRevision: true } });
+  if (!quote || !(await canAccessInternalQuote(req.user!, quote))) return fail(req, res, 404, 'NOT_FOUND', 'Quotation not found.');
+  if (quote.stage !== 'DRAFT' || quote.currentRevision?.state !== 'DRAFT') return fail(req, res, 409, 'INVALID_STATE', 'Only a draft quotation can be previewed.');
+  if (quote.version !== parsed.data.expectedVersion || quote.currentRevisionId !== parsed.data.revisionId) return fail(req, res, 409, 'STALE_VERSION', 'Refresh the quotation before recalculating.');
+  const lines = parsed.data.lines.map((line) => ({ productId: line.variantId, quantity: line.quantity, discount: line.lineDiscount }));
+  const prepared = await prepareQuoteCalculation(req.user!.organizationId, quote.customerTier, lines, parsed.data.orderDiscount);
+  return ok(req, res, {
+    revisionId: quote.currentRevisionId,
+    version: quote.version,
+    ...quoteCalculationDto(prepared),
+  });
+});
+
 app.put('/api/v1/quotations/:id/draft', authenticate, requireModule('quotations'), requireRole('REP', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
-  const parsed = draftSchema.safeParse(req.body);
+  const parsed = quoteDraftSchema.safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Add valid quotation lines.', parsed.error.flatten());
   const quote = await db.quote.findUnique({ where: { id: routeParam(req, 'id') }, include: { currentRevision: true } });
-  if (!quote || !canAccessInternalQuote(req.user!, quote)) return fail(req, res, 404, 'NOT_FOUND', 'Quotation not found.');
+  if (!quote || !(await canAccessInternalQuote(req.user!, quote))) return fail(req, res, 404, 'NOT_FOUND', 'Quotation not found.');
   if (quote.version !== parsed.data.version || quote.stage !== 'DRAFT' || quote.currentRevision?.state !== 'DRAFT') return fail(req, res, 409, 'STALE_VERSION', 'Refresh the quotation before saving.');
-  const products = await db.product.findMany({ where: { id: { in: parsed.data.lines.map((line) => line.productId) }, organizationId: req.user!.organizationId, active: true } });
-  if (products.length !== new Set(parsed.data.lines.map((line) => line.productId)).size) return fail(req, res, 422, 'CONFIGURATION_REQUIRED', 'One or more products are unavailable.');
-  const policy = await db.discountPolicy.findFirst({ where: { organizationId: req.user!.organizationId, tier: quote.customerTier } });
-  if (!policy) return fail(req, res, 422, 'CONFIGURATION_REQUIRED', 'Configure this customer tier before saving.');
-  const inputs = parsed.data.lines.map((line) => { const product = products.find((item) => item.id === line.productId)!; const categoryLimit = product.category === 'Hardware' ? policy.hardwareLimit : product.category === 'Services' ? policy.servicesLimit : policy.subscriptionLimit; return { ...line, unitPrice: product.price, unitCost: product.cost, taxRate: product.taxRate, cadence: product.recurring ? product.cadence : 'One-time', allowedDiscount: Prisma.Decimal.min(policy.maxDiscount, categoryLimit) }; });
-  const calculation = calculateQuote(inputs, parsed.data.orderDiscount, { financeThreshold: policy.financeThreshold });
-  const snapshot = inputs.map((line) => ({ productId: line.productId, quantity: line.quantity, unitPrice: line.unitPrice.toString(), unitCost: line.unitCost.toString(), taxRate: line.taxRate.toString(), cadence: line.cadence, discount: line.discount, allowedDiscount: line.allowedDiscount.toString() }));
+  const { inputs, products, policy, calculation } = await prepareQuoteCalculation(req.user!.organizationId, quote.customerTier, parsed.data.lines, parsed.data.orderDiscount);
+  const snapshot = inputs.map((line,index) => { const product=products.find((item)=>item.id===line.productId)!; const calculated=calculation.lines[index]!; return { productId: line.productId, name:product.name, sku:product.sku, category:product.category, quantity: line.quantity, unitPrice: line.unitPrice.toString(), unitCost: line.unitCost.toString(), taxRate: line.taxRate.toString(), cadence: line.cadence, discount: line.discount, allowedDiscount: line.allowedDiscount.toString(), net:calculated.net, lineCost:calculated.lineCost }; });
   const updated = await db.$transaction(async (tx) => {
     const won = await tx.quote.updateMany({ where: { id: quote.id, version: parsed.data.version, stage: 'DRAFT' }, data: { orderDiscount: parsed.data.orderDiscount, total: calculation.total, taxTotal: calculation.taxTotal, totalsByCadence: asJson(calculation.totalsByCadence), margin: calculation.margin, riskScore: calculation.riskScore, version: { increment: 1 }, lastActivity: new Date() } });
     if (won.count !== 1) throw new DomainError(409, 'STALE_VERSION', 'Refresh the quotation before saving.');
     await tx.quoteLine.deleteMany({ where: { quoteId: quote.id } });
     await tx.quoteLine.createMany({ data: inputs.map((line) => ({ quoteId: quote.id, productId: line.productId, quantity: line.quantity, unitPrice: line.unitPrice, unitCost: line.unitCost, discount: line.discount, allowedDiscount: line.allowedDiscount })) });
-    await tx.quoteRevision.update({ where: { id: quote.currentRevisionId! }, data: { orderDiscount: parsed.data.orderDiscount, subtotal: calculation.subtotal, taxTotal: calculation.taxTotal, total: calculation.total, margin: calculation.margin, riskScore: calculation.riskScore, totalsByCadence: asJson(calculation.totalsByCadence), linesSnapshot: asJson(snapshot), policySnapshot: asJson({ id: policy.id, version: policy.version, tier: policy.tier, financeThreshold: policy.financeThreshold.toString() }), termsHash: termsHash({ quoteId: quote.id, revisionId: quote.currentRevisionId, snapshot, orderDiscount: parsed.data.orderDiscount, calculation }) } });
+    await tx.quoteRevision.update({ where: { id: quote.currentRevisionId! }, data: { orderDiscount: parsed.data.orderDiscount, subtotal: calculation.subtotal, taxTotal: calculation.taxTotal, total: calculation.total, margin: calculation.margin, riskScore: calculation.riskScore, totalsByCadence: asJson(calculation.totalsByCadence), linesSnapshot: asJson(snapshot), policySnapshot: asJson({ id: policy.id, version: policy.version, tier: policy.tier, financeThreshold: policy.financeThreshold.toString(), minimumMarginPercent: '12', calculation: { worstExcess: calculation.worstExcess, weightedExcess: calculation.weightedExcess, marginPercent: calculation.marginPercent } }), termsHash: termsHash({ quoteId: quote.id, revisionId: quote.currentRevisionId, snapshot, orderDiscount: parsed.data.orderDiscount, calculation }) } });
     await audit(tx, req, 'QUOTE_SAVED', 'Quote', quote.id, undefined, quote.currentRevisionId!);
     return tx.quote.findUniqueOrThrow({ where: { id: quote.id }, include: { lines: { include: { product: true } } } });
   });
@@ -518,7 +835,7 @@ app.put('/api/v1/quotations/:id/draft', authenticate, requireModule('quotations'
 
 app.post('/api/v1/quotations/:id/submit', authenticate, requireModule('quotations'), requireRole('REP', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
   const quote = await db.quote.findUnique({ where: { id: routeParam(req, 'id') }, include: { currentRevision: true, lines: { include: { product: true } } } });
-  if (!quote || !canAccessInternalQuote(req.user!, quote)) return fail(req, res, 404, 'NOT_FOUND', 'Quotation not found.');
+  if (!quote || !(await canAccessInternalQuote(req.user!, quote))) return fail(req, res, 404, 'NOT_FOUND', 'Quotation not found.');
   if (quote.stage !== 'DRAFT' || quote.currentRevision?.state !== 'DRAFT' || !quote.lines.length) return fail(req, res, 409, 'INVALID_STATE', 'Only a complete draft can be submitted.');
   const policy = await db.discountPolicy.findFirst({ where: { organizationId: req.user!.organizationId, tier: quote.customerTier } });
   if (!policy) return fail(req, res, 422, 'CONFIGURATION_REQUIRED', 'Configure this customer tier before submitting.');
@@ -532,7 +849,7 @@ app.post('/api/v1/quotations/:id/submit', authenticate, requireModule('quotation
     const steps: Array<{ step: string; sequence: number; state: 'PENDING' | 'WAITING' }> = [];
     if (calculation.needsManager) steps.push({ step: 'Sales Manager', sequence: 1, state: 'PENDING' });
     if (calculation.needsFinance) steps.push({ step: 'Finance', sequence: steps.length + 1, state: steps.length ? 'WAITING' : 'PENDING' });
-    await tx.quoteRevision.update({ where: { id: quote.currentRevisionId! }, data: { state: 'SUBMITTED', submittedById: req.user!.id, policySnapshot: asJson({ id: policy.id, version: policy.version, tier: policy.tier, financeThreshold: policy.financeThreshold.toString(), calculation: { worstExcess: calculation.worstExcess, weightedExcess: calculation.weightedExcess, marginPercent: calculation.marginPercent } }) } });
+    await tx.quoteRevision.update({ where: { id: quote.currentRevisionId! }, data: { state: 'SUBMITTED', submittedById: req.user!.id, policySnapshot: asJson({ id: policy.id, version: policy.version, tier: policy.tier, financeThreshold: policy.financeThreshold.toString(), minimumMarginPercent: '12', calculation: { worstExcess: calculation.worstExcess, weightedExcess: calculation.weightedExcess, marginPercent: calculation.marginPercent } }) } });
     if (steps.length) await tx.approval.createMany({ data: steps.map((step) => ({ quoteId: quote.id, revisionId: quote.currentRevisionId!, cycle, ...step })) });
     const updated = await tx.quote.update({ where: { id: quote.id }, data: { stage: steps.length ? 'PENDING_APPROVAL' : 'APPROVED', version: { increment: 1 }, lastActivity: new Date() } });
     await audit(tx, req, 'QUOTE_SUBMITTED', 'Quote', quote.id, steps.length ? steps.map((step) => step.step).join(' then ') : 'Within policy; auto-approved', quote.currentRevisionId!);
@@ -576,7 +893,7 @@ app.post('/api/v1/approvals/:id/decision', authenticate, requireModule('approval
 
 app.post('/api/v1/quotations/:id/send', authenticate, requireModule('quotations'), requireRole('REP', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
   const quote = await db.quote.findUnique({ where: { id: routeParam(req, 'id') }, include: { currentRevision: true, customerRecord: true } });
-  if (!quote || !canAccessInternalQuote(req.user!, quote)) return fail(req, res, 404, 'NOT_FOUND', 'Quotation not found.');
+  if (!quote || !(await canAccessInternalQuote(req.user!, quote))) return fail(req, res, 404, 'NOT_FOUND', 'Quotation not found.');
   if (quote.stage !== 'APPROVED' || !quote.currentRevision) return fail(req, res, 409, 'INVALID_STATE', 'Only the current approved revision can be sent.');
   const sentAt = new Date();
   const updated = await db.$transaction(async (tx) => {
@@ -608,7 +925,7 @@ app.post('/api/v1/quotations/:id/proposals/:proposalId/respond', authenticate, r
   const parsed = z.object({ decision: z.enum(['ADOPT', 'DECLINE']), reason: z.string().trim().min(2).max(2000) }).strict().safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'A decision and reason are required.');
   const quote = await db.quote.findUnique({ where: { id: routeParam(req, 'id') }, include: { lines: { include: { product: true } }, currentRevision: true } });
-  if (!quote || !canAccessInternalQuote(req.user!, quote)) return fail(req, res, 404, 'NOT_FOUND', 'Quotation not found.');
+  if (!quote || !(await canAccessInternalQuote(req.user!, quote))) return fail(req, res, 404, 'NOT_FOUND', 'Quotation not found.');
   const proposal = await db.negotiation.findFirst({ where: { id: routeParam(req, 'proposalId'), quoteId: quote.id, revisionId: quote.currentRevisionId ?? '__none__', kind: 'PROPOSAL', state: 'OPEN' } });
   if (!proposal) return fail(req, res, 409, 'INVALID_STATE', 'This proposal is no longer open.');
   if (parsed.data.decision === 'DECLINE') {
@@ -622,7 +939,7 @@ app.post('/api/v1/quotations/:id/proposals/:proposalId/respond', authenticate, r
   const adopted = await db.$transaction(async (tx) => {
     await tx.quoteRevision.update({ where: { id: quote.currentRevisionId! }, data: { state: 'SUPERSEDED' } });
     const latest = await tx.quoteRevision.findFirst({ where: { quoteId: quote.id }, orderBy: { revisionNumber: 'desc' } });
-    const revision = await tx.quoteRevision.create({ data: { quoteId: quote.id, revisionNumber: (latest?.revisionNumber ?? 0) + 1, state: 'DRAFT', orderDiscount: proposedDiscount, subtotal: calculation.subtotal, taxTotal: calculation.taxTotal, total: calculation.total, margin: calculation.margin, riskScore: calculation.riskScore, totalsByCadence: asJson(calculation.totalsByCadence), linesSnapshot: quote.currentRevision!.linesSnapshot as Prisma.InputJsonValue, policySnapshot: asJson({ id: policy.id, version: policy.version, financeThreshold: policy.financeThreshold.toString() }), termsHash: termsHash({ source: proposal.revisionId, counterDiscount: proposedDiscount.toString(), calculation }) } });
+    const revision = await tx.quoteRevision.create({ data: { quoteId: quote.id, revisionNumber: (latest?.revisionNumber ?? 0) + 1, state: 'DRAFT', orderDiscount: proposedDiscount, subtotal: calculation.subtotal, taxTotal: calculation.taxTotal, total: calculation.total, margin: calculation.margin, riskScore: calculation.riskScore, totalsByCadence: asJson(calculation.totalsByCadence), linesSnapshot: quote.currentRevision!.linesSnapshot as Prisma.InputJsonValue, policySnapshot: asJson({ id: policy.id, version: policy.version, tier: policy.tier, financeThreshold: policy.financeThreshold.toString(), minimumMarginPercent: '12', calculation: { worstExcess: calculation.worstExcess, weightedExcess: calculation.weightedExcess, marginPercent: calculation.marginPercent } }), termsHash: termsHash({ source: proposal.revisionId, counterDiscount: proposedDiscount.toString(), calculation }) } });
     const updated = await tx.quote.update({ where: { id: quote.id }, data: { currentRevisionId: revision.id, stage: 'DRAFT', sentAt: null, orderDiscount: proposedDiscount, total: calculation.total, taxTotal: calculation.taxTotal, totalsByCadence: asJson(calculation.totalsByCadence), margin: calculation.margin, riskScore: calculation.riskScore, version: { increment: 1 }, lastActivity: new Date() } });
     const record = await tx.negotiation.update({ where: { id: proposal.id }, data: { state: 'ADOPTED' } });
     await audit(tx, req, 'CUSTOMER_PROPOSAL_ADOPTED', 'Quote', quote.id, parsed.data.reason, revision.id);

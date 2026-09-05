@@ -9,6 +9,7 @@ const currency = (value: number | string, compact = false) => new Intl.NumberFor
 const readable = (value: string) => value.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, character => character.toUpperCase());
 const percent = (part: number, total: number) => total ? `${Math.round(part / total * 100)}%` : "—";
 const isoDay = (value: string) => value.slice(0, 10);
+const quoteCreatedAt = (quote: Quote) => quote.createdAt ?? quote.lastActivity ?? quote.updatedAt;
 
 function periodRange(period: Period, previous = false) {
   const now = new Date();
@@ -28,7 +29,7 @@ function periodRange(period: Period, previous = false) {
 function inPeriod(quote: Quote, period: Period, previous = false) {
   const range = periodRange(period, previous);
   if (!range) return true;
-  const created = new Date(quote.createdAt);
+  const created = new Date(quoteCreatedAt(quote));
   return created >= range.start && created < range.end;
 }
 
@@ -108,7 +109,7 @@ function buildReport(quotes: Quote[]) {
   const categories = [...lines.reduce((map, line) => { const row = map.get(line.product.category) ?? { name: line.product.category, weighted: 0, quantity: 0 }; row.weighted += Number(line.discount) * line.quantity; row.quantity += line.quantity; map.set(line.product.category, row); return map; }, new Map<string, { name: string; weighted: number; quantity: number }>()).values()].map(row => ({ name: row.name, average: row.quantity ? row.weighted / row.quantity : 0 })).sort((a, b) => b.average - a.average);
   const products = [...lines.reduce((map, line) => { const row = map.get(line.product.id) ?? { id: line.product.id, name: line.product.name, category: line.product.category, deals: new Set<string>(), quantity: 0, value: 0 }; const quote = quotes.find(item => item.lines.some(candidate => candidate.id === line.id)); if (quote) row.deals.add(quote.id); row.quantity += line.quantity; row.value += Number(line.unitPrice) * line.quantity * (1 - Number(line.discount) / 100); map.set(line.product.id, row); return map; }, new Map<string, { id: string; name: string; category: string; deals: Set<string>; quantity: number; value: number }>()).values()].map(row => ({ ...row, deals: row.deals.size })).sort((a, b) => b.value - a.value);
   const approvals = [...quotes.flatMap(quote => quote.approvals.filter(approval => approval.state === "PENDING")).reduce((map, approval) => { const hours = approval.createdAt ? Math.max(0, (Date.now() - new Date(approval.createdAt).getTime()) / 3_600_000) : 0; const row = map.get(approval.step) ?? { step: approval.step, pending: 0, totalHours: 0, longestHours: 0 }; row.pending++; row.totalHours += hours; row.longestHours = Math.max(row.longestHours, hours); map.set(approval.step, row); return map; }, new Map<string, { step: string; pending: number; totalHours: number; longestHours: number }>()).values()].map(row => ({ ...row, averageHours: row.pending ? row.totalHours / row.pending : 0 })).sort((a, b) => b.longestHours - a.longestHours);
-  const trendMap = quotes.reduce((map, quote) => { const key = isoDay(quote.createdAt); const row = map.get(key) ?? { label: new Intl.DateTimeFormat("en-IN", { month: "short", day: "numeric" }).format(new Date(quote.createdAt)), quotes: 0, confirmed: 0 }; row.quotes++; if (["APPROVED", "CONFIRMED"].includes(quote.stage)) row.confirmed += Number(quote.total); map.set(key, row); return map; }, new Map<string, { label: string; quotes: number; confirmed: number }>());
+  const trendMap = quotes.reduce((map, quote) => { const createdAt = quoteCreatedAt(quote); const key = isoDay(createdAt); const row = map.get(key) ?? { label: new Intl.DateTimeFormat("en-IN", { month: "short", day: "numeric" }).format(new Date(createdAt)), quotes: 0, confirmed: 0 }; row.quotes++; if (["APPROVED", "CONFIRMED"].includes(quote.stage)) row.confirmed += Number(quote.total); map.set(key, row); return map; }, new Map<string, { label: string; quotes: number; confirmed: number }>());
   const trend = [...trendMap.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-12).map(([, value]) => value);
   return { funnel, customers, representatives, discounts: { average, highest, amount, risk, categories }, products, approvals, trend, maxTrendQuotes: Math.max(1, ...trend.map(point => point.quotes)), maxTrendValue: Math.max(1, ...trend.map(point => point.confirmed)) };
 }
@@ -117,7 +118,7 @@ function formatWait(hours: number) { if (!hours) return "Just now"; if (hours < 
 
 function downloadSpreadsheet(quotes: Quote[], filters: Record<string, string>) {
   const escape = (value: unknown) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-  const rows = quotes.map(quote => `<tr><td>${escape(quote.number)}</td><td>${escape(quote.customer)}</td><td>${escape(quote.owner?.name ?? "Unassigned")}</td><td>${escape(readable(quote.stage))}</td><td>${Number(quote.total)}</td><td>${escape(isoDay(quote.createdAt))}</td></tr>`).join("");
+  const rows = quotes.map(quote => `<tr><td>${escape(quote.number)}</td><td>${escape(quote.customer)}</td><td>${escape(quote.owner?.name ?? "Unassigned")}</td><td>${escape(readable(quote.stage))}</td><td>${Number(quote.total)}</td><td>${escape(isoDay(quoteCreatedAt(quote)))}</td></tr>`).join("");
   const summary = Object.entries(filters).map(([key, value]) => `<tr><th>${escape(readable(key))}</th><td>${escape(value)}</td></tr>`).join("");
   const html = `<html><head><meta charset="utf-8"></head><body><table>${summary}</table><br/><table border="1"><thead><tr><th>Quotation</th><th>Customer</th><th>Representative</th><th>Status</th><th>Value (INR)</th><th>Created</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
   const url = URL.createObjectURL(new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" }));

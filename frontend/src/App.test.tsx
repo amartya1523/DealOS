@@ -95,6 +95,11 @@ describe("DealOS public routes", () => {
     );
     expect(await screen.findByRole("heading", {name:"Sales dashboard"})).toBeInTheDocument();
     expect(window.location.pathname).toBe("/app");
+    expect(screen.getByRole("button", { name: "New quotation" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View reports" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View reports" }));
+    expect(screen.getByRole("heading", { name: "Sales reporting" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Overview" }));
     expect(screen.queryByText(/^Live$/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
     expect(document.querySelector(".app-shell")).toHaveClass("sidebar-collapsed");
@@ -107,6 +112,8 @@ describe("DealOS public routes", () => {
     expect(screen.getByRole("heading", { name: "Sales dashboard" })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/app");
     expect(fetchMock).toHaveBeenCalledTimes(requestsBeforeBrandClick);
+    fireEvent.click(screen.getByRole("button", { name: "New quotation" }));
+    expect(screen.getByRole("heading", { name: "New quotation" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/auth/signup",
       expect.objectContaining({
@@ -127,90 +134,26 @@ describe("DealOS public routes", () => {
       await screen.findByRole("heading", { name: "Welcome back." }),
     ).toBeInTheDocument();
   });
-  it("creates a quotation through the UI and reloads real workspace totals", async () => {
+  it("filters the approval queue by pending, returned, and approved state", async () => {
     window.history.replaceState({}, "", "/app");
-    const baseWorkspace = {
-      user: {
-        id: "admin",
-        name: "Admin User",
-        email: "admin@example.com",
-        role: "ADMIN",
-        moduleAccess: [],
-        actorType: "USER",
-        platformSuperAdmin: false,
-        viewContext: null,
-      },
-      organization: { id: "org", name: "Acme" },
-      users: [],
-      quotes: [],
-      products: [],
-      policies: [],
-      warehouses: [],
-      subscriptions: [],
-      invoices: [],
-      alerts: [],
-      audits: [],
-    };
-    const now = new Date().toISOString();
-    const createdQuote = {
-      id: "quote-real",
-      number: "Q-REAL-001",
-      customer: "Real Customer",
-      customerTier: "Gold",
-      stage: "DRAFT",
-      version: 1,
-      orderDiscount: 0,
-      total: 0,
-      margin: 0,
-      riskScore: 0,
-      createdAt: now,
-      updatedAt: now,
-      lastActivity: now,
-      owner: { id: "admin", name: "Admin User" },
-      lines: [],
-      approvals: [],
-      negotiation: [],
-      invoices: [],
-    };
-    let workspaceReads = 0;
-    fetchMock.mockImplementation((url: string) =>
-      Promise.resolve({
-        ok: true,
-        json: async () => ({
-          success: true,
-          data: url.endsWith("/workspace")
-            ? ++workspaceReads > 1
-              ? { ...baseWorkspace, quotes: [createdQuote] }
-              : baseWorkspace
-            : url.endsWith("/quotations")
-              ? createdQuote
-              : { id: "admin", role: "ADMIN" },
-        }),
-      }),
-    );
-    render(<App />);
-    expect(
-      await screen.findByRole("heading", { name: "Sales dashboard" }),
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Quotations" }));
-    fireEvent.click(screen.getByRole("button", { name: "New quotation" }));
-    fireEvent.change(screen.getByLabelText("Customer"), {
-      target: { value: "Real Customer" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
-    expect(await screen.findByText("Q-REAL-001")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Overview" }));
-    expect(screen.getByText("1 active quotations")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/quotations",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          customer: "Real Customer",
-          customerTier: "Gold",
-        }),
-      }),
-    );
+    const quote = (id:string, stage:string, state:string) => ({ id, number:`Q-${id}`, customer:`${id} Customer`, customerTier:'Gold', stage, version:1, orderDiscount:0, total:100, margin:20, riskScore:1, updatedAt:'2026-09-05T00:00:00.000Z', lines:[], approvals:[{id:`approval-${id}`,step:'Sales Manager',sequence:1,state}], negotiation:[], invoices:[] });
+    const workspace = { user:{id:'admin',name:'Admin User',email:'admin@example.com',role:'ADMIN',moduleAccess:[],actorType:'USER',platformSuperAdmin:false,viewContext:null}, organization:{id:'org',name:'Acme'}, users:[], quotes:[quote('PENDING','PENDING_APPROVAL','PENDING'),quote('RETURNED','DRAFT','RETURNED'),quote('APPROVED','APPROVED','APPROVED'),quote('REJECTED','REJECTED','REJECTED')], products:[], policies:[], warehouses:[], subscriptions:[], invoices:[], alerts:[], audits:[] };
+    fetchMock.mockImplementation((url:string) => Promise.resolve({ok:true,json:async()=>({success:true,data:url.endsWith('/workspace')?workspace:{}})}));
+    render(<App/>);
+    expect(await screen.findByRole("heading", {name:"Sales dashboard"})).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name:"Approvals"}));
+    expect(screen.getByText("Q-PENDING")).toBeInTheDocument();
+    expect(screen.queryByText("Q-RETURNED")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", {name:"Pending"})).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", {name:"Returned"}));
+    expect(screen.getByText("Q-RETURNED")).toBeInTheDocument();
+    expect(screen.queryByText("Q-PENDING")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", {name:"Returned"})).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", {name:"Approved"}));
+    expect(screen.getByText("Q-APPROVED")).toBeInTheDocument();
+    expect(screen.queryByText("Q-RETURNED")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", {name:"Approved"})).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("Q-REJECTED")).not.toBeInTheDocument();
   });
   it("edits and publishes every discount ceiling with an audit reason", async () => {
     window.history.replaceState({}, "", "/app");
