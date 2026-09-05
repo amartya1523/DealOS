@@ -62,6 +62,16 @@ describe("DealOS public routes", () => {
       "Please sign in",
     );
     expect(screen.getByLabelText("Email or user ID")).toHaveValue("test@example.com");
+    expect(screen.queryByText(/Choose a demo role/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Made with/i)).not.toBeInTheDocument();
+  });
+  it("opens the public English chat assistant from sign in", () => {
+    window.history.replaceState({}, "", "/sign-in");
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Open DealOS Assistant" }));
+    expect(screen.getByText("DealOS Guide")).toBeInTheDocument();
+    expect(screen.getByText(/Powered by Groq · English/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask about DealOS…")).toBeInTheDocument();
   });
   it("offers customer email and Google sign-in and opens all email-linked documents", async () => {
     window.history.replaceState({}, "", "/customer");

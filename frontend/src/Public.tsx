@@ -3,7 +3,6 @@ import {
   ArrowUpRight,
   ArrowRight,
   Check,
-  ChevronDown,
   ShieldCheck,
   Eye,
   EyeOff,
@@ -410,41 +409,11 @@ export function AuthPage({
                   {signup ? "Sign in" : "Get started"} <ArrowUpRight />
                 </a>
               </div>
-              {!signup && (
-                <details className="demo-roles">
-                  <summary>
-                    Just exploring? Choose a demo role <ChevronDown />
-                  </summary>
-                  <div>
-                    {[
-                      ["rep", "Sales rep"],
-                      ["manager", "Manager"],
-                      ["finance", "Finance"],
-                      ["admin", "Admin"],
-                    ].map(([v, t]) => (
-                      <button
-                        type="button"
-                        key={v}
-                        onClick={() => {
-                          setEmail(`${v}@dealos.demo`);
-                          setPassword("DealOS2026!");
-                        }}
-                      >
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                  <small>
-                    Local development accounts. Select a role, then sign in.
-                  </small>
-                </details>
-              )}
             </form>
         </div>
         <div className="auth-security">
           <LockKeyhole /> Protected by secure, server-managed sessions.
         </div>
-        <div className="auth-makers">Made with <span>♥</span> by Amartya, Sanket, Hitesh &amp; Aryan.</div>
       </main>
     </div>
   );
