@@ -16,7 +16,7 @@ import { platformRouter } from './platform.js';
 import { clearPlatformLoginFailures, platformLoginAllowed, platformOwnerCredentialsMatch, readPlatformOwnerCredentials, recordPlatformLoginFailure } from './platform-owner.js';
 import { discountPolicyUpdateSchema } from './policy.js';
 import { CustomerRelationshipError, customerRecordScope, customerRelationshipDto, customerRelationshipInclude, customerRelationshipSchema, updateCustomerRelationships } from './customer-relationships.js';
-import { acceptPortalInvitation, inspectPortalInvitation, issuePortalInvitation, PortalInvitationError, portalInvitationAcceptSchema, revokePortalInvitation } from './portal-invitations.js';
+import { acceptPortalInvitation, assertCustomerCreationPortalAccess, inspectPortalInvitation, issuePortalInvitation, PortalInvitationError, portalInvitationAcceptSchema, provisionCustomerPortalPassword, revokePortalInvitation } from './portal-invitations.js';
 import { createReturnedDraft, decideStep, evaluateRisk, GovernanceError, openCase } from './governance.js';
 import { customerSafeQuotationDto, idempotencyKey, PortalError, portalAcceptSchema, portalCommentSchema, portalProposalSchema, proposalResponseSchema, requireExactSentRevision, sendQuotationSchema } from './portal.js';
 import { confirmEligibleRevision, OrderConfirmationError } from './orders.js';
@@ -27,6 +27,8 @@ import { consolidateBackorder, consolidateSchema, FulfillmentError, previewSplit
 import { assistantMessagesSchema, runAssistant, type AssistantContext } from './assistant.js';
 import { convertLead, dismissLead, dismissLeadSchema, getLead, leadListSchema, listLeads, listPortalRequests, portalRequestCatalog, PortalRequestError, portalRequestSchema, rfqHandlingSettingSchema, submitPortalRequest, updateRfqHandlingMode } from './portal-requests.js';
 import { createRazorpayClient, paymentWebhookKey, readRazorpayConfiguration, rupeesToPaise, verifyCheckoutSignature, verifyWebhookSignature } from './payments.js';
+import { createCustomerProfile, customerCreationSchema, customerProfileSchema, CustomerProfileError } from './customers.js';
+import { approveDirectoryJoinRequest, approveDirectoryJoinRequestSchema, createDirectoryJoinRequest, declineDirectoryJoinRequest, declineDirectoryJoinRequestSchema, directoryJoinListSchema, directoryJoinRequestSchema, DirectoryError, getOrganizationDirectoryProfile, listDirectoryBusinesses, listDirectoryJoinRequests, organizationProfileSchema, updateOrganizationDirectoryProfile } from './directory.js';
 
 type Actor = { id: string; name: string; email: string; loginId: string | null; role: string; customerId: string | null; organizationId: string; moduleAccess: string[]; csrfToken: string; actorType: 'USER' | 'PLATFORM_OWNER'; platformSuperAdmin: boolean; readOnlyView: boolean; organization: { id: string; name: string; status: string } | null; viewContext: { readOnly: true; organizationId: string; organizationName: string; simulatedUserId: string | null; realActor: { id: string; name: string } } | null };
 type AuthRequest = Request & { user?: Actor; requestId?: string };
@@ -296,6 +298,19 @@ app.post('/api/v1/assistant/public', async (req: AuthRequest, res) => {
     if (error instanceof Error && error.message === 'GROQ_NOT_CONFIGURED') return fail(req, res, 503, 'AI_NOT_CONFIGURED', 'DealOS Assistant is not configured yet. Add GROQ_API_KEY to backend/.env.');
     return fail(req, res, 502, 'AI_UNAVAILABLE', error instanceof Error ? error.message : 'The assistant is temporarily unavailable.');
   }
+});
+
+app.get('/api/v1/directory/businesses', async (req: AuthRequest, res) => {
+  return ok(req, res, await listDirectoryBusinesses(db));
+});
+
+app.post('/api/v1/directory/businesses/:organizationId/join-requests', async (req: AuthRequest, res) => {
+  if (req.headers.origin !== allowedOrigin) return fail(req, res, 403, 'ORIGIN_INVALID', 'This request origin is not allowed.');
+  const organizationId = z.string().uuid().safeParse(routeParam(req, 'organizationId'));
+  const parsed = directoryJoinRequestSchema.safeParse(req.body);
+  if (!organizationId.success || !parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter a valid business, company, email, and request message.', parsed.success ? undefined : parsed.error.flatten());
+  const result = await createDirectoryJoinRequest(db, organizationId.data, parsed.data, req.ip ?? 'unknown');
+  return ok(req, res, result, 201);
 });
 
 async function authenticate(req: AuthRequest, res: Response, next: NextFunction) {
@@ -687,55 +702,13 @@ app.get('/api/v1/workspace', authenticate, async (req: AuthRequest, res) => {
   return ok(req, res, { user: req.user, organization, users, customers: customerDtos, quotes, products, policies, warehouses: warehouseDtos, subscriptions, invoices, alerts, audits });
 });
 
-const customerProfileSchema = z.object({
-  name: z.string().trim().min(2).max(160),
-  tier: z.string().trim().min(2).max(40).default('Gold'),
-  currency: z.string().trim().length(3).default('INR'),
-  customerType: z.string().trim().min(2).max(80).default('Business / Company'),
-  region: z.string().trim().min(2).max(80).default('India'),
-  contactPerson: z.string().trim().max(120).optional().nullable(),
-  email: z.string().trim().email().transform(value => value.toLowerCase()).optional().nullable(),
-  phone: z.string().trim().max(32).optional().nullable(),
-  countryCode: z.string().trim().min(1).max(8).default('+91'),
-  gstin: z.string().trim().max(15).optional().nullable(),
-  billingAddress: z.string().trim().max(1000).optional().nullable(),
-  shippingAddress: z.string().trim().max(1000).optional().nullable(),
-  paymentTerms: z.number().int().min(0).max(180).default(7),
-  active: z.boolean().default(true),
-}).strict();
-
-async function setCustomerPortalPassword(tx: Tx, req: AuthRequest, customer: { id: string; name: string; contactPerson: string | null; email: string | null }, password: string) {
-  if (!customer.email) throw new DomainError(422, 'CUSTOMER_EMAIL_REQUIRED', 'Add a customer email before setting a portal password.');
-  const email = customer.email.trim().toLowerCase();
-  const existing = await tx.user.findUnique({ where: { email } });
-  if (existing && (existing.organizationId !== req.user!.organizationId || existing.customerId !== customer.id || existing.role !== 'CUSTOMER')) {
-    throw new DomainError(409, 'EMAIL_EXISTS', 'This email already belongs to another DealOS account. Use a different customer email.');
-  }
-  const passwordHash = await bcrypt.hash(password, 12);
-  const user = existing
-    ? await tx.user.update({ where: { id: existing.id }, data: { name: customer.contactPerson || customer.name, passwordHash, status: 'ACTIVE', moduleAccess: [] } })
-    : await tx.user.create({ data: { organizationId: req.user!.organizationId, customerId: customer.id, name: customer.contactPerson || customer.name, email, passwordHash, status: 'ACTIVE', role: 'CUSTOMER', moduleAccess: [] } });
-  await tx.organizationMembership.upsert({
-    where: { organizationId_userId: { organizationId: req.user!.organizationId, userId: user.id } },
-    update: { accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' },
-    create: { organizationId: req.user!.organizationId, userId: user.id, accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' },
-  });
-  await tx.session.deleteMany({ where: { userId: user.id } });
-  await audit(tx, req, existing ? 'CUSTOMER_PORTAL_PASSWORD_RESET' : 'CUSTOMER_PORTAL_PASSWORD_CREATED', 'Customer', customer.id, email);
-  return user;
-}
-
 app.post('/api/v1/customers', authenticate, requireModule('customers'), requireRole('ADMIN', 'MANAGER'), requireCsrf, async (req: AuthRequest, res) => {
-  const parsed = customerProfileSchema.safeParse(req.body);
+  const parsed = customerCreationSchema.safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter a customer name, tier, and currency.', parsed.error.flatten());
-  if (parsed.data.email) {
-    const duplicate = await db.customer.findFirst({ where: { organizationId: req.user!.organizationId, email: { equals: parsed.data.email, mode: 'insensitive' } } });
-    if (duplicate) return fail(req, res, 409, 'CUSTOMER_EMAIL_EXISTS', 'This customer email is already used in this workspace.');
-  }
+  const { temporaryPassword, ...profile } = parsed.data;
+  const provisionPortalAccess = assertCustomerCreationPortalAccess(req.user!.role, profile.email, temporaryPassword);
   const customer = await db.$transaction(async (tx) => {
-    const created = await tx.customer.create({ data: { organizationId: req.user!.organizationId, ...parsed.data, currency: parsed.data.currency.toUpperCase() } });
-    await audit(tx, req, 'CUSTOMER_CREATED', 'Customer', created.id);
-    return created;
+    return createCustomerProfile(tx, req.user!, profile, provisionPortalAccess ? { temporaryPassword } : {});
   });
   return ok(req, res, customer, 201);
 });
@@ -809,7 +782,7 @@ app.put('/api/v1/customers/:id/portal-password', authenticate, requireModule('cu
   if (req.user!.role === 'MANAGER' && customer.primarySalesTeam?.managerId !== req.user!.id) return fail(req, res, 403, 'FORBIDDEN', 'Managers can manage portal access only for teams they manage.');
   if (!customer.primarySalesTeamId || !customer.primarySalesTeam || customer.assignments.length !== 1) return fail(req, res, 422, 'CONFIGURATION_REQUIRED', 'Assign a primary sales team and representative before activating portal access.');
   try {
-    const user = await db.$transaction((tx) => setCustomerPortalPassword(tx, req, customer, parsed.data.password));
+    const user = await db.$transaction((tx) => provisionCustomerPortalPassword(tx, req.user!, customer, parsed.data.password));
     return ok(req, res, { id: user.id, email: user.email, status: user.status });
   } catch (error) {
     if (error instanceof DomainError) return fail(req, res, error.status, error.code, error.message);
@@ -857,6 +830,25 @@ app.get('/api/v1/sales-teams', authenticate, requireModule('customers'), require
     orderBy: { name: 'asc' },
   });
   return ok(req, res, { items: teams.map((team) => ({ id: team.id, name: team.name, managerId: team.managerId, representatives: team.members.map((member) => member.user) })) });
+});
+
+app.get('/api/v1/directory/join-requests', authenticate, requireModule('customers'), requireRole('MANAGER', 'ADMIN'), async (req: AuthRequest, res) => {
+  const parsed = directoryJoinListSchema.safeParse(req.query);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Use a valid join-request status filter.', parsed.error.flatten());
+  return ok(req, res, await listDirectoryJoinRequests(db, { ...req.user!, requestId: req.requestId! }, parsed.data.status));
+});
+
+app.post('/api/v1/directory/join-requests/:id/approve', authenticate, requireModule('customers'), requireRole('MANAGER', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = approveDirectoryJoinRequestSchema.safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Select an eligible team and representative, customer tier, and currency.', parsed.error.flatten());
+  const result = await db.$transaction((tx) => approveDirectoryJoinRequest(tx, { ...req.user!, requestId: req.requestId! }, routeParam(req, 'id'), parsed.data));
+  return ok(req, res, result);
+});
+
+app.post('/api/v1/directory/join-requests/:id/decline', authenticate, requireModule('customers'), requireRole('MANAGER', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = declineDirectoryJoinRequestSchema.safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Provide a decline reason of at least five characters.', parsed.error.flatten());
+  return ok(req, res, await db.$transaction((tx) => declineDirectoryJoinRequest(tx, { ...req.user!, requestId: req.requestId! }, routeParam(req, 'id'), parsed.data.reason)));
 });
 
 app.put('/api/v1/customers/:id/relationships', authenticate, requireModule('customers'), requireRole('MANAGER', 'ADMIN'), requireCsrf, async (req: AuthRequest, res, next) => {
@@ -1904,6 +1896,16 @@ app.get('/api/v1/settings/rfq-handling', authenticate, requireRole('ADMIN'), asy
   return ok(req, res, { mode: organization.rfqHandlingMode, defaultClassification: 'PROPOSED' });
 });
 
+app.get('/api/v1/settings/directory-profile', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res) => {
+  return ok(req, res, await getOrganizationDirectoryProfile(db, { ...req.user!, requestId: req.requestId! }));
+});
+
+app.put('/api/v1/settings/directory-profile', authenticate, requireRole('ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
+  const parsed = organizationProfileSchema.safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter a display name and valid public directory details.', parsed.error.flatten());
+  return ok(req, res, await db.$transaction((tx) => updateOrganizationDirectoryProfile(tx, { ...req.user!, requestId: req.requestId! }, parsed.data)));
+});
+
 app.put('/api/v1/settings/rfq-handling', authenticate, requireRole('ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
   const parsed = rfqHandlingSettingSchema.safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Choose Lead first or Direct draft.', parsed.error.flatten());
@@ -1926,6 +1928,12 @@ app.use((error: unknown, req: AuthRequest, res: Response, _next: NextFunction) =
     if (error.retryAfter) res.setHeader('Retry-After', error.retryAfter);
     return fail(req, res, error.status, error.code, error.message);
   }
+  if (error instanceof DirectoryError) {
+    if (error.retryAfter) res.setHeader('Retry-After', error.retryAfter);
+    return fail(req, res, error.status, error.code, error.message);
+  }
+  if (error instanceof CustomerProfileError) return fail(req, res, error.status, error.code, error.message);
+  if (error instanceof QuotationCreationError) return fail(req, res, error.status, error.code, error.message);
   if (error instanceof DomainError) return fail(req, res, error.status, error.code, error.message);
   console.error(JSON.stringify({ level: 'error', requestId: req.requestId, route: req.path, error: error instanceof Error ? error.name : 'UnknownError' }));
   return fail(req, res, 500, 'INTERNAL_ERROR', 'The request could not be completed.');

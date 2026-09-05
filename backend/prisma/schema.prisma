@@ -174,110 +174,152 @@ enum InvitationStatus {
   EXPIRED
 }
 
+enum DirectoryJoinRequestStatus {
+  PENDING
+  APPROVED
+  DECLINED
+}
+
 model User {
-  id                      String                   @id @default(uuid())
-  name                    String
-  email                   String                   @unique
-  loginId                 String?                  @unique
-  googleSubject           String?                  @unique
-  passwordHash            String
-  status                  AccountStatus            @default(PENDING)
-  role                    Role
-  moduleAccess            String[]                 @default([])
-  organizationId          String?
-  organization            Organization?            @relation(fields: [organizationId], references: [id])
-  customerId              String?
-  customer                Customer?                @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  sessions                Session[]
-  quotes                  Quote[]                  @relation("QuoteOwner")
-  quotesCreated           Quote[]                  @relation("QuoteCreator")
-  managedSalesTeams       SalesTeam[]              @relation("SalesTeamManager")
-  salesTeamMemberships    SalesTeamMember[]
-  customerAssignments     CustomerRepresentative[] @relation("CustomerRepresentativeUser")
-  customerAssignmentsMade CustomerRepresentative[] @relation("CustomerRepresentativeAssigner")
-  approvals               Approval[]               @relation("ApprovalReviewer")
-  submittedApprovalCases  ApprovalCase[]           @relation("ApprovalCaseSubmitter")
-  auditEvents             AuditEvent[]
-  memberships             OrganizationMembership[]
-  invitationsSent         OrganizationInvitation[] @relation("InvitationSender")
-  privilegedActions       PrivilegedAudit[]        @relation("PrivilegedActor")
-  simulatedActions        PrivilegedAudit[]        @relation("PrivilegedSimulatedUser")
-  privilegedTargets       PrivilegedAudit[]        @relation("PrivilegedTargetUser")
-  subscriptionChanges     SubscriptionChange[]
-  invoiceNotes            InvoiceNote[]
-  stockMovements          StockMovement[]
-  portalRequestsSubmitted PortalRequest[]          @relation("PortalRequestSubmitter")
-  portalRequestsProcessed PortalRequest[]          @relation("PortalRequestProcessor")
-  assignedLeads           Lead[]                   @relation("LeadAssignedRep")
-  requestAlerts           Alert[]                  @relation("AlertRecipient")
-  createdAt               DateTime                 @default(now())
+  id                       String                   @id @default(uuid())
+  name                     String
+  email                    String                   @unique
+  loginId                  String?                  @unique
+  googleSubject            String?                  @unique
+  passwordHash             String
+  status                   AccountStatus            @default(PENDING)
+  role                     Role
+  moduleAccess             String[]                 @default([])
+  organizationId           String?
+  organization             Organization?            @relation(fields: [organizationId], references: [id])
+  customerId               String?
+  customer                 Customer?                @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  sessions                 Session[]
+  quotes                   Quote[]                  @relation("QuoteOwner")
+  quotesCreated            Quote[]                  @relation("QuoteCreator")
+  managedSalesTeams        SalesTeam[]              @relation("SalesTeamManager")
+  salesTeamMemberships     SalesTeamMember[]
+  customerAssignments      CustomerRepresentative[] @relation("CustomerRepresentativeUser")
+  customerAssignmentsMade  CustomerRepresentative[] @relation("CustomerRepresentativeAssigner")
+  approvals                Approval[]               @relation("ApprovalReviewer")
+  submittedApprovalCases   ApprovalCase[]           @relation("ApprovalCaseSubmitter")
+  auditEvents              AuditEvent[]
+  memberships              OrganizationMembership[]
+  invitationsSent          OrganizationInvitation[] @relation("InvitationSender")
+  privilegedActions        PrivilegedAudit[]        @relation("PrivilegedActor")
+  simulatedActions         PrivilegedAudit[]        @relation("PrivilegedSimulatedUser")
+  privilegedTargets        PrivilegedAudit[]        @relation("PrivilegedTargetUser")
+  subscriptionChanges      SubscriptionChange[]
+  invoiceNotes             InvoiceNote[]
+  stockMovements           StockMovement[]
+  portalRequestsSubmitted  PortalRequest[]          @relation("PortalRequestSubmitter")
+  portalRequestsProcessed  PortalRequest[]          @relation("PortalRequestProcessor")
+  assignedLeads            Lead[]                   @relation("LeadAssignedRep")
+  requestAlerts            Alert[]                  @relation("AlertRecipient")
+  directoryRequestsDecided DirectoryJoinRequest[]   @relation("DirectoryJoinRequestDecider")
+  createdAt                DateTime                 @default(now())
 }
 
 model Organization {
-  id               String                   @id @default(uuid())
-  name             String
-  slug             String                   @unique
-  status           OrganizationStatus       @default(ACTIVE)
-  users            User[]
-  memberships      OrganizationMembership[]
-  invitations      OrganizationInvitation[]
-  customers        Customer[]
-  products         Product[]
-  policies         DiscountPolicy[]
-  quotes           Quote[]
-  salesTeams       SalesTeam[]
-  warehouses       Warehouse[]
-  stockMovements   StockMovement[]
-  subscriptions    Subscription[]
-  invoices         Invoice[]
+  id                    String                   @id @default(uuid())
+  name                  String
+  slug                  String                   @unique
+  status                OrganizationStatus       @default(ACTIVE)
+  users                 User[]
+  memberships           OrganizationMembership[]
+  invitations           OrganizationInvitation[]
+  customers             Customer[]
+  products              Product[]
+  policies              DiscountPolicy[]
+  quotes                Quote[]
+  salesTeams            SalesTeam[]
+  warehouses            Warehouse[]
+  stockMovements        StockMovement[]
+  subscriptions         Subscription[]
+  invoices              Invoice[]
   payments         Payment[]
   paymentWebhooks  PaymentWebhookEvent[]
-  alerts           Alert[]
-  portalRequests   PortalRequest[]
-  leads            Lead[]
-  auditEvents      AuditEvent[]
-  privilegedAudits PrivilegedAudit[]
-  rfqHandlingMode  RfqHandlingMode          @default(LEAD_FIRST)
-  createdAt        DateTime                 @default(now())
-  updatedAt        DateTime                 @updatedAt
+  alerts                Alert[]
+  portalRequests        PortalRequest[]
+  leads                 Lead[]
+  auditEvents           AuditEvent[]
+  privilegedAudits      PrivilegedAudit[]
+  directoryProfile      OrganizationProfile?
+  directoryJoinRequests DirectoryJoinRequest[]
+  rfqHandlingMode       RfqHandlingMode          @default(LEAD_FIRST)
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
 }
 
 model Customer {
-  id                 String                   @id @default(uuid())
-  organizationId     String
-  organization       Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  name               String
-  tier               String
-  currency           String                   @default("INR")
-  customerType       String                   @default("Business / Company")
-  region             String                   @default("India")
-  contactPerson      String?
-  email              String?
-  phone              String?
-  countryCode        String                   @default("+91")
-  gstin              String?
-  billingAddress     String?
-  shippingAddress    String?
-  paymentTerms       Int                      @default(7)
-  active             Boolean                  @default(true)
-  primarySalesTeamId String?
-  primarySalesTeam   SalesTeam?               @relation(fields: [primarySalesTeamId], references: [id], onDelete: SetNull)
-  assignmentVersion  Int                      @default(1)
-  assignments        CustomerRepresentative[]
-  users              User[]
-  quotes             Quote[]
-  orders             Order[]
-  subscriptions      Subscription[]
-  invoices           Invoice[]
-  invitations        OrganizationInvitation[]
-  invoiceNotes       InvoiceNote[]
-  portalRequests     PortalRequest[]
-  leads              Lead[]
-  createdAt          DateTime                 @default(now())
-  updatedAt          DateTime                 @updatedAt
+  id                   String                   @id @default(uuid())
+  organizationId       String
+  organization         Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name                 String
+  tier                 String
+  currency             String                   @default("INR")
+  customerType         String                   @default("Business / Company")
+  region               String                   @default("India")
+  contactPerson        String?
+  email                String?
+  phone                String?
+  countryCode          String                   @default("+91")
+  gstin                String?
+  billingAddress       String?
+  shippingAddress      String?
+  paymentTerms         Int                      @default(7)
+  active               Boolean                  @default(true)
+  primarySalesTeamId   String?
+  primarySalesTeam     SalesTeam?               @relation(fields: [primarySalesTeamId], references: [id], onDelete: SetNull)
+  assignmentVersion    Int                      @default(1)
+  assignments          CustomerRepresentative[]
+  users                User[]
+  quotes               Quote[]
+  orders               Order[]
+  subscriptions        Subscription[]
+  invoices             Invoice[]
+  invitations          OrganizationInvitation[]
+  invoiceNotes         InvoiceNote[]
+  portalRequests       PortalRequest[]
+  leads                Lead[]
+  directoryJoinRequest DirectoryJoinRequest?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
 
   @@unique([organizationId, name])
   @@index([organizationId, primarySalesTeamId])
+}
+
+model OrganizationProfile {
+  organizationId   String       @id
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  displayName      String
+  shortDescription String?
+  category         String?
+  isDiscoverable   Boolean      @default(false)
+  updatedAt        DateTime     @updatedAt
+}
+
+model DirectoryJoinRequest {
+  id                  String                     @id @default(uuid())
+  organizationId      String
+  organization        Organization               @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  email               String
+  companyName         String
+  message             String
+  status              DirectoryJoinRequestStatus @default(PENDING)
+  decidedById         String?
+  decidedBy           User?                      @relation("DirectoryJoinRequestDecider", fields: [decidedById], references: [id], onDelete: Restrict)
+  decidedAt           DateTime?
+  decisionReason      String?
+  resultingCustomerId String?                    @unique
+  resultingCustomer   Customer?                  @relation(fields: [resultingCustomerId], references: [id], onDelete: Restrict)
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+
+  @@unique([organizationId, email, status])
+  @@index([organizationId, status, createdAt])
+  @@index([email, createdAt])
 }
 
 model CustomerRepresentative {

@@ -8,6 +8,7 @@
     "start": "node dist/src/server.js",
     "test": "vitest run",
     "test:fulfillment:pg": "node --import tsx tests/fulfillment.postgres.ts",
+    "test:directory:pg": "node --import tsx tests/directory.postgres.ts",
     "test:portal-rfq:pg": "node --import tsx tests/portal-requests.postgres.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",

@@ -8,6 +8,8 @@ export const portalInvitationAcceptSchema = z.object({
   password: z.string().min(12).max(128),
 }).strict();
 
+export const customerTemporaryPasswordSchema = z.string().min(12).max(128);
+
 export class PortalInvitationError extends Error {
   constructor(
     readonly status: number,
@@ -25,6 +27,57 @@ export type PortalInvitationActor = {
   organizationId: string;
   requestId?: string;
 };
+
+type CustomerPortalIdentity = {
+  id: string;
+  name: string;
+  contactPerson: string | null;
+  email: string | null;
+};
+
+export function assertCustomerCreationPortalAccess(role: string, email: string | null | undefined, temporaryPassword: string | undefined) {
+  if (role === 'ADMIN') {
+    if (!email) throw new PortalInvitationError(422, 'CUSTOMER_EMAIL_REQUIRED', 'A customer email is required so the generated temporary password can be used to sign in.');
+    if (!temporaryPassword) throw new PortalInvitationError(422, 'TEMPORARY_PASSWORD_REQUIRED', 'Generate a temporary password before creating this customer.');
+    return true;
+  }
+  if (temporaryPassword) throw new PortalInvitationError(403, 'FORBIDDEN', 'Only an Administrator can provision customer login credentials during profile creation.');
+  return false;
+}
+
+export async function provisionCustomerPortalPassword(
+  tx: Prisma.TransactionClient,
+  actor: Pick<PortalInvitationActor, 'id' | 'organizationId' | 'requestId'>,
+  customer: CustomerPortalIdentity,
+  password: string,
+) {
+  if (!customer.email) throw new PortalInvitationError(422, 'CUSTOMER_EMAIL_REQUIRED', 'Add a customer email before setting a portal password.');
+  const email = customer.email.trim().toLowerCase();
+  const existing = await tx.user.findUnique({ where: { email } });
+  if (existing && (existing.organizationId !== actor.organizationId || existing.customerId !== customer.id || existing.role !== 'CUSTOMER')) {
+    throw new PortalInvitationError(409, 'EMAIL_EXISTS', 'This email already belongs to another DealOS account. Use a different customer email.');
+  }
+  const passwordHash = await bcrypt.hash(password, 12);
+  const user = existing
+    ? await tx.user.update({ where: { id: existing.id }, data: { name: customer.contactPerson || customer.name, passwordHash, status: 'ACTIVE', moduleAccess: [] } })
+    : await tx.user.create({ data: { organizationId: actor.organizationId, customerId: customer.id, name: customer.contactPerson || customer.name, email, passwordHash, status: 'ACTIVE', role: 'CUSTOMER', moduleAccess: [] } });
+  await tx.organizationMembership.upsert({
+    where: { organizationId_userId: { organizationId: actor.organizationId, userId: user.id } },
+    update: { accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' },
+    create: { organizationId: actor.organizationId, userId: user.id, accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' },
+  });
+  await tx.session.deleteMany({ where: { userId: user.id } });
+  await tx.auditEvent.create({ data: {
+    organizationId: actor.organizationId,
+    actorId: actor.id,
+    action: existing ? 'CUSTOMER_PORTAL_PASSWORD_RESET' : 'CUSTOMER_PORTAL_PASSWORD_CREATED',
+    resource: 'Customer',
+    resourceId: customer.id,
+    reason: email,
+    requestId: actor.requestId,
+  } });
+  return user;
+}
 
 const invitationLifetimeMs = 7 * 24 * 60 * 60 * 1000;
 const invitationRateWindowMs = 60 * 60 * 1000;
