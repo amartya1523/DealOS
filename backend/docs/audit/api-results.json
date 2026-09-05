@@ -1,5 +1,5 @@
 {
-  "date": "2026-09-05T19:18:03.214Z",
+  "date": "2026-09-05T20:03:42.484Z",
   "environment": "isolated PostgreSQL schema; synthetic fixtures",
   "results": [
     {
@@ -29,6 +29,397 @@
     },
     {
       "name": "Unauthenticated workspace denied",
+      "status": "PASS",
+      "actual": 401
+    },
+    {
+      "name": "High excess routes Manager then Finance",
+      "status": "PASS",
+      "actual": [
+        "Sales Manager",
+        "Finance"
+      ]
+    },
+    {
+      "name": "Finance blocked before Manager",
+      "status": "PASS",
+      "actual": "APPROVAL_STEP_BLOCKED"
+    },
+    {
+      "name": "Rep cannot approve",
+      "status": "PASS",
+      "actual": 403
+    },
+    {
+      "name": "Approval requires reason",
+      "status": "PASS",
+      "actual": 422
+    },
+    {
+      "name": "Customer cannot confirm pending quote",
+      "status": "PASS",
+      "actual": 409
+    },
+    {
+      "name": "Allocation blocked before confirmation",
+      "status": "PASS",
+      "actual": 409
+    },
+    {
+      "name": "Manager approval leaves Finance pending",
+      "status": "PASS",
+      "actual": "PENDING_APPROVAL"
+    },
+    {
+      "name": "Final approval produces approved stage",
+      "status": "PASS",
+      "actual": "APPROVED"
+    },
+    {
+      "name": "Customer DTO excludes internal data",
+      "status": "PASS",
+      "actual": {
+        "margin": false,
+        "riskScore": false,
+        "lineCost": false,
+        "productCost": false,
+        "approvalReasons": []
+      }
+    },
+    {
+      "name": "Customer cannot confirm another customer quote",
+      "status": "PASS",
+      "actual": 404
+    },
+    {
+      "name": "Customer cannot modify another customer quote",
+      "status": "PASS",
+      "actual": 404
+    },
+    {
+      "name": "Unsent draft hidden from customer",
+      "status": "PASS",
+      "actual": false
+    },
+    {
+      "name": "Counteroffer recalculates totals and risk",
+      "status": "PASS",
+      "actual": {
+        "storedTotal": 96.76,
+        "expectedTotal": 96.76,
+        "storedRisk": 49,
+        "expectedRisk": 49
+      }
+    },
+    {
+      "name": "Prior approval decisions remain immutable",
+      "status": "PASS",
+      "actual": [
+        {
+          "state": "APPROVED",
+          "reason": "Audit manager approved"
+        },
+        {
+          "state": "APPROVED",
+          "reason": "Audit finance approved"
+        }
+      ]
+    },
+    {
+      "name": "Within-policy quote avoids unnecessary approval",
+      "status": "PASS",
+      "actual": []
+    },
+    {
+      "name": "Low margin routes Finance",
+      "status": "PASS",
+      "actual": {
+        "marginPercent": 5,
+        "steps": [
+          "Finance"
+        ]
+      }
+    },
+    {
+      "name": "Published Finance threshold affects routing",
+      "status": "PASS",
+      "actual": {
+        "configuredThreshold": 99,
+        "excess": 8,
+        "steps": [
+          "Sales Manager"
+        ]
+      }
+    },
+    {
+      "name": "Self approval blocked",
+      "status": "PASS",
+      "actual": "SELF_APPROVAL_NOT_ALLOWED"
+    },
+    {
+      "name": "Return sends quotation to draft",
+      "status": "PASS",
+      "actual": "DRAFT"
+    },
+    {
+      "name": "Resubmit preserves prior approval cycle",
+      "status": "PASS",
+      "actual": 4
+    },
+    {
+      "name": "Rep cannot edit another owner quote",
+      "status": "PASS",
+      "actual": 404
+    },
+    {
+      "name": "Approved customer quote can confirm",
+      "status": "PASS",
+      "actual": 200
+    },
+    {
+      "name": "Allocation retry does not double reserve",
+      "status": "PASS",
+      "actual": {
+        "first": 2,
+        "retry": 2
+      }
+    },
+    {
+      "name": "Stock API derives available on the backend",
+      "status": "PASS",
+      "actual": {
+        "onHand": 100,
+        "reserved": 2,
+        "available": 98
+      }
+    },
+    {
+      "name": "Partial allocation creates explicit backorder",
+      "status": "PASS",
+      "actual": {
+        "state": "BACKORDER",
+        "split": {
+          "split": [
+            {
+              "quantity": 98,
+              "productId": "aa944433-8aa8-48e7-833b-6ac3c988784c",
+              "warehouseId": "27bf017d-985e-4781-a87b-d6f7caff45a8",
+              "warehouseName": "Audit warehouse"
+            }
+          ],
+          "backorders": [
+            {
+              "quantity": 2,
+              "productId": "aa944433-8aa8-48e7-833b-6ac3c988784c"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Backorder is not consolidatable without new stock",
+      "status": "PASS",
+      "actual": false
+    },
+    {
+      "name": "Sales Rep cannot manage backorder",
+      "status": "PASS",
+      "actual": 403
+    },
+    {
+      "name": "Restock identifies consolidation candidate",
+      "status": "PASS",
+      "actual": [
+        "b9d7cfeb-5e5b-49f3-ad51-9824f20103ca"
+      ]
+    },
+    {
+      "name": "Backorder becomes consolidatable after restock",
+      "status": "PASS",
+      "actual": true
+    },
+    {
+      "name": "Consolidation reserves restock and completes fulfillment",
+      "status": "PASS",
+      "actual": {
+        "state": "FULFILLED",
+        "backorders": []
+      }
+    },
+    {
+      "name": "Manual override rejects unavailable quantity",
+      "status": "PASS",
+      "actual": {
+        "status": 409,
+        "code": "STOCK_CHANGED"
+      }
+    },
+    {
+      "name": "Manual override preserves unallocated demand as backorder",
+      "status": "PASS",
+      "actual": {
+        "state": "BACKORDER",
+        "split": {
+          "split": [
+            {
+              "quantity": 3,
+              "productId": "aa944433-8aa8-48e7-833b-6ac3c988784c",
+              "warehouseId": "27bf017d-985e-4781-a87b-d6f7caff45a8",
+              "warehouseName": "Audit warehouse"
+            }
+          ],
+          "backorders": [
+            {
+              "quantity": 2,
+              "productId": "aa944433-8aa8-48e7-833b-6ac3c988784c"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Stale recommendation is rejected after stock change",
+      "status": "PASS",
+      "actual": {
+        "status": 409,
+        "code": "STOCK_CHANGED"
+      }
+    },
+    {
+      "name": "Overpayment rejected",
+      "status": "PASS",
+      "actual": 422
+    },
+    {
+      "name": "Partial payment updates invoice",
+      "status": "PASS",
+      "actual": {
+        "state": "PARTIAL",
+        "paid": "100"
+      }
+    },
+    {
+      "name": "Payment retry does not duplicate ledger",
+      "status": "PASS",
+      "actual": {
+        "payments": 1,
+        "paid": 100
+      }
+    },
+    {
+      "name": "One-time and recurring totals stay separate",
+      "status": "PASS",
+      "actual": {
+        "total": 165.2,
+        "cadenceTotals": {
+          "One-time": {
+            "subtotal": 100,
+            "tax": 18,
+            "total": 118,
+            "cost": 50,
+            "margin": 50
+          },
+          "Monthly": {
+            "subtotal": 40,
+            "tax": 7.2,
+            "total": 47.2,
+            "cost": 12,
+            "margin": 28
+          }
+        }
+      }
+    },
+    {
+      "name": "Tax included as explicit calculated amount",
+      "status": "PASS",
+      "actual": [
+        "lines",
+        "subtotal",
+        "tax",
+        "taxTotal",
+        "total",
+        "cost",
+        "margin",
+        "marginPercent",
+        "worstExcess",
+        "weightedExcess",
+        "riskScore",
+        "needsManager",
+        "needsFinance",
+        "totalsByCadence"
+      ]
+    },
+    {
+      "name": "Duplicate SKU lines cannot overreserve stock",
+      "status": "PASS",
+      "actual": {
+        "onHand": 110,
+        "reserved": 110
+      }
+    },
+    {
+      "name": "Signup creates active organization admin",
+      "status": "PASS",
+      "actual": {
+        "http": 201,
+        "status": "ACTIVE"
+      }
+    },
+    {
+      "name": "Organization admin can log in",
+      "status": "PASS",
+      "actual": {
+        "http": 200,
+        "role": "ADMIN"
+      }
+    },
+    {
+      "name": "Reject moves quote to rejected",
+      "status": "PASS",
+      "actual": "REJECTED"
+    },
+    {
+      "name": "Reject clears actionable pending steps",
+      "status": "PASS",
+      "actual": [
+        "REJECTED",
+        "SUPERSEDED"
+      ]
+    },
+    {
+      "name": "Manager return clears actionable pending steps",
+      "status": "PASS",
+      "actual": {
+        "stage": "DRAFT",
+        "steps": [
+          "RETURNED",
+          "SUPERSEDED"
+        ]
+      }
+    },
+    {
+      "name": "Concurrent payments respect balance and ledger",
+      "status": "PASS",
+      "actual": {
+        "ledger": 700,
+        "paid": 700,
+        "payments": 1
+      }
+    },
+    {
+      "name": "Draft to approval to customer confirmation",
+      "status": "PASS",
+      "actual": "CONFIRMED"
+    },
+    {
+      "name": "Confirmed deal connects to generated billing",
+      "status": "PASS",
+      "actual": {
+        "invoices": 1
+      }
+    },
+    {
+      "name": "Logout invalidates session",
       "status": "PASS",
       "actual": 401
     }
