@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   ArrowUpRight,
   ArrowRight,
@@ -8,12 +8,123 @@ import {
   Eye,
   EyeOff,
   LockKeyhole,
+  Building2,
 } from "lucide-react";
 import { request } from "./api";
 import "./public.css";
 import { Brand } from "./Brand";
 const stages = ["Quote", "Approve", "Fulfill", "Bill"];
 export { Landing } from "./MotionLanding";
+
+type GoogleAccounts = {
+  id: {
+    initialize: (options: { client_id: string; callback: (response: { credential: string }) => void }) => void;
+    renderButton: (element: HTMLElement, options: Record<string, string | number>) => void;
+  };
+};
+
+declare global {
+  interface Window {
+    google?: { accounts: GoogleAccounts };
+  }
+}
+
+function GoogleAuth({ mode, organizationName = "", onComplete, onError }: { mode: "signup" | "login"; organizationName?: string; onComplete: () => void | Promise<void>; onError: (message: string) => void }) {
+  const buttonRef = useRef<HTMLDivElement>(null);
+  const [clientId, setClientId] = useState<string | null>(null);
+  const [configurationLoaded, setConfigurationLoaded] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    request<{ enabled: boolean; clientId: string | null }>("/auth/google/config")
+      .then((config) => {
+        if (active && config.enabled && config.clientId) setClientId(config.clientId);
+      })
+      .catch(() => undefined)
+      .finally(() => { if (active) setConfigurationLoaded(true); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!clientId || !buttonRef.current) return;
+    let active = true;
+    const render = () => {
+      if (!active || !buttonRef.current || !window.google) return;
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: async ({ credential }) => {
+          onError("");
+          try {
+            await request(`/auth/google/${mode}`, {
+              method: "POST",
+              body: JSON.stringify(mode === "signup" ? { credential, organizationName } : { credential }),
+            });
+            await onComplete();
+          } catch (error) {
+            onError(error instanceof Error ? error.message : "Google signup could not be completed.");
+          }
+        },
+      });
+      buttonRef.current.replaceChildren();
+      window.google.accounts.id.renderButton(buttonRef.current, {
+        type: "standard",
+        theme: "outline",
+        size: "large",
+        text: mode === "signup" ? "signup_with" : "signin_with",
+        shape: "rectangular",
+        logo_alignment: "left",
+        width: buttonRef.current.clientWidth || 400,
+      });
+    };
+    const existing = document.querySelector<HTMLScriptElement>('script[data-dealos-google-identity]');
+    const script = existing ?? document.createElement("script");
+    script.addEventListener("load", render);
+    if (!existing) {
+      script.src = "https://accounts.google.com/gsi/client";
+      script.async = true;
+      script.dataset.dealosGoogleIdentity = "true";
+      document.head.appendChild(script);
+    }
+    if (window.google) {
+      render();
+    }
+    return () => {
+      active = false;
+      script.removeEventListener("load", render);
+      buttonRef.current?.replaceChildren();
+    };
+  }, [clientId, mode, onComplete, onError, organizationName]);
+
+  if (!clientId) return (
+    <>
+      <button
+        type="button"
+        className="google-signup-fallback"
+        aria-label={mode === "signup" ? "Sign up with Google" : "Sign in with Google"}
+        onClick={() => onError(configurationLoaded
+          ? "Google authentication is not configured yet. Add GOOGLE_CLIENT_ID to backend/.env and restart the backend."
+          : "Google authentication is still loading. Please try again in a moment.")}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.4-.18-2.07H12v3.92h5.38a4.6 4.6 0 0 1-2 3.02v2.55h3.24c1.9-1.75 2.98-4.33 2.98-7.42Z" />
+          <path fill="#34A853" d="M12 22c2.7 0 4.97-.9 6.62-2.35l-3.24-2.55c-.9.6-2.05.96-3.38.96-2.61 0-4.82-1.76-5.61-4.13H3.04v2.63A10 10 0 0 0 12 22Z" />
+          <path fill="#FBBC05" d="M6.39 13.93A6.01 6.01 0 0 1 6.08 12c0-.67.12-1.32.31-1.93V7.44H3.04A10 10 0 0 0 2 12c0 1.61.39 3.14 1.04 4.56l3.35-2.63Z" />
+          <path fill="#EA4335" d="M12 5.94c1.47 0 2.79.5 3.83 1.5l2.87-2.88A9.64 9.64 0 0 0 12 2a10 10 0 0 0-8.96 5.44l3.35 2.63C7.18 7.7 9.39 5.94 12 5.94Z" />
+        </svg>
+        {mode === "signup" ? "Sign up with Google" : "Sign in with Google"}
+      </button>
+      <div className="auth-divider"><span>or continue with work email</span></div>
+    </>
+  );
+  return (
+    <>
+      <div className="google-signup" ref={buttonRef} aria-label={`Google ${mode}`}>
+        <span className="google-loading">Loading Google…</span>
+      </div>
+      <div className="auth-divider"><span>or continue with work email</span></div>
+    </>
+  );
+}
 
 export function AuthPage({
   signup = false,
@@ -27,23 +138,32 @@ export function AuthPage({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
+  const [organizationName, setOrganizationName] = useState("");
+  const [step, setStep] = useState(1);
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [done, setDone] = useState(false);
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (signup && step < 2) {
+      setStep(step + 1);
+      return;
+    }
     setBusy(true);
     setError("");
     try {
       await request(signup ? "/auth/signup" : "/auth/login", {
         method: "POST",
         body: JSON.stringify(
-          signup ? { email, password, displayName: name } : { email, password },
+          signup ? {
+            organizationName,
+            email,
+            password,
+            displayName: name,
+          } : { identifier: email, password },
         ),
       });
-      if (signup) setDone(true);
-      else await onSuccess();
+      await onSuccess();
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "Unable to connect. Please try again.",
@@ -87,31 +207,26 @@ export function AuthPage({
           ← Back to DealOS
         </a>
         <div className="auth-form-wrap">
-          {done ? (
-            <div className="signup-success" role="status">
-              <span className="success-icon">
-                <Check />
-              </span>
-              <span className="section-label">YOU’VE MADE THE FIRST MOVE</span>
-              <h2>Request received.</h2>
-              <p>
-                If this email is new, your account is now pending administrator
-                activation. You’ll need your administrator to enable access
-                before signing in.
-              </p>
-              <a href="/sign-in" className="cta">
-                Back to sign in <ArrowRight />
-              </a>
-            </div>
-          ) : (
             <form className="auth-form" onSubmit={submit}>
+              {signup && (
+                <div className="onboarding-progress two" aria-label={`Onboarding step ${step} of 2`}>
+                  {["Organization", "Admin account"].map((label, index) => (
+                    <span className={step >= index + 1 ? "active" : ""} key={label}>
+                      <i>{step > index + 1 ? <Check /> : index + 1}</i>{label}
+                    </span>
+                  ))}
+                </div>
+              )}
               <span className="section-label">
-                {signup ? "A CLEARER WAY FORWARD" : "YOUR WORKSPACE AWAITS"}
+                {signup ? `SETUP ${step} OF 2` : "YOUR WORKSPACE AWAITS"}
               </span>
-              <h2>{signup ? "Make your next move." : "Welcome back."}</h2>
+              <h2>{signup ? ["Create your organization.", "Create the admin account."][step - 1] : "Welcome back."}</h2>
               <p>
                 {signup
-                  ? "Request access and bring every deal into focus."
+                  ? [
+                    "The first account becomes this organization’s administrator.",
+                    "Continue with Google or create credentials for the first organization admin.",
+                  ][step - 1]
                   : "A little less friction. A lot more momentum."}
               </p>
               {(error || externalError) && (
@@ -119,9 +234,28 @@ export function AuthPage({
                   {error || externalError}
                 </div>
               )}
-              {signup && (
+              {signup && step === 1 && (
                 <label>
-                  Full name
+                  Organization name
+                  <div className="field-with-icon">
+                    <Building2 />
+                    <input
+                      autoFocus
+                      required
+                      minLength={2}
+                      maxLength={120}
+                      value={organizationName}
+                      onChange={(e) => setOrganizationName(e.target.value)}
+                      placeholder="Acme, Inc."
+                    />
+                  </div>
+                </label>
+              )}
+              {signup && step === 2 && (
+                <>
+                <GoogleAuth mode="signup" organizationName={organizationName} onComplete={onSuccess} onError={setError} />
+                <label>
+                  Admin full name
                   <input
                     autoComplete="name"
                     required
@@ -131,9 +265,8 @@ export function AuthPage({
                     placeholder="Jordan Davis"
                   />
                 </label>
-              )}
               <label>
-                Work email
+                Admin email
                 <input
                   type="email"
                   autoComplete="email"
@@ -167,20 +300,36 @@ export function AuthPage({
                   </button>
                 </div>
               </label>
-              {signup && (
                 <small>
-                  Accounts require administrator activation before workspace
-                  access.
+                  User access is configured after setup from the admin workspace.
                 </small>
+                </>
               )}
+              {!signup && <GoogleAuth mode="login" onComplete={onSuccess} onError={setError} />}
+              {!signup && <>
+                <label>
+                  Email or user ID
+                  <input autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com or DL-1234ABCD" />
+                </label>
+                <label>
+                  Password
+                  <div className="password-field">
+                    <input type={visible ? "text" : "password"} autoComplete="current-password" required minLength={8} maxLength={128} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" />
+                    <button type="button" aria-label={visible ? "Hide password" : "Show password"} onClick={() => setVisible(!visible)}>{visible ? <EyeOff /> : <Eye />}</button>
+                  </div>
+                </label>
+              </>}
+              <div className="onboarding-actions">
+                {signup && step > 1 && <button className="back-step" type="button" onClick={() => setStep(step - 1)}>Back</button>}
               <button className="cta" disabled={busy}>
                 {busy
                   ? "Just a moment…"
                   : signup
-                    ? "Request workspace access"
+                    ? step < 2 ? "Continue" : "Create organization"
                     : "Sign in to your workspace"}
                 <ArrowUpRight />
               </button>
+              </div>
               <div className="auth-switch">
                 {signup ? "Already have an account?" : "New to DealOS?"}{" "}
                 <a href={signup ? "/sign-in" : "/sign-up"}>
@@ -218,7 +367,6 @@ export function AuthPage({
                 </details>
               )}
             </form>
-          )}
         </div>
         <div className="auth-security">
           <LockKeyhole /> Protected by secure, server-managed sessions.

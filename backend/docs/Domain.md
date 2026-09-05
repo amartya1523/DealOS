@@ -59,9 +59,9 @@ Invoice: `DRAFT → ISSUED → PARTIALLY_PAID → PAID`, with credit-adjusted ba
 
 ### W-01 Identity and access
 
-- Trigger/actor: internal signup/login, Admin activation, or provisioned Customer login.
-- Input: email/password; authenticated Admin supplies roles and team/customer link.
-- Processing/logic: hash passwords, normalize email, rate limit, deny inactive accounts; rotate session on login. Public signup grants no active privileged role.
+- Trigger/actor: internal email/password signup, Google signup, email/password login, Admin activation, or provisioned Customer login.
+- Input: email/password or a Google Identity Services ID credential on sign-up; authenticated Admin supplies roles and team/customer link.
+- Processing/logic: hash passwords, normalize email, verify Google token signature/audience/expiry and verified email server-side, rate limit, deny inactive accounts; rotate session on login. Public signup grants no active privileged role. Google is not exposed as a sign-in method.
 - Database: user, role assignment, password hash, session token hash, audit.
 - Output: session cookie and minimal identity/permission projection.
 - Failure/recovery: generic invalid-credential response; expired session forces login; Admin activates pending signup. No fallback demo identity.

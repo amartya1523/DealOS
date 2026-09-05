@@ -1,5 +1,5 @@
 {
-  "date": "2026-09-05T07:05:26.085Z",
+  "date": "2026-09-05T08:20:09.452Z",
   "environment": "isolated PostgreSQL schema; synthetic fixtures",
   "results": [
     {
@@ -257,19 +257,19 @@
       }
     },
     {
-      "name": "Signup creates pending account",
+      "name": "Signup creates active organization admin",
       "status": "PASS",
       "actual": {
-        "http": 202,
-        "status": "PENDING"
+        "http": 201,
+        "status": "ACTIVE"
       }
     },
     {
-      "name": "Pending signup cannot log in",
+      "name": "Organization admin can log in",
       "status": "PASS",
       "actual": {
-        "http": 403,
-        "code": "ACCOUNT_INACTIVE"
+        "http": 200,
+        "role": "ADMIN"
       }
     },
     {

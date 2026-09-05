@@ -1059,7 +1059,7 @@ This inventory is approved as architecture scope, not as deployed functionality.
 
 ## Implementation update — 2026-09-05
 
-AUTH-01 is implemented: `POST /api/v1/auth/signup` accepts only `{displayName,email,password}`, trims and normalizes email/name, validates name 1–120 and password 12–128, hashes with bcrypt, persists PENDING, and returns HTTP 202 `{success:true,data:{status:"PENDING",message}}`. Existing emails receive the same public result without account changes. Extra fields (including role) are rejected with 422. AUTH-02 and session authentication now require ACTIVE; valid credentials for a pending/disabled account return 403 ACCOUNT_INACTIVE and no cookie. Administrator activation UI/endpoints, rate limiting and CSRF remain future hardening work. Existing active demo accounts remain available.
+AUTH-01 is implemented as organization onboarding: `POST /api/v1/auth/signup` accepts only `{organizationName,displayName,email,password}`, validates and normalizes the values, creates an isolated organization with its first ACTIVE administrator, starts a server-managed session, and returns HTTP 201. Duplicate email, validation, and role/access injection are rejected. AUTH-01A and AUTH-01B expose runtime Google configuration and verified Google organization signup; the exact OAuth audience and verified email are checked server-side. Google and email/password login both issue the same CSRF-bound session. AUTH-02 accepts either an email address or generated `DL-…` user ID and requires an ACTIVE account. Administrators can create audited module-scoped user access with generated credentials; every user and workspace query remains organization-scoped.
 
 ## Audit repair implementation update — 2026-09-05
 

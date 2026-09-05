@@ -1,7 +1,7 @@
 # DealOS backend audit repair report
 
-**Repair date:** 5 September 2026  
-**Automated result:** 44/44 isolated workflow checks pass. This includes all 24 preserved cases plus the previously failing backend checks.  
+**Repair date:** 5 September 2026
+**Automated result:** 44/44 isolated workflow checks pass. This includes all 24 preserved cases plus the previously failing backend checks.
 **Safety:** migration validation and API checks used disposable PostgreSQL schemas. After those checks passed, the reviewed migration was applied to the local development schema without reseeding; all five demo users and three demo quotes were preserved and backfilled.
 
 ## Fix 1 — Customer isolation, real ownership, and safe DTOs (C1)

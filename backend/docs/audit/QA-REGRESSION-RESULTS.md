@@ -1,7 +1,7 @@
 # DealOS preserved-case regression results
 
-**Run date:** 5 September 2026  
-**Environment:** synthetic records in a unique disposable PostgreSQL schema; the schema was dropped after the run. Existing demo records were not changed.  
+**Run date:** 5 September 2026
+**Environment:** synthetic records in a unique disposable PostgreSQL schema; the schema was dropped after the run. Existing demo records were not changed.
 **Result:** 24/24 previously passing cases preserved. The separate repair checks are recorded in `api-results.json` and `REPAIR-REPORT.md`.
 
 | Case ID | Scenario | Expected result | Actual result | HTTP status | Database evidence | Pass/Fail |
