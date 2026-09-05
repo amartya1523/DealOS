@@ -7,7 +7,7 @@ import helmet from 'helmet';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { db } from './db.js';
-import { createGoogleOrganizationAdmin, createOrganizationAdmin, googleSignupSchema, signupSchema, verifyGoogleSignupCredential } from './identity.js';
+import { createGoogleOrganizationAdmin, createOrganizationAdmin, findOrLinkGoogleLoginUser, googleSignupSchema, signupSchema, verifyGoogleSignupCredential } from './identity.js';
 import { allocateStock, billingSchedule, calculateQuote } from './rules.js';
 import { authenticate as authenticatePlatform, csrfCookieName, hashToken as hashPlatformToken, identityDto, platformSessionCookieName } from './authorization.js';
 import { platformRouter } from './platform.js';
@@ -160,8 +160,8 @@ app.post('/api/v1/auth/google/login', async (req: AuthRequest, res) => {
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'A valid Google credential is required.');
   try {
     const profile = await verifyGoogleSignupCredential(parsed.data.credential, googleClientId);
-    const user = await db.user.findUnique({ where: { googleSubject: profile.subject } });
-    if (!user || !user.organizationId || user.status !== 'ACTIVE') return fail(req, res, 401, 'INVALID_CREDENTIALS', 'Google account is not linked to an active workspace.');
+    const user = await findOrLinkGoogleLoginUser(profile);
+    if (!user) return fail(req, res, 401, 'INVALID_CREDENTIALS', 'No active workspace was found for this Google account. Create an account first or sign in with work email.');
     const token = await startSession(user, res);
     return ok(req, res, { id: user.id, name: user.name, email: user.email, role: user.role, csrfToken: csrfForToken(token) });
   } catch { return fail(req, res, 401, 'INVALID_GOOGLE_CREDENTIAL', 'Google could not verify this sign-in.'); }

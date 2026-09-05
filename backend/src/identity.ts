@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
+import type { User } from '@prisma/client';
 import { OAuth2Client } from 'google-auth-library';
 import { z } from 'zod';
 import { db } from './db.js';
@@ -69,4 +70,19 @@ export async function createGoogleOrganizationAdmin(profile: GoogleSignupProfile
   if (existing) return null;
   const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
   return createAdminOrganization({ organizationName, displayName: profile.displayName, email: profile.email, passwordHash, googleSubject: profile.subject });
+}
+
+export async function findOrLinkGoogleLoginUser(profile: GoogleSignupProfile): Promise<User | null> {
+  const linkedUser = await db.user.findUnique({ where: { googleSubject: profile.subject } });
+  if (linkedUser) return linkedUser.organizationId && linkedUser.status === 'ACTIVE' ? linkedUser : null;
+
+  const emailUser = await db.user.findUnique({ where: { email: profile.email } });
+  if (!emailUser?.organizationId || emailUser.status !== 'ACTIVE' || emailUser.googleSubject) return null;
+
+  try {
+    return await db.user.update({ where: { id: emailUser.id }, data: { googleSubject: profile.subject } });
+  } catch {
+    const concurrentlyLinkedUser = await db.user.findUnique({ where: { googleSubject: profile.subject } });
+    return concurrentlyLinkedUser?.organizationId && concurrentlyLinkedUser.status === 'ACTIVE' ? concurrentlyLinkedUser : null;
+  }
 }
