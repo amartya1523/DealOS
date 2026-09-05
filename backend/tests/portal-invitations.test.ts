@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
-import { acceptPortalInvitation, inspectPortalInvitation, issuePortalInvitation, portalInvitationTokenHash, revokePortalInvitation } from '../src/portal-invitations.js';
+import { acceptPortalInvitation, assertCustomerCreationPortalAccess, inspectPortalInvitation, issuePortalInvitation, portalInvitationTokenHash, provisionCustomerPortalPassword, revokePortalInvitation } from '../src/portal-invitations.js';
 
 const token = 'a'.repeat(64);
 const now = new Date('2026-09-05T12:00:00.000Z');
@@ -8,6 +8,25 @@ const customerId = '11111111-1111-4111-8111-111111111111';
 const actor = { id: '22222222-2222-4222-8222-222222222222', role: 'ADMIN', organizationId: 'org-1', requestId: 'request-1' };
 
 describe('customer portal invitations', () => {
+  it('allows only an Admin to provision required customer credentials during creation', () => {
+    expect(assertCustomerCreationPortalAccess('ADMIN', 'buyer@example.com', 'SecurePassword12!')).toBe(true);
+    expect(() => assertCustomerCreationPortalAccess('ADMIN', 'buyer@example.com', undefined)).toThrow(expect.objectContaining({ code: 'TEMPORARY_PASSWORD_REQUIRED' }));
+    expect(() => assertCustomerCreationPortalAccess('ADMIN', null, 'SecurePassword12!')).toThrow(expect.objectContaining({ code: 'CUSTOMER_EMAIL_REQUIRED' }));
+    expect(() => assertCustomerCreationPortalAccess('MANAGER', 'buyer@example.com', 'SecurePassword12!')).toThrow(expect.objectContaining({ status: 403, code: 'FORBIDDEN' }));
+    expect(assertCustomerCreationPortalAccess('MANAGER', null, undefined)).toBe(false);
+  });
+
+  it('hashes an Admin-created temporary password and activates the customer identity', async () => {
+    const { db, state } = fakeDb();
+    const customer = { id: customerId, name: 'Acme Buyer', contactPerson: 'Buyer Person', email: ' Buyer@Example.com ' };
+    const user = await (db as any).$transaction((tx: any) => provisionCustomerPortalPassword(tx, actor, customer, 'SecurePassword12!'));
+    const bcrypt = await import('bcryptjs');
+    expect(user).toMatchObject({ organizationId: 'org-1', customerId, email: 'buyer@example.com', role: 'CUSTOMER', status: 'ACTIVE' });
+    expect(state.createdUser?.passwordHash).not.toBe('SecurePassword12!');
+    expect(await bcrypt.compare('SecurePassword12!', String(state.createdUser?.passwordHash))).toBe(true);
+    expect(state.audits).toContainEqual(expect.objectContaining({ action: 'CUSTOMER_PORTAL_PASSWORD_CREATED', resource: 'Customer', resourceId: customerId }));
+  });
+
   it('requires an active primary representative before issuing a link', async () => {
     const { db } = fakeDb({ assigned: false });
     await expect(issuePortalInvitation(db, actor, customerId, 'http://localhost:5173', now)).rejects.toMatchObject({ status: 422, code: 'CONFIGURATION_REQUIRED' });
@@ -120,6 +139,7 @@ function fakeDb(options: FakeOptions = {}) {
   const tx = {
     organizationInvitation,
     user: {
+      findUnique: async () => null,
       create: async ({ data }: any) => {
         state.createdUser = data;
         return { id: '44444444-4444-4444-8444-444444444444', ...data };
@@ -127,6 +147,7 @@ function fakeDb(options: FakeOptions = {}) {
       update: async ({ data }: any) => ({ id: '44444444-4444-4444-8444-444444444444', organizationId: 'org-1', customerId, email: invitation.email, role: 'CUSTOMER', ...data }),
     },
     organizationMembership: { upsert: async () => ({}) },
+    session: { deleteMany: async () => ({ count: 0 }) },
     auditEvent: { create: async ({ data }: any) => { state.audits.push(data); return data; } },
   };
   const customer = {

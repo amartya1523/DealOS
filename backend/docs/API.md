@@ -185,13 +185,13 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 
 - **Method/path:** `POST /api/v1/customers`
 - **Purpose:** Configure a buying business.
-- **Actor / authorization:** Manager, Admin; resource scope and global restrictions above apply. Customer profiles are never created by Reps or portal users.
+- **Actor / authorization:** Manager, Admin; resource scope and global restrictions above apply. Customer profiles are never created by Reps or portal users. Only Admin may provision login credentials during this request.
 - **Authentication:** Active database-backed session required.
-- **Request:** `{name,tier,currency,customerType,region,contactPerson?,email?,phone?,countryCode,gstin?,billingAddress?,shippingAddress?,paymentTerms,active}`.
-- **Validation:** known tier/currency; normalized unique customer email within the organization; payment terms 0–180 days; no assignment, owner, role, or invitation input. Assignment is a separate required step before portal invitation or quotation creation.
+- **Request:** `{name,tier,currency,customerType,region,contactPerson?,email?,phone?,countryCode,gstin?,billingAddress?,shippingAddress?,paymentTerms,active,temporaryPassword?}`. For Admin, `email` and `temporaryPassword` are required and the password is 12–128 characters. Manager must omit `temporaryPassword`.
+- **Validation:** known tier/currency; normalized globally available portal email and unique customer email within the organization; payment terms 0–180 days; no assignment, owner, role, or invitation input. Admin creation atomically creates an active CUSTOMER/PORTAL_USER identity while storing only the password hash. Assignment remains a separate required step before portal RFQ submission, portal invitation, or quotation creation.
 - **Response:** 201 CustomerDTO.
 - **Errors:** common error contract above; validation, permission, lifecycle and concurrency conditions are enforced before commit.
-- **Business rules:** R-005, BR-017.
+- **Business rules:** R-005, R-050, BR-017, BR-027.
 
 ### CAT-03 — Update customer commercial setup
 
@@ -1276,6 +1276,8 @@ CAT-01, CAT-03A, AUTH-08's implemented team read and QUO-02/03 now enforce the c
 
 ## Customer portal invitation implementation update — 2026-09-05
 
-POR-00A–POR-00D implement the assignment-gated invitation lifecycle on the existing `OrganizationInvitation` model. Customer creation, customer email edits, quotation sending, and invoice creation no longer create invitations implicitly. The customer detail UI shows the complete invitation status history, explains the assignment gate, and surfaces the raw manual-share link only immediately after issuance. `/customer/invitations/:token` provides password setup through the existing identity/session system, and `/customer/sign-in` supports that password plus Google linking for an already-active customer identity. No outbound email exists.
+POR-00A–POR-00D implement the assignment-gated invitation lifecycle on the existing `OrganizationInvitation` model. Customer email edits, quotation sending, and invoice creation do not create invitations implicitly. The customer detail UI shows the complete invitation status history, explains the assignment gate, and surfaces the raw manual-share link only immediately after issuance. `/customer/invitations/:token` provides password setup through the existing identity/session system, and `/customer/sign-in` supports that password plus Google linking for an already-active customer identity. No outbound email exists.
+
+CAT-02 additionally implements the confirmed Admin-created credential path. An Admin request requires customer email plus `temporaryPassword`; profile, customer-scoped active User, PORTAL_USER membership and audit rows commit atomically. The response remains CustomerDTO and never echoes the password. The React form generates and holds the plaintext locally, then shows it once after success for manual sharing. Managers cannot submit this field and continue to use assignment-gated invitation onboarding.
 
 POR-00E–POR-00G, LEA-01–LEA-04 and SET-08/09 now implement the formerly deferred customer RFQ branch. Submission always retains the raw request, revalidates assignment and creates a recipient-scoped in-app Alert. `LEAD_FIRST` creates a qualification record; `DIRECT_DRAFT` and Lead conversion both call the same quotation draft service. Quotation list/detail DTOs identify portal origin for internal users. Customer request DTOs remain separate and never serialize Draft price/link, owner/team, degradation reason, internal note or Lead dismiss reason.

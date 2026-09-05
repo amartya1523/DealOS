@@ -16,7 +16,7 @@ import { platformRouter } from './platform.js';
 import { clearPlatformLoginFailures, platformLoginAllowed, platformOwnerCredentialsMatch, readPlatformOwnerCredentials, recordPlatformLoginFailure } from './platform-owner.js';
 import { discountPolicyUpdateSchema } from './policy.js';
 import { CustomerRelationshipError, customerRecordScope, customerRelationshipDto, customerRelationshipInclude, customerRelationshipSchema, updateCustomerRelationships } from './customer-relationships.js';
-import { acceptPortalInvitation, inspectPortalInvitation, issuePortalInvitation, PortalInvitationError, portalInvitationAcceptSchema, revokePortalInvitation } from './portal-invitations.js';
+import { acceptPortalInvitation, assertCustomerCreationPortalAccess, customerTemporaryPasswordSchema, inspectPortalInvitation, issuePortalInvitation, PortalInvitationError, portalInvitationAcceptSchema, provisionCustomerPortalPassword, revokePortalInvitation } from './portal-invitations.js';
 import { createReturnedDraft, decideStep, evaluateRisk, GovernanceError, openCase } from './governance.js';
 import { customerSafeQuotationDto, idempotencyKey, PortalError, portalAcceptSchema, portalCommentSchema, portalProposalSchema, proposalResponseSchema, requireExactSentRevision, sendQuotationSchema } from './portal.js';
 import { confirmEligibleRevision, OrderConfirmationError } from './orders.js';
@@ -578,37 +578,21 @@ const customerProfileSchema = z.object({
   active: z.boolean().default(true),
 }).strict();
 
-async function setCustomerPortalPassword(tx: Tx, req: AuthRequest, customer: { id: string; name: string; contactPerson: string | null; email: string | null }, password: string) {
-  if (!customer.email) throw new DomainError(422, 'CUSTOMER_EMAIL_REQUIRED', 'Add a customer email before setting a portal password.');
-  const email = customer.email.trim().toLowerCase();
-  const existing = await tx.user.findUnique({ where: { email } });
-  if (existing && (existing.organizationId !== req.user!.organizationId || existing.customerId !== customer.id || existing.role !== 'CUSTOMER')) {
-    throw new DomainError(409, 'EMAIL_EXISTS', 'This email already belongs to another DealOS account. Use a different customer email.');
-  }
-  const passwordHash = await bcrypt.hash(password, 12);
-  const user = existing
-    ? await tx.user.update({ where: { id: existing.id }, data: { name: customer.contactPerson || customer.name, passwordHash, status: 'ACTIVE', moduleAccess: [] } })
-    : await tx.user.create({ data: { organizationId: req.user!.organizationId, customerId: customer.id, name: customer.contactPerson || customer.name, email, passwordHash, status: 'ACTIVE', role: 'CUSTOMER', moduleAccess: [] } });
-  await tx.organizationMembership.upsert({
-    where: { organizationId_userId: { organizationId: req.user!.organizationId, userId: user.id } },
-    update: { accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' },
-    create: { organizationId: req.user!.organizationId, userId: user.id, accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' },
-  });
-  await tx.session.deleteMany({ where: { userId: user.id } });
-  await audit(tx, req, existing ? 'CUSTOMER_PORTAL_PASSWORD_RESET' : 'CUSTOMER_PORTAL_PASSWORD_CREATED', 'Customer', customer.id, email);
-  return user;
-}
+const customerCreationSchema = customerProfileSchema.extend({ temporaryPassword: customerTemporaryPasswordSchema.optional() }).strict();
 
 app.post('/api/v1/customers', authenticate, requireModule('customers'), requireRole('ADMIN', 'MANAGER'), requireCsrf, async (req: AuthRequest, res) => {
-  const parsed = customerProfileSchema.safeParse(req.body);
+  const parsed = customerCreationSchema.safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter a customer name, tier, and currency.', parsed.error.flatten());
-  if (parsed.data.email) {
-    const duplicate = await db.customer.findFirst({ where: { organizationId: req.user!.organizationId, email: { equals: parsed.data.email, mode: 'insensitive' } } });
+  const { temporaryPassword, ...profile } = parsed.data;
+  const provisionPortalAccess = assertCustomerCreationPortalAccess(req.user!.role, profile.email, temporaryPassword);
+  if (profile.email) {
+    const duplicate = await db.customer.findFirst({ where: { organizationId: req.user!.organizationId, email: { equals: profile.email, mode: 'insensitive' } } });
     if (duplicate) return fail(req, res, 409, 'CUSTOMER_EMAIL_EXISTS', 'This customer email is already used in this workspace.');
   }
   const customer = await db.$transaction(async (tx) => {
-    const created = await tx.customer.create({ data: { organizationId: req.user!.organizationId, ...parsed.data, currency: parsed.data.currency.toUpperCase() } });
+    const created = await tx.customer.create({ data: { organizationId: req.user!.organizationId, ...profile, currency: profile.currency.toUpperCase() } });
     await audit(tx, req, 'CUSTOMER_CREATED', 'Customer', created.id);
+    if (provisionPortalAccess) await provisionCustomerPortalPassword(tx, req.user!, created, temporaryPassword!);
     return created;
   });
   return ok(req, res, customer, 201);
@@ -683,7 +667,7 @@ app.put('/api/v1/customers/:id/portal-password', authenticate, requireModule('cu
   if (req.user!.role === 'MANAGER' && customer.primarySalesTeam?.managerId !== req.user!.id) return fail(req, res, 403, 'FORBIDDEN', 'Managers can manage portal access only for teams they manage.');
   if (!customer.primarySalesTeamId || !customer.primarySalesTeam || customer.assignments.length !== 1) return fail(req, res, 422, 'CONFIGURATION_REQUIRED', 'Assign a primary sales team and representative before activating portal access.');
   try {
-    const user = await db.$transaction((tx) => setCustomerPortalPassword(tx, req, customer, parsed.data.password));
+    const user = await db.$transaction((tx) => provisionCustomerPortalPassword(tx, req.user!, customer, parsed.data.password));
     return ok(req, res, { id: user.id, email: user.email, status: user.status });
   } catch (error) {
     if (error instanceof DomainError) return fail(req, res, error.status, error.code, error.message);

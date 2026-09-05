@@ -105,7 +105,7 @@ describe("DealOS public routes", () => {
     expect((await screen.findAllByText('INV-EMAIL-1')).length).toBeGreaterThan(0);
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/auth/customer/login',expect.objectContaining({method:'POST',body:JSON.stringify({email:'buyer@example.com',password:'CustomerPass12!'})}));
   });
-  it("creates a customer without bypassing assignment-gated portal onboarding", async () => {
+  it("creates an Admin customer with one-time temporary portal credentials", async () => {
     window.history.replaceState({}, "", "/app");
     const workspace = { user:{id:'admin',name:'Admin User',email:'admin@example.com',role:'ADMIN',moduleAccess:[],actorType:'USER',platformSuperAdmin:false,viewContext:null}, organization:{id:'org',name:'Acme'}, users:[], customers:[], quotes:[], products:[], policies:[], warehouses:[], subscriptions:[], invoices:[], alerts:[], audits:[] };
     fetchMock.mockResolvedValue({ok:true,json:async()=>({success:true,data:workspace})});
@@ -117,13 +117,18 @@ describe("DealOS public routes", () => {
     fireEvent.change(screen.getByLabelText("Company Name *"), {target:{value:"Portal Customer"}});
     fireEvent.change(screen.getByLabelText(/^Email ID/), {target:{value:"portal@example.com"}});
     fireEvent.change(screen.getByPlaceholderText("e.g. 9876543210"), {target:{value:"9876543210"}});
+    const generated = screen.getByLabelText(/^Temporary password/) as HTMLInputElement;
+    expect(generated.value).toMatch(/^Deal-.+!$/);
+    expect(generated.value.length).toBeGreaterThanOrEqual(12);
     fireEvent.click(screen.getAllByRole("button", {name:/Add Customer/}).at(-1)!);
     await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith('/api/v1/customers',expect.objectContaining({
       method:'POST',
       body:expect.stringContaining('"email":"portal@example.com"'),
     })));
     const requestCall=fetchMock.mock.calls.find(([url,options])=>url==='/api/v1/customers'&&options?.method==='POST');
-    expect(JSON.parse(String(requestCall?.[1]?.body))).not.toHaveProperty('portalPassword');
+    expect(JSON.parse(String(requestCall?.[1]?.body))).toMatchObject({email:'portal@example.com',temporaryPassword:generated.value});
+    expect(await screen.findByRole('heading',{name:'Copy these credentials now'})).toBeInTheDocument();
+    expect(screen.getByText('/customer/sign-in')).toBeInTheDocument();
   });
   it("lets an admin edit and safely delete a customer from customer details", async () => {
     window.history.replaceState({}, "", "/app?screen=customer&record=customer-1");

@@ -14,7 +14,7 @@ Lifecycle enums below are application enums plus DB CHECK constraints (or review
 
 - **Owner:** identity.
 - **Fields:** email citext U; display_name text; password_hash text; status enum(PENDING,ACTIVE,DISABLED); customer_id uuid? FK customers; session_version int default 1.
-- **Constraints and indexes:** email unique; status indexed; a CUSTOMER role requires customer_id; disable instead of delete.
+- **Constraints and indexes:** email unique; status indexed; a CUSTOMER role requires customer_id; disable instead of delete. Admin-created customer access stores only `password_hash`; Customer, User, PORTAL_USER membership and audit rows are created atomically without a plaintext credential column.
 
 ### `roles`
 

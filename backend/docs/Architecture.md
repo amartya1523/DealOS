@@ -26,7 +26,7 @@ Quotation is the stable deal; revision is the commercial snapshot. Approval and 
 
 ## 6. Business Rules
 
-BR-001–BR-026 in [Domain.md](Domain.md#numbered-business-rules) cover calculation, combined discounts, effective caps, risk, revisions, reviewer independence, confirmation, isolation, stock, splitting, consolidation, cadence, proration, credits, idempotency, payments, audit, alerts, suggestions, exports, customer relationships, portal onboarding and portal RFQ processing. Each rule has owner/workflow/edge cases. A rule change requires updated examples, tests, API effects and migration assessment.
+BR-001–BR-027 in [Domain.md](Domain.md#numbered-business-rules) cover calculation, combined discounts, effective caps, risk, revisions, reviewer independence, confirmation, isolation, stock, splitting, consolidation, cadence, proration, credits, idempotency, payments, audit, alerts, suggestions, exports, customer relationships, portal onboarding, portal RFQ processing and Admin-provisioned initial customer access. Each rule has owner/workflow/edge cases. A rule change requires updated examples, tests, API effects and migration assessment.
 
 ## 7. Capability Map
 
@@ -63,7 +63,11 @@ flowchart LR
     Setup[Organization catalog setup] --> Profile[Customer profile]
     Profile --> Assign[Primary team and active Rep]
     Assign --> Invite[Accepted portal invitation]
-    Invite --> Request[Raw PortalRequest]
+    Profile -->|Admin creation| Credentials[Temporary portal credentials]
+    Invite --> Portal[Active customer identity]
+    Credentials --> Portal
+    Assign --> Request
+    Portal --> Request[Raw PortalRequest]
     Request --> Mode{RfqHandlingMode}
     Mode -->|LEAD_FIRST - Proposed default| Lead[Assigned Lead]
     Lead -->|Assigned Rep converts once| Draft[Private quotation Draft]
@@ -126,8 +130,8 @@ Scheduler leases work from PostgreSQL using `FOR UPDATE SKIP LOCKED` or advisory
 
 | Module | Owns / public functions | Does not own | Dependencies / entities | Routes | Rules and security |
 |---|---|---|---|---|---|
-| identity | signup, activateUser, login, logout, authenticate, authorizeScope; team membership reads | Commercial rules or customer-assignment writes | users, roles, teams, sessions | `/auth`, `/admin/users`, `/admin/teams`, `/sales-teams` | BR-008/021/024; hash passwords; scoped identities |
-| catalog | customers, customerRelationship assignment service, products/variants, price lists, plan/policy configuration publication | Historical Quote rewrites, billing execution | tiers, customers, CustomerRepresentative history, products, prices, plan/policy versions | `/customers`, `/catalog`, `/settings` | BR-001/003/017/024; Manager/Admin assignment boundary |
+| identity | signup, activateUser, login, logout, authenticate, authorizeScope; team membership reads | Commercial rules or customer-assignment writes | users, roles, teams, sessions | `/auth`, `/admin/users`, `/admin/teams`, `/sales-teams` | BR-008/021/024/027; hash passwords; scoped identities |
+| catalog | customers, customerRelationship assignment service, products/variants, price lists, plan/policy configuration publication | Historical Quote rewrites, billing execution | tiers, customers, CustomerRepresentative history, products, prices, plan/policy versions | `/customers`, `/catalog`, `/settings` | BR-001/003/017/024/027; Manager/Admin assignment boundary |
 | quotations | shared createDraft with server-derived customer relationship snapshot, preview, revise, submit, send, getScopedQuote | CustomerRepresentative writes, raw portal-request mutation, approval decisions, stock or invoice posting | catalog relationship reads, governance evaluator; quotes/revisions/lines | `/quotations` | BR-001–005/012/017/024/026; portal and Lead paths reuse this service rather than cloning price/ownership rules |
 | governance | evaluateRisk, openCase, decideStep, createReturnedDraft | Editing customer terms outside the explicit returned-revision transition | identity, immutable quote snapshot; policy/cases/steps | `/approvals` | BR-003–006; Manager-first, no self-approval |
 | recommendations | rankSuggestions, dismissSuggestion | Mutating quotes or inventing costs | catalog, quote calculator, order history | quote suggestions + `/settings/recommendations` | BR-019; customer-safe isolation |
@@ -198,7 +202,7 @@ Keep exception reason, financial cadence and next action visible. Customer shell
 
 ## 15. Security Model
 
-Identity is explicitly required. Proposed opaque random session cookie (`HttpOnly`, `Secure` in production, `SameSite=Lax`, path `/`), storing only hash in PostgreSQL. Rotate on login/privilege change; revoke on logout/deactivation. Proposed limits: 12-hour absolute, 30-minute idle expiry. Passwords use Argon2id with current vetted parameters when implemented; no plaintext seed credentials in production.
+Identity is explicitly required. Proposed opaque random session cookie (`HttpOnly`, `Secure` in production, `SameSite=Lax`, path `/`), storing only hash in PostgreSQL. Rotate on login/privilege change; revoke on logout/deactivation. Proposed limits: 12-hour absolute, 30-minute idle expiry. Passwords use the implemented adaptive bcrypt work factor pending an explicitly planned Argon2id migration; no plaintext seed credentials in production. Admin-created customer credentials are accepted only with customer creation, hashed before persistence, omitted from every API response, and shown once from browser-held form state for manual sharing.
 
 Mutations require session and CSRF token bound to session plus Origin validation; CORS allows exactly configured frontend origin in development, same-origin production. Public signup cannot choose privileged roles. Google signup accepts only a Google ID credential and verifies its signature, audience, expiry, and verified email on the server; the client ID is runtime configuration. The sign-up page keeps the Google option visible when configuration is absent and reports the missing setup instead of initiating authentication. Admin provisions Customer account ownership and activates internal users. Customers see only explicitly projected DTOs; cross-customer guesses get 404. Internal access requires team/ownership scope, not just role flags.
 
@@ -357,7 +361,7 @@ The mappings below summarize requirement-to-implementation traceability. Review 
 
 1. Confirm/change proposed risk bands, aggregate caps and margin floors in P2/P4.
 2. The initial invoice trigger is implemented at confirmation with the explicitly Proposed +14-day due default. Confirm/change proration timezone, cancellation timing, mixed-invoice separation and unused-period credit policy before the recurring scheduler/proration phase.
-3. Broader team visibility and internal account activation policy remains open. Customer portal invitation activation is now confirmed: Manager/Admin only, after primary team/Rep assignment, with manual link delivery and a customer-only identity.
+3. Broader team visibility and internal account activation policy remains open. Customer portal invitation activation remains Manager/Admin-only after primary team/Rep assignment. A later confirmed alternate path allows Admin customer creation to activate a customer-only identity with one-time-displayed temporary credentials; this does not relax assignment checks on RFQ or quotation creation.
 4. Current export implements the requested HTML-based legacy `.xls`; confirm whether a later `.xlsx` package/output is required.
 5. Portal invoice visibility is inferred from quotation-to-payment context; document any customer-account access changes.
 6. `LEAD_FIRST` and five customer/user requests per rolling hour are implemented Proposed defaults. Confirm or change them explicitly; both modes remain supported regardless of the selected default.

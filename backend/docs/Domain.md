@@ -64,9 +64,9 @@ Invoice: `DRAFT → ISSUED → PARTIALLY_PAID → PAID`, with credit-adjusted ba
 
 ### W-01 Identity and access
 
-- Trigger/actor: internal email/password signup, Google signup, email/password login, Admin activation, or provisioned Customer login.
-- Input: email/password or a Google Identity Services ID credential on sign-up; authenticated Admin supplies roles and team/customer link.
-- Processing/logic: hash passwords, normalize email, verify Google token signature/audience/expiry and verified email server-side, rate limit, deny inactive accounts; rotate session on login. Public signup grants no active privileged role. Google is not exposed as a sign-in method.
+- Trigger/actor: internal email/password signup, Google signup, email/password login, Admin activation, Admin-created temporary customer credentials, or provisioned Customer login.
+- Input: email/password or a Google Identity Services ID credential on sign-up; authenticated Admin supplies roles and team/customer link or the one-time-displayed initial customer password.
+- Processing/logic: hash passwords, normalize email, verify Google token signature/audience/expiry and verified email server-side, rate limit, deny inactive accounts; rotate session on login. Admin customer creation atomically activates a customer-only portal identity and never persists or returns the plaintext temporary password. Public signup grants no active privileged role. Google is not exposed as a sign-in method.
 - Database: user, role assignment, password hash, session token hash, audit.
 - Output: session cookie and minimal identity/permission projection.
 - Failure/recovery: generic invalid-credential response; expired session forces login; Admin activates pending signup. No fallback demo identity.
@@ -248,6 +248,10 @@ Condition: Manager/Admin creates, inspects, accepts, or revokes a customer porta
 ### BR-026 — Assignment-gated portal RFQ processing [C/I/P]
 
 Condition: portal request submission, Lead conversion/dismissal, or organization RFQ mode change. Behavior: revalidate the current active primary Rep and team at submission; retain the raw request even when product references degrade; synchronously create exactly one assigned Lead or private Draft under the configured mode. `LEAD_FIRST` and five requests per customer/user/hour are Proposed defaults. Only the assigned Rep converts a NEW Lead via the same server-authoritative draft service; Rep or managed-team Manager may reasonedly dismiss it. A customer projection exposes only Received/In progress/Declined and customer-safe line context. Admin alone changes the mode, and a real change is audited. Owner: portal intake/quotations; W-03A. Edge cases: stale assignment rejects before persistence; cross-tenant/inactive/malformed product references become text-only, never catalog data; non-whole structured quantity remains context only; free text never becomes a priced line; repeated submit/convert does not duplicate a commercial document; no Draft identifier, price, owner ID, internal note, degradation reason or dismissal reason crosses the customer boundary.
+
+### BR-027 — Admin-provisioned initial customer access [C]
+
+Condition: an organization Admin creates a customer profile. Behavior: customer email and a 12–128 character generated temporary password are required; Customer, active `CUSTOMER` User, active `PORTAL_USER` membership and both creation/access audits commit in one transaction. Only the bcrypt hash is persisted; neither plaintext nor hash is returned by the API. The creating browser retains and displays the plaintext once for secure manual sharing. Managers cannot submit a temporary password and retain the profile → assignment → invitation path. The resulting customer may authenticate immediately, but BR-024 and BR-026 still require a current primary team/Rep before quotation creation or RFQ submission. Owner: catalog/identity/portal; W-01/W-03A. Edge cases: email collision rolls back the whole customer creation; no external email is claimed; later reset revokes active sessions.
 
 ## Implemented audit-repair decisions — 2026-09-05
 
