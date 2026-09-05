@@ -1,6 +1,6 @@
 # DealOS — Domain model and business rules
 
-Status: design baseline. C/I/P classifications refer to [PRD.md](PRD.md). Proposed defaults are decisions for the initial implementation, not facts claimed from the source.
+Status: living domain contract. C/I/P classifications refer to [PRD.md](PRD.md). Proposed defaults are decisions for the initial implementation, not facts claimed from the source.
 
 ## Glossary
 
@@ -41,6 +41,7 @@ Status: design baseline. C/I/P classifications refer to [PRD.md](PRD.md). Propos
 | Finance/Operations | Control high-risk discounts, stock and receivables | Approved commercial details, stock, invoices, plans | Second review, allocate, ship, receive stock, change subscriptions, record payment/credit | Sequential approval and immutable ledger restrictions; receives reconciliation results |
 | Customer | Understand and agree commercial offer | Own business's sent quotes, allowed terms/comments and invoices | Submit proposal/comment, accept current revision | Cannot access draft quotes, other customers, internal notes/cost/risk; receives confirmation/pending-review state |
 | Admin | Maintain correct setup and identities | Organization configuration, identities and reports | Activate accounts; assign roles/team/customer links; configure catalog, warehouses/plans/policies | No implicit reviewer bypass; cannot edit issued financial history; receives configuration audit |
+| Platform Super Admin / Platform Owner | Securely oversee the complete DealOS installation | Global organization and member control plane | Create/suspend/archive organizations; manage organization memberships; inspect tenant-scoped records; use read-only View As | Independent environment identity and session, never an organization user or role; all mutations require reasoned privileged audit |
 | System scheduler | Process due billing and health rules | Only job-required domain data | Claim due jobs, generate recurring invoices, resolve/reopen alerts | No interactive login; transaction/idempotency protections apply; receives durable job status |
 
 ## Entities and relationships
@@ -210,3 +211,12 @@ Condition: request suggestions. Behavior: rank active valid products by co-purch
 
 ### BR-020 — Scope-preserving reporting [C/I]
 Condition: report/export. Behavior: apply role/team/customer constraints before grouping; reuse report calculation; group incompatible currency/cadence. Reason: exports must not widen access or misstate revenue. Owner: reporting; W-10. Edge cases: untrusted spreadsheet strings beginning `=`, `+`, `-`, `@` are escaped; export dates/filters shown.
+
+### BR-021 — Organization isolation and suspension [C]
+Condition: a request reads or changes tenant data. Behavior: resolve an active server-side membership and constrain every business query by its organization ID; caller-supplied organization or record IDs never grant access. Suspended organizations retain history but reject normal business operations. Reason: tenant isolation and reversible operational suspension. Owner: authorization and every business repository. Edge cases: the Platform Owner may inspect any organization only through its independent environment-authenticated session or read-only View As context.
+
+### BR-022 — Protected platform administration [C]
+Condition: owner login or a high-risk organization/user state change. Behavior: owner login accepts only the exact server environment login ID/password, uses constant-time comparison and throttles failures; mutations require the independent owner session, explicit confirmation and a written reason of at least ten characters. Reason: prevent organization-to-platform privilege escalation and accidental administrative actions. Owner: platform control service. Edge cases: no organization user, including Organization Admin, can be granted owner access through the database or API.
+
+### BR-023 — Read-only simulated context [C]
+Condition: a Platform Super Admin enters View As Organization/User. Behavior: store a separate organization and optional user on the existing session, retain the authenticated user as the real actor, show a persistent banner and reject every write until explicit exit. Reason: support investigation without impersonation or password sharing. Owner: authorization/platform control. Edge cases: entry, exit and denied privileged requests are audited with safe request metadata and the simulated identity when present.

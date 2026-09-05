@@ -1,6 +1,6 @@
 # DealOS — REST API contracts
 
-Status: **designed, not implemented**. This is the baseline endpoint inventory for future phases; there are no running endpoints in P0. Endpoint IDs below are stable traceability references. Any implemented contract change must update this document in the same change.
+Status: living API contract. The inventory describes the target API; the functional subset explicitly identified under Implementation update is running locally. Endpoint IDs remain stable traceability references. Any implemented contract change must update this document in the same change.
 
 ## Shared HTTP contract
 
@@ -1055,8 +1055,33 @@ No endpoint edits an issued invoice, deletes audit history or directly patches o
 
 ## Contract lifecycle
 
-This inventory is approved as architecture scope, not as deployed functionality. Implement only the phase's endpoints; record implemented IDs and test evidence in Memory.md. Generate OpenAPI 3.1 from runtime validators or maintain it alongside code in P1 onward; do not ship two diverging contracts. Until then this document is the canonical design contract. Breaking production changes require a documented compatibility plan and, when necessary, a new API version.
+This inventory is the approved target scope, not a claim that every listed endpoint exists. Implemented exceptions are recorded below and test evidence belongs in `memory.me`. Generate OpenAPI 3.1 from runtime validators or maintain it alongside code; do not ship two diverging contracts. Breaking production changes require a documented compatibility plan and, when necessary, a new API version.
 
 ## Implementation update — 2026-09-05
 
-AUTH-01 is implemented: `POST /api/v1/auth/signup` accepts only `{displayName,email,password}`, trims and normalizes email/name, validates name 1–120 and password 12–128, hashes with bcrypt, persists PENDING, and returns HTTP 202 `{success:true,data:{status:"PENDING",message}}`. Existing emails receive the same public result without account changes. Extra fields (including role) are rejected with 422. AUTH-02 and session authentication now require ACTIVE; valid credentials for a pending/disabled account return 403 ACCOUNT_INACTIVE and no cookie. Administrator activation UI/endpoints, rate limiting and CSRF remain future hardening work. Existing active demo accounts remain available.
+AUTH-01 is implemented: `POST /api/v1/auth/signup` accepts only `{displayName,email,password}`, trims and normalizes email/name, validates name 1–120 and password 12–128, hashes with bcrypt, persists PENDING, and returns HTTP 202 `{success:true,data:{status:"PENDING",message}}`. Existing emails receive the same public result without account changes. Extra fields (including role) are rejected with 422. AUTH-02 and session authentication require ACTIVE; valid credentials for a pending/disabled account return 403 ACCOUNT_INACTIVE and no cookie. Existing active demo accounts remain available.
+
+Browser authentication now uses an opaque HttpOnly `dealos_session` cookie plus a SameSite=Strict `dealos_csrf` cookie whose hash is stored on the session. Authenticated mutations require both an exact configured `Origin` and matching `X-CSRF-Token`. `GET /api/v1/auth/me` returns platform status, organization context and a distinct real actor/simulated identity when View As is active.
+
+`POST /api/v1/auth/super-admin/login` is the only Platform Owner login endpoint. It accepts strict `{loginId,password}`. Server configuration requires a non-empty `PLATFORM_OWNER_LOGIN_ID` and `PLATFORM_OWNER_PASSWORD` of at least 16 characters; incomplete or weak configuration returns 503 `PLATFORM_OWNER_NOT_CONFIGURED`. Valid input is compared in constant time, a five-failure/15-minute process-local throttle applies, and success returns a separate four-hour HttpOnly `dealos_platform_session`. It clears an organization session in the same browser. `GET /api/v1/auth/super-admin/me` accepts only that session. Organization users, including Admins, receive `PLATFORM_OWNER_REQUIRED` from every platform endpoint. No endpoint can grant owner status to a user.
+
+### Implemented Platform Super Admin API
+
+All routes below require the independent environment-authenticated Platform Owner session. Every mutation requires CSRF validation. Except for View As exit, mutations are denied while a read-only simulated context is active.
+
+| Method and path | Purpose | High-risk controls |
+|---|---|---|
+| `GET /api/v1/platform/dashboard` | Live global metrics, filtered/paged organizations and recent privileged actions | Independent Platform Owner session only |
+| `GET /api/v1/platform/organizations/:id` | Organization members, quotes/approvals, inventory, subscriptions, invoices/payments and audit history | Independent Platform Owner session; safe selected fields |
+| `POST /api/v1/platform/organizations` | Create organization | Written reason; privileged audit |
+| `PATCH /api/v1/platform/organizations/:id` | Rename, activate, suspend or archive organization | Written reason; exact status confirmation for suspend/archive |
+| `GET /api/v1/platform/members` | Search/paginate users, memberships and role/status assignments | Password/session/token fields omitted |
+| `POST /api/v1/platform/invitations` | Create seven-day organization invitation | Role-pair validation; token hash never returned |
+| `POST /api/v1/platform/organizations/:id/members` | Add/reactivate existing user membership | Organization/user existence and role-pair validation |
+| `PATCH /api/v1/platform/memberships/:id` | Change organization role or suspend/revoke membership | Written reason; status confirmation |
+| `PATCH /api/v1/platform/users/:id/status` | Activate/disable organization user and revoke disabled user's sessions | Written reason; status confirmation |
+| `POST /api/v1/platform/users/:id/reset-access` | Revoke active sessions | `RESET ACCESS` confirmation; does not pretend to send a password |
+| `POST /api/v1/platform/view-as` | Enter read-only organization or user context | Active target validation; written reason; real actor retained |
+| `POST /api/v1/platform/view-as/exit` | Explicitly return to global platform context | Audited exit; allowed while simulation blocks other mutations |
+
+Normal `/api/v1/workspace` and business resource routes resolve organization membership centrally and constrain database reads/mutations by `organizationId`. A manipulated `X-Organization-Id` returns `ORGANIZATION_ACCESS_DENIED`; suspended organizations return `ORGANIZATION_SUSPENDED`. The Platform Owner receives no global business data from `/workspace` unless it explicitly enters read-only View As.

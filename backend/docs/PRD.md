@@ -1,6 +1,6 @@
 # DealOS — Product requirements
 
-Status: architecture baseline, 2026-09-05. Application implementation is not yet claimed.
+Status: living product contract, 2026-09-05. The current functional slice and remaining limitations are recorded in `memory.me`.
 
 ## Source precedence and evidence
 
@@ -63,7 +63,7 @@ Confidence means confidence in the interpretation, not implementation status. C 
 | R-023 | Quote versioning and approval/acceptance binding to exact terms | I | Prevent negotiation from bypassing approvals | High |
 | R-024 | Atomic stock reservation and duplicate prevention for billing/payment | I | Prevent overselling and duplicate money movements | High |
 | R-025 | Product cost snapshots and cadence-specific margins | I | Required to compute meaningful margin impact | High |
-| R-026 | Single organization with assigned teams and one configured transaction currency per quote | P | Smallest coherent initial deployment; no multi-company requirement | High |
+| R-026 | Multiple isolated organizations with one configured transaction currency per quote | C | Superseded by the explicit Platform Super Admin request on 2026-09-05 | High |
 | R-027 | Opaque database-backed cookie sessions with CSRF protection | P | Revocable browser sessions fit the same-origin deployment | High |
 | R-028 | Approval formula combines worst-line excess and value-weighted excess | P | Brief gives examples but no mathematical formula; see BR-004 | Medium |
 | R-029 | Day-based proration using actual billing-period length | P | Exact proration convention not specified | Medium |
@@ -71,6 +71,11 @@ Confidence means confidence in the interpretation, not implementation status. C 
 | R-031 | Customer portal email/password initially; magic links deferred | P | A1 allows either method; avoids unconfigured email delivery | High |
 | R-032 | In-app nudges with durable PostgreSQL job records; no external messages by default | P | Meets alert-action flow without pretending email/SMS is configured | High |
 | R-033 | Single service deploy, no Redis/Kafka/microservices | P | Low operational complexity; no requirement justifies them | High |
+| R-034 | Dedicated environment-authenticated Platform Owner identity, separate from every organization user and role | C | Corrected explicit Platform Super Admin direction | High |
+| R-035 | Global organization/member control plane with live metrics, search, status, paging and privileged audit | C | Explicit Platform Super Admin request | High |
+| R-036 | Read-only View As Organization/User retains the real actor and has a persistent exit banner | C | Explicit Platform Super Admin request | High |
+| R-037 | Organization suspension blocks normal business operations without deleting history | C | Explicit Platform Super Admin request | High |
+| R-038 | High-risk platform changes require a reason and confirmation; organization credentials can never authenticate to the owner console | C | Corrected explicit Platform Super Admin direction | High |
 
 ## Actors, outcomes and access
 
@@ -79,6 +84,7 @@ Confidence means confidence in the interpretation, not implementation status. C 
 - Finance/Operations: second-level discount approval, stock allocation, billing changes, payment recording and credit notes.
 - Customer: only quotations/orders/invoices associated with their linked customer account; see commercial prices but not internal costs, margins, risk or reviewer notes.
 - Admin: activate identities, manage configuration and organization reporting. Admin status alone does not bypass approval segregation; a separately assigned reviewer role is required.
+- Platform Super Admin / Platform Owner: authenticate only at `/login/super-admin` using server environment credentials, then inspect and administer all organizations from a separate global control plane. This identity is not a database user, organization member or organization role. The owner can enter a read-only simulated organization/user context while the environment login ID remains the audit actor.
 
 Multi-role internal users are supported; permissions compose, but self-approval restrictions still apply.
 
@@ -96,7 +102,7 @@ The PDF describes aggregate margin erosion even when individual limits appear ac
 
 MVP demo: authenticated configuration, saved quotations, discounts and sequential approval, real recommendations, restricted negotiation, version-safe acceptance, stock splitting/backorder, hybrid invoice/schedule and recorded payments. Deal-health rules and reporting complete the specified release. Optional pairing-rule UI and multi-currency conversion/multi-company are not MVP gates.
 
-Future scope: email delivery integration, real payment gateway, multi-company, exchange-rate conversion, sophisticated warehouse optimization and statistical recommendation training. These are not secretly included as dependencies.
+Future scope: email delivery integration, real payment gateway, exchange-rate conversion, sophisticated warehouse optimization and statistical recommendation training. Multi-organization isolation and the global platform control plane are now implemented scope; richer company accounting remains future scope.
 
 ## Acceptance scenarios
 

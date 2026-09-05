@@ -7,14 +7,14 @@ Repository documentation is the source of truth. Do not depend on previous chat 
 ## Current State
 
 - **Product name:** DealOS.
-- **Current objective:** Completed the user-requested repository organization on 2026-09-05. Continue application work from the existing implementation, not the historical P0 scaffold plan below.
+- **Current objective:** Maintain the corrected environment-only Platform Owner control plane and continue hardening the functional quotation-to-cash slice. Do not revert to the superseded database-user platform group.
 - **Repository:** Independent `frontend/` and `backend/` npm projects; only `README.md`, `compose.yaml`, and `.gitignore` are root files. Shared documentation and original references live in `backend/docs/`.
-- **Existing implementation:** React UI, Express API, Prisma schema, initial migration, seed, backend rules tests, and frontend component test were already present when this restructuring began. Existing uncommitted work was preserved.
-- **Database/API changes this session:** None. No migration, seed, or business-data writes were performed.
-- **Validation:** Clean `npm ci` in both applications; backend Prisma generation and build; frontend build; 3 backend tests and 1 frontend test; Docker Compose configuration; compiled backend liveness HTTP 200; root layout and diff whitespace checks passed.
-- **Local configuration:** Existing backend `.env` preserved. Former root `.env` preserved as ignored `backend/.env.root-backup`; missing backend keys were copied from it. No environment values were printed.
-- **Limits:** No full end-to-end or database integration suite was run. Historical design sections below describe intended domain guarantees, not verified completion.
-- **Next safe task:** Continue application hardening against the documented contracts, inspecting current code and existing changes first.
+- **Existing implementation:** React/Vite UI; Express/Prisma API; PostgreSQL-backed organization users and isolated tenant data; pending signup; CSRF-bound opaque sessions; an independent environment-authenticated Platform Owner console; privileged audit; read-only View As; deterministic multi-organization seed; rule, authorization and component tests.
+- **Database/API state:** Five migrations are applied locally through `20260905150000_platform_owner_env_auth`. The owner authenticates only through `POST /api/v1/auth/super-admin/login`; no user, organization membership, bootstrap or grant API can create owner authority.
+- **Validation:** Backend 19/19 tests and build passed; frontend 7/7 tests and production build passed. Live login through the frontend proxy returned HTTP 200 for the configured owner and HTTP 401 for organization credentials. The authenticated owner check returned `PLATFORM_OWNER`; logout succeeded; `git diff --check` passed.
+- **Local configuration:** Owner credentials live only in ignored `backend/.env`. `backend/src/env.ts` resolves that file relative to the backend module, so root `npm --prefix backend ...` commands load it correctly. Login ID must be non-empty and password at least 16 characters. Restart the API after changing `.env`.
+- **Limits:** The current implementation is a functional slice, not the entire target contract. Production still requires a secret manager, MFA, distributed throttling/security telemetry, fuller PostgreSQL/browser coverage, revision/idempotency/concurrency hardening, external delivery and exports.
+- **Next safe task:** Add browser/PostgreSQL integration coverage for owner login and mutations, then implement MFA and centralized security telemetry without weakening organization isolation.
 
 ## Authoritative Inputs
 
@@ -105,7 +105,7 @@ These are architectural defaults, not confirmed source requirements. Confirm or 
 2. **Proration, P7:** use actual calendar days in a half-open billing period and a configured IANA timezone, rounding only the posted amount.
 3. **Cancellation, P7:** create an eligible credit note for unused service according to the snapshotted plan policy; do not claim that cash was refunded without a real provider or recorded reconciliation.
 4. **Authentication, P1:** opaque database-backed cookie sessions; public internal signup remains pending until Admin activation; customer accounts use email/password initially.
-5. **Organization, P1/P2:** one organization and one quote currency per quotation in the initial release; multi-company and currency conversion are future scope.
+5. **Organization, corrected 2026-09-05:** tenant-owned records use required organization IDs and server-resolved memberships; a separate environment-authenticated Platform Owner identity provides global oversight and is never an organization user. One transaction currency per quotation remains the default; currency conversion is future scope.
 6. **Reporting export, P8:** the problem statement says XLS. Confirm whether legacy `.xls` is mandatory or whether `.xlsx` is acceptable before implementation.
 
 Do not silently treat these as confirmed requirements. If implementation needs a decision, document the selected value in `backend/docs/PRD.md`, the applicable rule in `backend/docs/Domain.md`, and this memory.
@@ -130,7 +130,7 @@ Do not implement P8 dashboards using permanent fake data before the upstream wor
 Harden the current vertical flow without replacing it:
 
 1. Add explicit `QuotationRevision`, `CustomerAcceptance`, and `Order` records, migrate seeded data, and bind every approval/confirmation to the same revision.
-2. Add CSRF tokens, idempotency records, login rate limiting, and row locks for allocation and payment posting.
+2. Add idempotency records, login rate limiting, and row locks for allocation and payment posting. Same-origin CSRF tokens are implemented.
 3. Split `backend/src/app.ts` and `frontend/src/App.tsx` into the domain modules described in `backend/docs/Architecture.md` while preserving contracts and behavior.
 4. Implement report PDF/XLS generation, replenishment movements, manual allocation override, shipment dispatch, and proration previews.
 5. Add PostgreSQL API integration tests and browser tests for all five roles.
@@ -190,3 +190,38 @@ Harden the current vertical flow without replacing it:
 - **Validation:** Frontend tests 5/5; backend tests 5/5; frontend TypeScript/Vite and backend TypeScript builds passed after final changes. Prisma generate and migrate deploy passed. Live HTTP verification passed pending signup, duplicate signup, pending-login refusal without cookie, role injection rejection, invalid login, active demo login, persisted workspace read and logout. Browser checked 1280px desktop landing, product parallax, 390px mobile landing/menu/auth, and successful demo sign-in to `/app` with real data.
 - **Limitations:** Administrator activation UI/endpoints still unimplemented; requesters must be activated by administrator-controlled provisioning. Existing rate limiting/CSRF/revision/concurrency/export debt remains. No production deployment requested or performed.
 - **Next safe task:** Add audited administrator identity activation and production auth hardening, then continue revision/idempotency/concurrency work.
+
+### SESSION: Superseded database-user Platform Super Admin design
+
+- **Date:** 2026-09-05.
+- **Objective:** Historical first implementation of the global control plane. Its `PlatformGroupMembership` identity design was explicitly superseded by the corrected Platform Owner direction below.
+- **Compatibility decision:** The repository is React/Express/Prisma and has no Odoo runtime, addon manifest, models, ACLs or `res.company`. Implemented the requested security semantics with a dedicated `PlatformGroupMembership`, custom `Organization`/`OrganizationMembership`, centralized authorization and an allowlisted platform router. Organization Admin remains tenant-scoped and is not a platform role.
+- **Completed:** Live global dashboard; organization search/status/pagination/detail/create/suspend/archive; member directory; invitations; membership roles/status; account status and session reset; protected platform grants/revocations; read-only View As Organization/User with persistent exit banner; organization-scoped business and ID queries; suspension enforcement; append-only privileged success/failure audits; same-origin double-submit CSRF tied to the session; one-time additive platform bootstrap; responsive control-plane UI.
+- **Files added:** `backend/src/authorization.ts`, `backend/src/platform.ts`, `backend/prisma/bootstrap-platform-admin.ts`, migrations `20260905130000_platform_super_admin` and `20260905140000_session_csrf`, `backend/tests/platform-security.test.ts`, `frontend/src/PlatformAdmin.tsx`, `backend/docs/PlatformAdmin.md`.
+- **Files modified:** Prisma schema/seed/package; backend application; frontend app/API/styles/tests; root/backend READMEs; PRD, Domain, Architecture, Database, API and this memory.
+- **Database:** Both additive migrations applied successfully to local PostgreSQL without a reset. Existing records were backfilled to `DealOS Demo`; the controlled bootstrap granted `admin@dealos.demo` platform access. A second organization, `Northstar Distribution`, was created through the protected API for live isolation verification. The destructive revised seed was not run. One pending signup `orgadmin@northstar.demo` remains unactivated because changing its privileges was outside the approved persistent-data scope.
+- **Security verification:** Platform dashboard read succeeded; REP platform access returned `PLATFORM_ADMIN_REQUIRED`; manipulated cross-organization header returned `ORGANIZATION_ACCESS_DENIED`; View As returned tenant-scoped data and rejected privileged mutation with `VIEW_AS_READ_ONLY`; explicit exit succeeded. The real actor and organization remained available for audit.
+- **Automated verification:** Prisma format/generate and migrations succeeded. Backend TypeScript build passed; 17/17 backend tests passed, including 12 platform-authorization tests. Frontend production build passed; 6/6 component tests passed. Re-run these after any later code changes.
+- **Known limitations:** No external email/identity provider is connected for invitation or password-reset delivery; reset-access only revokes sessions. The compact current schema lacks several future entities in the architecture contract, including first-class customers, price-list versions, orders and quote revisions. Production still needs MFA, rate limiting, centralized security telemetry, TLS/secure-cookie deployment, audit retention/export, database integration/browser coverage, idempotency and concurrency locks.
+- **Next safe task:** Add PostgreSQL API integration and browser tests for platform workflows, then implement rate limiting/MFA integration and the planned revision/idempotency/concurrency domain hardening.
+
+### SESSION: Corrected environment-only Platform Owner login
+
+- **Date:** 2026-09-05.
+- **Objective:** Rectify Super Admin authentication so the platform owner signs in only at `/login/super-admin` with credentials from `backend/.env`, and no organization user can gain or use owner access. Do not commit or push.
+- **Completed:** Removed the platform-membership grant/revoke API, bootstrap script and user relationship. Added `PlatformOwnerSession`; dedicated UI/API login; separate strict four-hour cookie; constant-time credential comparison; five-failure/15-minute login throttle; cross-clearing of user/owner cookies; environment actor audit; independent logout; retained read-only View As access to every currently implemented workspace module.
+- **Database:** Applied `20260905150000_platform_owner_env_auth` without resetting business data. It dropped `PlatformGroupMembership`, created `PlatformOwnerSession`, and allowed `PrivilegedAudit` to identify either a database user or the environment owner. Test owner sessions were explicitly logged out and removed.
+- **Security verification:** The configured environment credential authenticated and loaded two organizations. The Organization Admin demo credential was rejected by the owner login and its authenticated session received HTTP 403 `PLATFORM_OWNER_REQUIRED` at the platform dashboard. Owner View As loaded quotations, products, warehouses, subscriptions, invoices and alerts; exit/logout succeeded and zero owner sessions remained.
+- **Validation:** All five migrations are applied. Prisma format/generate/validate passed. Backend build and 19/19 tests passed, including 14 dedicated owner-boundary tests. Frontend production build and 7/7 component tests passed. `git diff --check` passed, and the real `.env` remains ignored.
+- **Files:** Added `backend/src/platform-owner.ts` and migration `20260905150000_platform_owner_env_auth`; updated authorization, app/platform routers, Prisma schema/seed, environment example/local environment, PlatformAdmin UI, route handling, tests, READMEs and architecture/API/domain/database/product documentation; removed `backend/prisma/bootstrap-platform-admin.ts`.
+- **Known limitations:** Owner password is intentionally a raw environment secret per the user's direction; production must source it from a secret manager and add MFA. Rate limiting is process-local and must move to shared infrastructure for multiple replicas.
+- **Next safe task:** Add browser/PostgreSQL integration coverage for the dedicated login and all owner mutations, then add MFA and centralized security telemetry.
+
+### SESSION: Platform Owner environment startup fix
+
+- **Date:** 2026-09-05.
+- **Objective:** Fix HTTP 503 at `/api/v1/auth/super-admin/login` when the backend is started from the repository root.
+- **Root cause:** `dotenv/config` searched the shell working directory, while `npm --prefix backend run dev` retained the repository root. The local owner password had also been changed to a 9-character value, below the enforced 16-character minimum.
+- **Completed:** Added `backend/src/env.ts`, loaded it before application initialization, resolved `backend/.env` for both source and compiled layouts, kept deployment-provided values authoritative, restored a compliant local owner password and aligned documentation/examples on login ID `superadmin`.
+- **Validation:** Root-started login through `http://localhost:5173/api/v1/auth/super-admin/login` returned HTTP 200; owner identity returned HTTP 200 with `actorType=PLATFORM_OWNER`; organization-style credentials returned HTTP 401 `INVALID_PLATFORM_CREDENTIALS`; logout returned HTTP 200. Backend 19/19 tests, frontend 7/7 tests and both builds passed.
+- **Security note:** Do not record the real owner password in tracked documentation. Keep only a safe placeholder in `.env.example`, rotate before production and source production credentials from a secret manager.

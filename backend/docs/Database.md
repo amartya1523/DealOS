@@ -1,12 +1,12 @@
 # DealOS — PostgreSQL persistence design
 
-Status: proposed logical/physical schema contract; no Prisma schema or migration has been executed. PostgreSQL is authoritative. Tables are plural snake_case; Prisma models may use PascalCase with explicit mappings. Domain comes first: see [Domain.md](Domain.md).
+Status: living persistence contract. Five Prisma migrations implement the current functional subset; the broader entity catalog remains the target schema. PostgreSQL is authoritative. Prisma models may use PascalCase with explicit mappings. Domain comes first: see [Domain.md](Domain.md).
 
 ## Shared field conventions
 
 Unless a table explicitly represents a join, each table has `id uuid PRIMARY KEY DEFAULT gen_random_uuid()`, `created_at timestamptz NOT NULL DEFAULT now()` and `updated_at timestamptz NOT NULL`. Join tables also use UUID IDs initially for uniform audit referencing and enforce their natural composite uniqueness. Append-only tables use created/occurred time and do not permit updates; an unused updated_at need not be added to those tables. `?` means nullable, otherwise NOT NULL. `U` means UNIQUE. Every FK is explicitly named in migration and indexed unless already the leading key of an index. Numeric money values use `numeric(19,4)` internal precision and currency rounding at posting; rates use fixed precision, never float. Quantities use `numeric(14,3)` with integer enforcement for stock-tracked unit products. ISO currency, IANA timezone and email constraints are validated at the boundary. PostgreSQL `citext` is proposed for case-insensitive email; if unavailable use normalized email plus unique lower(email), documented in migration.
 
-Lifecycle enums below are application enums plus DB CHECK constraints (or reviewed native PostgreSQL enums). No unvalidated arbitrary status strings. All ownership filters derive from authenticated user/team/customer records. Single organization is proposed; there is no decorative tenant_id column pretending to implement multi-company isolation.
+Lifecycle enums below are application enums plus DB CHECK constraints (or reviewed native PostgreSQL enums). No unvalidated arbitrary status strings. Tenant-owned records carry required organization foreign keys, and all normal-user ownership filters derive from a server-resolved active `OrganizationMembership`. The independent Platform Owner can cross this boundary only through its dedicated session and allowlisted control-plane operations.
 
 ## Entity catalog
 
@@ -399,8 +399,24 @@ List queries constrain team/customer/state/date and use stable `(created_at,id)`
 
 ## Current database state
 
-No server started, database created, extension enabled, schema migrated, fixture seeded or persistent business data written by this architecture task. `compose.yaml` is opt-in local infrastructure configuration. The table inventory is a contract for phased implementation, not an assertion that tables exist.
+The large table inventory above remains the target contract; only models represented in the current Prisma schema are implemented. Local PostgreSQL has all five committed migrations applied through `20260905150000_platform_owner_env_auth`. The platform-control migrations were applied without resetting existing records; see the implementation deltas below and `memory.me` for verification evidence.
 
 ## Implemented identity delta — 2026-09-05
 
 Migration `20260905120000_pending_accounts` adds PostgreSQL `AccountStatus` (PENDING, ACTIVE, DISABLED) and `User.status`. Existing identities are backfilled ACTIVE; future inserts default PENDING. Seed users explicitly set ACTIVE. Public signup stores a bcrypt hash and nonprivileged REP role with PENDING status; both login and session middleware require ACTIVE. No other schema or records are reset.
+
+## Implemented platform-control delta — 2026-09-05
+
+Migration `20260905130000_platform_super_admin` introduced `Organization`, `OrganizationMembership`, the now-retired `PlatformGroupMembership`, `OrganizationInvitation` and `PrivilegedAudit`, plus the `OrganizationStatus`, `OrganizationAccessRole`, `MembershipStatus` and `InvitationStatus` enums. It creates a stable default organization, backfills existing records and identities, then makes `organizationId` required on products, policies, quotations, warehouses, subscriptions, invoices, alerts and normal audit events. Product-tier policies and warehouse names are unique inside an organization rather than globally.
+
+`OrganizationMembership` is unique on `(organizationId,userId)` and constrains organization access independently of the user's legacy business role. `PrivilegedAudit` references either an organization user actor or the environment Platform Owner login ID, plus optional simulated/target user and organization; its JSON values contain only allowlisted operational fields. The API exposes no update/delete path for these rows.
+
+Migration `20260905140000_session_csrf` adds `Session.csrfHash`. The browser receives a readable SameSite=Strict CSRF cookie while only its SHA-256 hash is stored. The opaque authentication cookie remains HttpOnly. Session rows also hold nullable read-only View As organization/user fields; these never replace the real session owner.
+
+The organization and CSRF migrations were applied successfully to the local PostgreSQL database without resetting existing data. The revised seed is deterministic and multi-organization, but remains intentionally destructive and must be run only for an intended demo reset.
+
+## Corrected Platform Owner authentication delta — 2026-09-05
+
+Migration `20260905150000_platform_owner_env_auth` removes `PlatformGroupMembership`, makes `PrivilegedAudit.actorId` nullable, adds `platformActorId`, and enforces that exactly one real actor representation is present. It creates `PlatformOwnerSession` with only opaque token/CSRF hashes, configured login ID, expiry and optional read-only View As context. The Platform Owner is deliberately not stored in `User` or `OrganizationMembership`.
+
+Platform Owner credentials are read only from `PLATFORM_OWNER_LOGIN_ID` and `PLATFORM_OWNER_PASSWORD` in the backend environment. The login ID must be non-empty and the password at least 16 characters. The password is never persisted to PostgreSQL. Migration deploy completed successfully without resetting application data.

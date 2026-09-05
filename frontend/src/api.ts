@@ -1,5 +1,5 @@
 export type Workspace = {
-  user: { id: string; name: string; email: string; role: string };
+  user: { id: string; realUserId:string; actorType:'USER'|'PLATFORM_OWNER'; name: string; email: string; role: string; platformSuperAdmin:boolean; organization:{id:string;name:string;status:string}|null; viewContext:{readOnly:true;organizationId:string;organizationName:string;simulatedUserId:string|null;realActor:{id:string;name:string}}|null };
   quotes: Quote[];
   products: Product[];
   policies: Policy[];
@@ -20,7 +20,9 @@ export type Alert = {id:string;kind:string;title:string;detail:string;severity:s
 export type Audit = {id:string;action:string;resource:string;resourceId:string;reason?:string;createdAt:string};
 
 export async function request<T>(path:string, options:RequestInit = {}):Promise<T> {
-  const response = await fetch(`/api/v1${path}`, { ...options, credentials:'include', headers:{'Content-Type':'application/json', ...(options.headers ?? {})} });
+  const csrf = document.cookie.split('; ').find((part)=>part.startsWith('dealos_csrf='))?.split('=').slice(1).join('=');
+  const mutation = Boolean(options.method && !['GET','HEAD'].includes(options.method.toUpperCase()));
+  const response = await fetch(`/api/v1${path}`, { ...options, credentials:'include', headers:{'Content-Type':'application/json', ...(csrf&&mutation?{'X-CSRF-Token':decodeURIComponent(csrf)}:{}), ...(options.headers ?? {})} });
   const body = await response.json();
   if (!response.ok || !body.success) throw new Error(body.error?.message ?? 'Request failed');
   return body.data as T;

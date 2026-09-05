@@ -13,6 +13,8 @@ vi.mock("gsap/ScrollTrigger", () => ({ ScrollTrigger: {} }));
 const fetchMock = vi.fn();
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
+  Element.prototype.scrollIntoView = vi.fn();
+  window.scrollTo = vi.fn();
   fetchMock.mockReset();
   fetchMock.mockResolvedValue({
     ok: false,
@@ -28,12 +30,10 @@ describe("DealOS public routes", () => {
   it("renders the landing page and interactive workflow", () => {
     render(<App />);
     expect(
-      screen.getByRole("heading", { name: /Less friction/ }),
+      screen.getByRole("heading", { name: /Every deal\. In motion\./ }),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: /Approve/ }));
-    expect(screen.getByRole("tabpanel")).toHaveTextContent(
-      "Make every decision accountable.",
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Explore Approve" }));
+    expect(screen.getByRole("heading", { name: /Find your green light/ })).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Make your next move" }),
     ).toHaveAttribute("href", "/sign-up");
@@ -100,6 +100,29 @@ describe("DealOS public routes", () => {
     expect(
       await screen.findByRole("heading", { name: "Welcome back." }),
     ).toBeInTheDocument();
+  });
+  it("renders the live Platform Super Admin control plane for protected members", async () => {
+    window.history.replaceState({}, "", "/app");
+    const workspace = { user: { id: "platform-owner", realUserId: "platform-owner", actorType: "PLATFORM_OWNER", name: "Platform Owner", email: "platform-owner", role: "ADMIN", platformSuperAdmin: true, organization: null, viewContext: null }, quotes: [], products: [], policies: [], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] };
+    const dashboard = { metrics: { totalOrganizations: 2, activeOrganizations: 2, suspendedOrganizations: 0, activeUsers: 5, pendingInvitations: 1, blockedDeals: 1 }, organizations: [], pagination: { page: 1, pages: 1, total: 0 }, recentActions: [] };
+    fetchMock.mockImplementation((url: string) => Promise.resolve({ ok: true, json: async () => ({ success: true, data: url.includes("/platform/dashboard") ? dashboard : url.includes("/workspace") ? workspace : workspace.user }) }));
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Global organizations" })).toBeInTheDocument();
+    expect(screen.getByText("Platform Control")).toBeInTheDocument();
+    expect(await screen.findByText("Approval bottlenecks")).toBeInTheDocument();
+  });
+  it("uses a dedicated Platform Owner login route and endpoint", async () => {
+    window.history.replaceState({}, "", "/login/super-admin");
+    const workspace = { user: { id: "platform-owner", realUserId: "platform-owner", actorType: "PLATFORM_OWNER", name: "Platform Owner", email: "platform-owner", role: "ADMIN", platformSuperAdmin: true, organization: null, viewContext: null }, quotes: [], products: [], policies: [], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] };
+    const dashboard = { metrics: { totalOrganizations: 2, activeOrganizations: 2, suspendedOrganizations: 0, activeUsers: 5, pendingInvitations: 0, blockedDeals: 0 }, organizations: [], pagination: { page: 1, pages: 1, total: 0 }, recentActions: [] };
+    fetchMock.mockImplementation((url: string) => Promise.resolve({ ok: true, json: async () => ({ success: true, data: url.includes("/platform/dashboard") ? dashboard : url.includes("/workspace") ? workspace : { actorType: "PLATFORM_OWNER" } }) }));
+    render(<App />);
+    expect(screen.getByRole("heading", { name: "Platform Owner sign in" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Platform login ID"), { target: { value: "platform-owner" } });
+    fireEvent.change(screen.getByLabelText("Platform password"), { target: { value: "ConfiguredOwnerPassword!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Enter Platform Control" }));
+    expect(await screen.findByRole("heading", { name: "Global organizations" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/auth/super-admin/login", expect.objectContaining({ method: "POST", body: JSON.stringify({ loginId: "platform-owner", password: "ConfiguredOwnerPassword!" }) }));
   });
   it("renders a recovery link on unknown routes", () => {
     window.history.replaceState({}, "", "/missing");
