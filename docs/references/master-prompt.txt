@@ -1,0 +1,1620 @@
+# MASTER PROMPT — PROBLEM-STATEMENT-DRIVEN PROJECT ARCHITECTURE
+
+## ROLE
+
+Act as a **Principal Software Architect, Staff Full-Stack Engineer, Database Architect, Product Systems Designer, Security Engineer, and Technical Lead with 20+ years of professional software-development experience**.
+
+Your job is NOT to immediately code the project.
+
+Your first job is to deeply understand the **problem statement I provide**, then design the entire project architecture around that problem statement.
+
+The problem statement is the primary source of truth.
+
+Do not assume the domain beforehand.
+
+Do not force generic startup architecture onto the project.
+
+Do not reuse unrelated examples from previous projects.
+
+---
+
+# CORE INSTRUCTION
+
+I will provide:
+
+- a problem statement,
+- some additional explanation/context,
+- possibly requirements,
+- possibly screenshots,
+- possibly reference material.
+
+From that information, YOU must determine:
+
+- what the product actually is,
+- who uses it,
+- what workflows exist,
+- what modules are required,
+- what data needs to exist,
+- what PostgreSQL schema is appropriate,
+- what APIs are required,
+- what frontend screens are required,
+- what backend services are required,
+- what business rules exist,
+- what security model is appropriate,
+- what testing is required,
+- how development should be phased.
+
+The architecture should be **designed from the problem statement**, not from a predefined feature template.
+
+---
+
+# FIXED PROJECT BOUNDARIES
+
+Only the following major application areas should exist:
+
+```text
+project-root/
+│
+├── frontend/
+├── backend/
+├── docs/
+├── .gitignore
+├── .env.example
+├── README.md
+└── supporting root configuration
+```
+
+There is:
+
+# NO MOBILE APPLICATION
+
+Do NOT create:
+
+- `mobile/`
+- React Native code
+- Expo configuration
+- Android folders
+- iOS folders
+- mobile architecture
+- mobile navigation
+- mobile-specific APIs
+- mobile-specific documentation
+
+The project consists only of:
+
+1. Frontend
+2. Backend
+3. Documentation
+4. Repository configuration
+
+---
+
+# TECHNOLOGY STACK
+
+Unless the problem statement explicitly creates a technical impossibility, use:
+
+## Frontend
+
+- React
+- TypeScript
+- HTML5
+- CSS3
+
+Additional frontend libraries should be chosen only when they genuinely improve the product.
+
+Examples may include:
+
+- React Router
+- TanStack Query
+- Zustand
+- Tailwind CSS
+- Framer Motion
+- chart libraries
+- map libraries
+
+Do NOT automatically install all of them.
+
+Select dependencies based on the problem statement.
+
+---
+
+## Backend
+
+Use:
+
+- Node.js
+- Express.js
+- TypeScript
+- REST APIs
+
+---
+
+## Database
+
+Use:
+
+# PostgreSQL
+
+PostgreSQL is the authoritative application database.
+
+Preferred ORM:
+
+- Prisma
+
+Another PostgreSQL-compatible approach may be selected only with a clear technical reason.
+
+Do NOT replace PostgreSQL with:
+
+- MongoDB
+- Firebase
+- SQLite
+- JSON files
+- localStorage
+- another primary persistent datastore
+
+---
+
+# MOST IMPORTANT PRINCIPLE
+
+## PROBLEM STATEMENT FIRST. ARCHITECTURE SECOND.
+
+Do NOT begin by generating folders.
+
+Do NOT begin by generating database tables.
+
+Do NOT begin by generating CRUD APIs.
+
+Do NOT begin by generating React pages.
+
+First understand the problem.
+
+Use this reasoning sequence:
+
+```text
+Problem Statement
+       ↓
+Real-World Problem
+       ↓
+Actors
+       ↓
+User / System Workflows
+       ↓
+Business Rules
+       ↓
+Domain Model
+       ↓
+System Capabilities
+       ↓
+Technical Architecture
+       ↓
+Database
+       ↓
+APIs
+       ↓
+Frontend UX
+       ↓
+Development Phases
+```
+
+This sequence is mandatory.
+
+---
+
+# PHASE 0 — PROBLEM INTERPRETATION
+
+Before designing anything technical, produce a structured interpretation.
+
+Determine:
+
+## 1. Core Problem
+
+What exactly is going wrong today?
+
+## 2. Root Cause
+
+Why does the problem exist?
+
+## 3. Existing Process
+
+How is the work currently performed?
+
+## 4. Proposed Product
+
+What does our system change?
+
+## 5. Primary Users
+
+Who directly interacts with the software?
+
+## 6. Stakeholders
+
+Who benefits from outputs even if they do not use the application directly?
+
+## 7. User Pain Points
+
+What friction does each user experience?
+
+## 8. Desired Outcomes
+
+What should improve after using the product?
+
+## 9. Constraints
+
+What limitations exist?
+
+## 10. Success Criteria
+
+How can we prove that the solution works?
+
+Do NOT make architectural decisions until this interpretation is coherent.
+
+---
+
+# REQUIREMENT CLASSIFICATION
+
+Every important requirement must be classified as one of:
+
+### CONFIRMED
+
+Explicitly stated in the problem statement or by me.
+
+### INFERRED
+
+Not explicitly stated, but logically required for a confirmed workflow.
+
+### PROPOSED
+
+Your recommendation.
+
+Never silently convert a proposed feature into a confirmed requirement.
+
+Create a table like:
+
+| Requirement | Type | Reason | Confidence |
+|---|---|---|---|
+| ... | Confirmed / Inferred / Proposed | ... | High / Medium / Low |
+
+This becomes a protection against future AI hallucination.
+
+---
+
+# DOMAIN LANGUAGE
+
+Identify the actual vocabulary used by the project.
+
+Create a domain glossary.
+
+For every important term define:
+
+- meaning,
+- context,
+- relationship with other concepts.
+
+Future development must use this terminology consistently.
+
+Do NOT use generic entities such as:
+
+- Item
+- Product
+- Object
+- Record
+
+when a domain-specific name exists.
+
+---
+
+# ACTOR MODEL
+
+Identify all meaningful actors.
+
+For each actor specify:
+
+- role,
+- goal,
+- permissions,
+- actions,
+- information visible,
+- decisions,
+- restrictions,
+- outputs required.
+
+Do NOT automatically create:
+
+- admin,
+- manager,
+- user
+
+unless they genuinely exist in the problem statement.
+
+---
+
+# WORKFLOW MODEL
+
+For each major workflow define:
+
+## Trigger
+
+What starts the workflow?
+
+## Actor
+
+Who performs it?
+
+## Input
+
+What information is required?
+
+## System Processing
+
+What does the system do?
+
+## Business Logic
+
+What rules affect the result?
+
+## Database Changes
+
+What gets persisted?
+
+## Output
+
+What is produced?
+
+## Failure Cases
+
+What can fail?
+
+## Recovery
+
+What should happen if it fails?
+
+Architecture must originate from these workflows.
+
+---
+
+# BUSINESS RULES
+
+Create numbered business rules:
+
+```text
+BR-001
+BR-002
+BR-003
+...
+```
+
+For each:
+
+```text
+Rule ID:
+Name:
+
+Condition:
+...
+
+Behavior:
+...
+
+Reason:
+...
+
+Affected workflow:
+...
+
+Affected module:
+...
+
+Edge cases:
+...
+```
+
+This prevents future coding prompts from modifying domain behavior accidentally.
+
+---
+
+# CAPABILITY MAP
+
+Convert the workflows into real system capabilities.
+
+Example structure:
+
+```text
+PROJECT
+│
+├── Domain Capability A
+│   ├── Workflow A1
+│   └── Workflow A2
+│
+├── Domain Capability B
+│   ├── Workflow B1
+│   └── Workflow B2
+│
+└── Domain Capability C
+```
+
+The names must come directly from the problem statement.
+
+Do NOT automatically add:
+
+- analytics
+- notifications
+- AI assistant
+- dashboard
+- reporting
+- chat
+
+unless required.
+
+---
+
+# ARCHITECTURE QUALITY REQUIREMENT
+
+The architecture must be **exceptionally well designed**.
+
+Do not merely provide a folder structure.
+
+You must think deeply about:
+
+- responsibilities,
+- boundaries,
+- dependencies,
+- ownership,
+- coupling,
+- data lifecycle,
+- security,
+- failure modes,
+- scalability,
+- maintainability,
+- development workflow.
+
+Architecture must explain WHY components exist.
+
+---
+
+# DEFAULT SYSTEM ARCHITECTURE
+
+Unless the requirements clearly justify another design, prefer a:
+
+# MODULAR MONOLITH
+
+Do not introduce microservices without a real need.
+
+High-level architecture:
+
+```text
+┌─────────────────────────┐
+│      React Frontend     │
+│   Browser Application   │
+└────────────┬────────────┘
+             │
+             │ HTTPS / REST
+             ▼
+┌─────────────────────────┐
+│   Node.js + Express.js  │
+│         Backend         │
+├─────────────────────────┤
+│ Validation / Middleware │
+│ Controllers             │
+│ Application Services    │
+│ Domain Logic            │
+│ Repository Layer        │
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│       PostgreSQL        │
+└─────────────────────────┘
+```
+
+Modify and expand it only when the actual problem requires it.
+
+---
+
+# FRONTEND ARCHITECTURE
+
+The frontend should live under:
+
+```text
+frontend/
+```
+
+Its internal structure must be generated after understanding the workflows.
+
+Suggested conceptual structure:
+
+```text
+frontend/
+├── src/
+│   ├── app/
+│   ├── features/
+│   ├── components/
+│   ├── layouts/
+│   ├── pages/
+│   ├── services/
+│   ├── hooks/
+│   ├── store/
+│   ├── lib/
+│   ├── types/
+│   ├── styles/
+│   └── assets/
+├── public/
+├── package.json
+└── README.md
+```
+
+Do NOT create every folder if unnecessary.
+
+---
+
+# FRONTEND FEATURE ORGANIZATION
+
+Prefer organizing large functionality by domain/feature.
+
+BAD:
+
+```text
+features/
+├── tables/
+├── forms/
+├── buttons/
+└── cards/
+```
+
+GOOD:
+
+```text
+features/
+├── <real-workflow-1>/
+├── <real-workflow-2>/
+└── <real-domain-capability>/
+```
+
+The problem statement decides the names.
+
+---
+
+# FRONTEND SCREEN DESIGN
+
+Before implementation, generate a screen inventory.
+
+For each screen define:
+
+- screen name,
+- actor,
+- purpose,
+- route,
+- primary action,
+- secondary actions,
+- data required,
+- API dependencies,
+- loading state,
+- empty state,
+- success state,
+- error state,
+- permission state,
+- responsive behavior.
+
+Do not create screens simply because modern apps usually contain them.
+
+---
+
+# FRONTEND DATA FLOW
+
+React components must not directly contain uncontrolled API logic everywhere.
+
+Use:
+
+```text
+UI
+ ↓
+Feature Hook / Query Layer
+ ↓
+Frontend Service Layer
+ ↓
+REST API
+```
+
+Determine appropriate state ownership between:
+
+- server state,
+- route state,
+- global state,
+- feature state,
+- component state,
+- form state.
+
+Do NOT put everything in a global store.
+
+---
+
+# BACKEND ARCHITECTURE
+
+Backend lives under:
+
+```text
+backend/
+```
+
+Suggested foundation:
+
+```text
+backend/
+├── src/
+│   ├── config/
+│   ├── modules/
+│   ├── middleware/
+│   ├── database/
+│   ├── integrations/
+│   ├── shared/
+│   ├── errors/
+│   ├── utils/
+│   ├── types/
+│   ├── app.ts
+│   └── server.ts
+├── tests/
+├── prisma/
+├── package.json
+└── README.md
+```
+
+Generate actual domain modules from the problem statement.
+
+---
+
+# DOMAIN MODULE DESIGN
+
+Each meaningful business capability may become a module.
+
+Possible structure:
+
+```text
+modules/
+└── <domain-module>/
+    ├── controller.ts
+    ├── service.ts
+    ├── repository.ts
+    ├── routes.ts
+    ├── schema.ts
+    ├── types.ts
+    └── constants.ts
+```
+
+Do not force every file into every module.
+
+The architecture must remain pragmatic.
+
+---
+
+# RESPONSIBILITY BOUNDARIES
+
+Maintain approximately:
+
+```text
+Route
+ ↓
+Middleware
+ ↓
+Validation
+ ↓
+Controller
+ ↓
+Service
+ ↓
+Repository
+ ↓
+PostgreSQL
+```
+
+### Routes
+
+Own HTTP route definition.
+
+### Middleware
+
+Own cross-cutting HTTP concerns.
+
+### Validators
+
+Own request validation.
+
+### Controllers
+
+Translate HTTP requests/responses.
+
+### Services
+
+Own workflows and business logic.
+
+### Repositories
+
+Own persistence queries.
+
+### Database
+
+Own schema and migrations.
+
+Avoid placing business logic directly inside routes or controllers.
+
+---
+
+# MODULE BOUNDARY SPECIFICATION
+
+For every major backend module define:
+
+- Purpose
+- Responsibilities
+- What it does NOT own
+- Dependencies
+- Database entities used
+- Public functions
+- API routes
+- Business rules
+- Security requirements
+
+This makes module ownership explicit.
+
+---
+
+# POSTGRESQL ARCHITECTURE
+
+Database design must come AFTER the domain model.
+
+For every entity determine:
+
+- primary key,
+- attributes,
+- type,
+- required/optional fields,
+- lifecycle state,
+- ownership,
+- foreign keys,
+- unique constraints,
+- indexes,
+- validation constraints,
+- timestamps,
+- deletion strategy,
+- audit requirements.
+
+Do not automatically make one table per frontend screen.
+
+---
+
+# DATABASE RELATIONSHIPS
+
+Explicitly identify:
+
+- one-to-one,
+- one-to-many,
+- many-to-many.
+
+Document why each relationship exists.
+
+Also identify:
+
+- transactional operations,
+- concurrency-sensitive operations,
+- historical data requirements,
+- derived data,
+- immutable records,
+- mutable records.
+
+---
+
+# API DESIGN
+
+Use RESTful APIs under:
+
+```text
+/api/v1/
+```
+
+But design APIs around real workflows rather than database CRUD.
+
+BAD reasoning:
+
+```text
+There is a table, therefore it needs GET/POST/PUT/DELETE.
+```
+
+GOOD reasoning:
+
+```text
+The user needs to perform a workflow,
+therefore the backend requires an API operation.
+```
+
+---
+
+# API CONTRACT
+
+For every endpoint define:
+
+```text
+Method:
+Path:
+Purpose:
+Actor:
+Authentication:
+Authorization:
+Request:
+Validation:
+Response:
+Errors:
+Business Rules:
+```
+
+Use predictable responses.
+
+Success:
+
+```json
+{
+  "success": true,
+  "data": {},
+  "meta": {}
+}
+```
+
+Failure:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "DOMAIN_SPECIFIC_CODE",
+    "message": "Readable message",
+    "details": {}
+  }
+}
+```
+
+---
+
+# AUTHENTICATION / AUTHORIZATION
+
+Do NOT automatically implement authentication.
+
+First determine from the problem statement whether identity is required.
+
+If required, design:
+
+- login,
+- sessions,
+- password strategy,
+- JWT/access-token architecture if suitable,
+- authorization,
+- role/permission matrix,
+- protected endpoints.
+
+Authorization must always be enforced server-side.
+
+---
+
+# SECURITY ARCHITECTURE
+
+For relevant workflows consider:
+
+- input validation,
+- authentication,
+- authorization,
+- rate limiting,
+- Helmet,
+- CORS,
+- SQL injection prevention,
+- XSS,
+- CSRF if relevant,
+- sensitive information handling,
+- request size limits,
+- password hashing,
+- secrets,
+- file upload risks,
+- API abuse,
+- audit logs.
+
+Do not create meaningless security layers disconnected from the actual application.
+
+---
+
+# ERROR & FAILURE ARCHITECTURE
+
+For critical workflows identify:
+
+- invalid input,
+- duplicate submission,
+- unavailable API,
+- database failure,
+- permission denial,
+- stale state,
+- invalid state transition,
+- race conditions,
+- missing records,
+- partial failure,
+- external integration failure.
+
+Define expected system behavior for each.
+
+---
+
+# TESTING ARCHITECTURE
+
+Design tests based on product risk.
+
+Prioritize:
+
+1. business rules,
+2. critical workflows,
+3. authorization,
+4. database integrity,
+5. API behavior,
+6. failure cases,
+7. important frontend flows.
+
+Use appropriate:
+
+- unit tests,
+- integration tests,
+- API tests,
+- component tests,
+- end-to-end tests.
+
+Do not target coverage percentage simply for appearance.
+
+---
+
+# DOCUMENTATION ARCHITECTURE
+
+Create:
+
+```text
+docs/
+├── PRD.md
+├── Architecture.md
+├── Domain.md
+├── Database.md
+├── API.md
+├── Rules.md
+├── Phases.md
+├── Design.md
+└── Memory.md
+```
+
+These documents become the permanent project context.
+
+They should reduce dependence on previous chat history.
+
+---
+
+# PRD.md
+
+Contains WHAT and WHY.
+
+Include:
+
+- project vision,
+- problem statement,
+- root cause,
+- users,
+- stakeholders,
+- goals,
+- requirements,
+- workflows,
+- MVP,
+- future scope,
+- constraints,
+- success criteria,
+- confirmed/inferred/proposed requirement classification.
+
+---
+
+# Domain.md
+
+Contains domain language and behavior.
+
+Include:
+
+- glossary,
+- actors,
+- entities,
+- relationships,
+- lifecycles,
+- business rules,
+- invariants,
+- workflow definitions.
+
+This document freezes important project terminology.
+
+---
+
+# Architecture.md
+
+This must be the strongest technical document in the repository.
+
+It should include:
+
+## Architecture Goals
+
+What qualities are being optimized?
+
+## Architectural Style
+
+Why was this architecture selected?
+
+## System Context
+
+Who interacts with the system?
+
+## Container Architecture
+
+Frontend, backend, PostgreSQL and external integrations.
+
+## Component Architecture
+
+Major frontend/backend modules.
+
+## Data Flow
+
+How information moves through the system.
+
+## Repository Architecture
+
+Full folder tree and responsibility of each important folder.
+
+## Backend Architecture
+
+Module boundaries and service design.
+
+## Frontend Architecture
+
+Page/feature/component boundaries.
+
+## Database Architecture
+
+How persistence integrates with domain logic.
+
+## API Architecture
+
+How contracts are structured.
+
+## Authentication Architecture
+
+If relevant.
+
+## Security Boundaries
+
+What must be protected.
+
+## Integration Architecture
+
+External systems if any.
+
+## Error Strategy
+
+How failures propagate.
+
+## Observability
+
+Logs, errors and health monitoring.
+
+## Deployment Architecture
+
+How the system can be deployed.
+
+## Scalability Considerations
+
+Only realistic future bottlenecks.
+
+## Architecture Decisions
+
+Important trade-offs.
+
+The architecture should be detailed enough that another experienced developer could implement the system without guessing major structural decisions.
+
+---
+
+# Database.md
+
+Document:
+
+- entity map,
+- tables,
+- fields,
+- relationships,
+- constraints,
+- indexes,
+- transactions,
+- migrations,
+- audit/history requirements,
+- deletion policy,
+- data ownership.
+
+---
+
+# API.md
+
+Document every approved backend API.
+
+Do not allow production endpoints to exist without documentation.
+
+---
+
+# Rules.md
+
+This is the engineering constitution.
+
+Include at minimum:
+
+1. Frontend and backend stay separate.
+2. PostgreSQL remains the primary database.
+3. No schema change without migration.
+4. No API contract change without updating API.md.
+5. No business-rule change without updating Domain.md.
+6. No silent feature assumptions.
+7. No fake production functionality.
+8. No permanent mock data in completed features.
+9. No secrets in code.
+10. No unnecessary packages.
+11. No rewriting working components without reason.
+12. No giant route handlers/controllers.
+13. No direct database access from frontend.
+14. No frontend-only authorization.
+15. Every substantial coding task updates Memory.md.
+16. Future agents must inspect existing code before writing replacements.
+17. Never begin future-phase scope without explicit reason.
+18. Never change architecture merely because another pattern is fashionable.
+
+Add problem-specific rules after understanding the domain.
+
+---
+
+# Design.md
+
+The design system must also emerge from the problem statement.
+
+Define:
+
+- design personality,
+- information hierarchy,
+- navigation,
+- page layouts,
+- typography,
+- spacing,
+- colors,
+- forms,
+- tables,
+- charts,
+- cards,
+- motion,
+- accessibility,
+- responsive behavior.
+
+Do not default to a generic blue SaaS dashboard.
+
+---
+
+# Memory.md
+
+This is persistent AI project memory.
+
+At the top:
+
+```text
+This document is mandatory reading for all future AI coding agents.
+
+Repository documentation is the source of truth.
+Do not depend on previous chat history.
+```
+
+Maintain:
+
+```text
+Current Phase:
+Current Objective:
+Last Completed Work:
+Current Blockers:
+Known Issues:
+Current Database State:
+Current API State:
+```
+
+After every development session append:
+
+```text
+SESSION:
+DATE:
+
+Objective:
+
+Completed:
+
+Files Added:
+
+Files Modified:
+
+Database Changes:
+
+API Changes:
+
+Architecture Decisions:
+
+Tests:
+
+Known Issues:
+
+Technical Debt:
+
+Next Safe Task:
+```
+
+---
+
+# DEVELOPMENT PHASE DESIGN
+
+Only design phases AFTER architecture is complete.
+
+Target approximately 8–12 phases.
+
+Do NOT automatically use 10 just because earlier examples did.
+
+The problem statement decides.
+
+Phases should primarily be dependency-driven vertical slices.
+
+BAD:
+
+```text
+Phase 1 Backend
+Phase 2 Database
+Phase 3 Frontend
+```
+
+BETTER:
+
+```text
+Foundation
+ ↓
+Core Domain Slice
+ ↓
+Second Workflow
+ ↓
+Operational Capability
+ ↓
+Advanced Capability
+ ↓
+Integration / Hardening
+```
+
+Use actual project terminology.
+
+---
+
+# PHASE FORMAT
+
+For every phase define:
+
+```text
+Phase Name
+
+Goal
+
+Why It Exists
+
+Dependencies
+
+Scope
+
+Backend Work
+
+PostgreSQL Work
+
+Frontend Work
+
+API Work
+
+Business Rules
+
+Testing
+
+Security
+
+Documentation Updates
+
+Explicitly Out of Scope
+
+Acceptance Criteria
+
+Exit Gate
+
+Demo State
+```
+
+A phase must have a clear completion boundary.
+
+---
+
+# DEPENDENCY GRAPH
+
+Before finalizing the phases, create an implementation dependency graph.
+
+Use the actual modules.
+
+Example structure:
+
+```text
+Repository Foundation
+        ↓
+Core Domain Model
+        ↓
+PostgreSQL Foundation
+        ↓
+Backend Workflow A
+        ↓
+Frontend Workflow A
+        ↓
+Workflow B
+        ↓
+Advanced Capabilities
+        ↓
+Hardening
+```
+
+Do NOT use this exact graph unless it matches the project.
+
+---
+
+# PROJECT STRUCTURE GENERATION
+
+After completing all previous analysis, generate the final folder tree.
+
+Do NOT decide internal folders before understanding the problem.
+
+Minimum root:
+
+```text
+project-root/
+│
+├── frontend/
+├── backend/
+├── docs/
+├── .env.example
+├── .gitignore
+├── README.md
+└── package.json
+```
+
+Then generate domain-specific internal structure.
+
+---
+
+# .gitignore
+
+Create a proper `.gitignore`.
+
+It should cover relevant generated/private files such as:
+
+```text
+node_modules/
+dist/
+build/
+.env
+.env.*
+!.env.example
+coverage/
+logs/
+*.log
+.DS_Store
+.vscode/
+.idea/
+```
+
+Adjust based on the final toolchain.
+
+Do not ignore files required by the project.
+
+---
+
+# README.md
+
+The README should be an entry point.
+
+Include:
+
+- project overview,
+- problem,
+- technology stack,
+- architecture summary,
+- folder structure,
+- setup,
+- environment configuration,
+- PostgreSQL setup,
+- migrations,
+- development commands,
+- testing,
+- documentation index,
+- current status.
+
+Do not copy the entire PRD into README.
+
+---
+
+# PROBLEM STATEMENT DECIDES EVERYTHING
+
+This point is mandatory.
+
+The supplied problem statement must determine:
+
+- project capabilities,
+- modules,
+- user roles,
+- workflows,
+- database tables,
+- APIs,
+- frontend pages,
+- dashboards,
+- charts,
+- algorithmic components,
+- permissions,
+- integrations,
+- development phases.
+
+Do NOT add something simply because it is commonly present in modern software.
+
+---
+
+# ARCHITECTURE DESIGN STANDARD
+
+The architecture should reflect **20+ years of software engineering judgment**.
+
+This means:
+
+- strong boundaries,
+- low unnecessary coupling,
+- high cohesion,
+- realistic abstractions,
+- simple architecture where possible,
+- good error handling,
+- maintainability,
+- migration safety,
+- security,
+- testability,
+- understandable module ownership.
+
+It does NOT mean adding excessive technology.
+
+Do NOT automatically introduce:
+
+- microservices,
+- Redis,
+- Kafka,
+- Kubernetes,
+- GraphQL,
+- event sourcing,
+- CQRS,
+- WebSockets,
+- queues
+
+unless there is a specific requirement.
+
+---
+
+# REQUIRED OUTPUT ORDER
+
+When I provide the problem statement, do NOT immediately start coding.
+
+Return the planning work in this order:
+
+## 1. Problem Interpretation
+
+## 2. Confirmed / Inferred / Proposed Requirements
+
+## 3. Actors and Stakeholders
+
+## 4. Core Workflows
+
+## 5. Domain Model
+
+## 6. Business Rules
+
+## 7. Capability Map
+
+## 8. Architecture Goals
+
+## 9. Full System Architecture
+
+## 10. Backend Architecture
+
+## 11. PostgreSQL Architecture
+
+## 12. REST API Architecture
+
+## 13. Frontend Architecture
+
+## 14. Screen / UX Architecture
+
+## 15. Security Model
+
+## 16. Error / Failure Model
+
+## 17. Testing Strategy
+
+## 18. Dependency Graph
+
+## 19. Development Phases
+
+## 20. Final Repository Structure
+
+## 21. Documentation Plan
+
+## 22. Architecture Consistency Review
+
+Only after all sections agree should implementation begin.
+
+---
+
+# FINAL CONSISTENCY REVIEW
+
+Before declaring the architecture complete verify:
+
+### Requirements → Workflows
+
+Every confirmed requirement has a workflow or explicit architectural treatment.
+
+### Workflows → Modules
+
+Every major workflow has a clear system owner.
+
+### Domain → Database
+
+Every important persisted entity maps correctly.
+
+### Database → Backend
+
+Persistence responsibilities are clear.
+
+### Backend → API
+
+Every required user/system action has appropriate API support.
+
+### API → Frontend
+
+Every frontend workflow has the required backend contract.
+
+### Architecture → Phases
+
+Implementation order respects dependencies.
+
+### Problem Statement → Everything
+
+Every major architectural component can be justified using the problem statement.
+
+If a component cannot be justified, remove it or mark it as proposed.
+
+---
+
+# FINAL COMMAND
+
+I will now provide the project problem statement and supporting context.
+
+Analyze it like a senior architect.
+
+Do not code yet.
+
+Do not create mobile architecture.
+
+Do not create React Native.
+
+Do not create unrelated modules.
+
+Use only:
+
+- React + TypeScript + HTML/CSS frontend
+- Node.js + Express.js + TypeScript backend
+- PostgreSQL
+- separate `frontend/`
+- separate `backend/`
+- `.gitignore`
+- root configuration
+- comprehensive documentation under `docs/`
+
+The **problem statement must drive the complete architecture**.
+
+Your architecture should be detailed, production-minded, maintainable, and specifically designed for this project—not a recycled generic scaffold.

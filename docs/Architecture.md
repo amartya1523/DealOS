@@ -1,0 +1,344 @@
+# DealOS — Architecture baseline
+
+Status: architecture and repository setup only. This file follows the master's required 22-section order. Supporting documents provide implementation-level contracts. No application, API, migration or deployed service is claimed to exist yet.
+
+## 1. Problem Interpretation
+
+DealOS coordinates B2B quotation preparation, discount review, negotiation, warehouse fulfillment and mixed billing. The root issue is disconnected commercial and operational state. Reps, reviewers, operations and customers need one traceable deal history. A working solution must enforce the rules while users move between screens. See the ten-point interpretation and evidence precedence in [PRD.md](PRD.md).
+
+## 2. Confirmed / Inferred / Proposed Requirements
+
+The R-001–R-033 register in [PRD.md](PRD.md#requirements-classification) is authoritative for classification. Confirmed capabilities come from the PDF and 18-screen board. Versioning, reservations and idempotency are inferred correctness needs. Session mechanism, aggregate risk formula, billing convention and deployment are proposed technical decisions. Proposed decisions remain marked when implemented; new requirements need an entry rather than a silent addition.
+
+## 3. Actors and Stakeholders
+
+Five explicit roles: Sales Rep, Sales Manager, Finance/Operations, Customer and Admin. The [actor matrix](Domain.md#actor-matrix) specifies decisions, information visibility and restrictions. Customer purchasing teams, warehouse and financial leadership are stakeholders; they do not automatically become new software roles. A scheduler is a noninteractive system actor, not an account with a reusable password.
+
+## 4. Core Workflows
+
+W-01 Identity; W-02 Configuration; W-03 Quotation and suggestions; W-04 Approval; W-05 Negotiation/acceptance; W-06 Fulfillment; W-07 Hybrid billing; W-08 Payment; W-09 Deal health; W-10 Reporting. [Domain.md](Domain.md#workflow-definitions) records trigger, actor, input, logic, database effects, outputs, failure and recovery for each.
+
+Commercial execution order: draft → evaluated submitted revision → required review → customer review and possible revision → matching approval and acceptance → order → allocation/dispatch and billing → payment. The board's screen ordering is not interpreted as permission to dispatch before customer agreement.
+
+## 5. Domain Model
+
+Quotation is the stable deal; revision is the commercial snapshot. Approval and acceptance reference a revision. Order copies approved/accepted terms. Reservation is a stock promise; shipment is physical consumption. Subscription is a recurring obligation; invoice is an issued receivable; payment is recorded settlement evidence. [Domain.md](Domain.md) freezes this language. Avoid generic CRUD models and one-table-per-screen designs.
+
+## 6. Business Rules
+
+BR-001–BR-020 in [Domain.md](Domain.md#numbered-business-rules) cover calculation, combined discounts, effective caps, risk, revisions, reviewer independence, confirmation, isolation, stock, splitting, consolidation, cadence, proration, credits, idempotency, payments, audit, alerts, suggestions and exports. Each rule has owner/workflow/edge cases. A rule change requires updated examples, tests, API effects and migration assessment.
+
+## 7. Capability Map
+
+```text
+DealOS
+├── Identity and role activation
+├── Sales backend configuration
+│   ├── Customers, tiers, teams and product variants
+│   ├── Price lists and versioned approval policies
+│   └── Warehouses, stock and subscription plans
+├── Quotation preparation
+│   ├── Pricing, discounts and cadence-specific margin
+│   └── Cross-sell / upsell suggestions
+├── Discount governance
+│   └── Ordered review and audit
+├── Customer negotiation
+│   └── Revision-bound acceptance and order confirmation
+├── Fulfillment
+│   └── Reservation, split, shipment and backorder consolidation
+├── Hybrid billing
+│   └── Recurring periods, proration, invoices, payments and credits
+├── Deal health
+│   └── Rule-based alerts and internal nudges
+└── Reporting and exports
+```
+
+No chatbot, social messaging, mobile application, marketing site or unrelated analytics platform is included.
+
+## 8. Architecture Goals
+
+1. Correct money, stock and authorization transitions under retries and concurrent requests.
+2. Traceability from source requirement to workflow, rule, API and screen.
+3. Pragmatic module ownership; one deployment and one PostgreSQL transaction boundary.
+4. Clear customer/internal security boundary and revocable identity.
+5. Testable pure calculations separated from I/O.
+6. Reproducible setup and explicit phase gates; no fake completion or mock persistence.
+7. Operationally modest design with safe room to grow.
+
+Initial performance targets are proposed, not sourced: paginated lists default 25/max 100; quote preview normally under 500 ms on representative seeded workloads; normal list/detail reads under 1 s. Measure on documented hardware before claiming these targets are met. No unsupported scale or availability promise.
+
+## 9. Full System Architecture
+
+### Architectural style and system context
+
+A modular monolith fits tightly transactional quote/order/stock/billing operations and the small development scope. Microservices would introduce distributed consistency without a demonstrated need. Browser users communicate with Express; PostgreSQL is authoritative. The first release needs no external identity provider, carrier, payment gateway, model API or email service.
+
+```mermaid
+flowchart LR
+    Internal[Rep / Manager / Finance / Admin] --> UI[React browser workspace]
+    Customer[Customer] --> Portal[Restricted React portal]
+    UI -->|HTTPS /api/v1| API[Express API]
+    Portal -->|HTTPS /api/v1/portal| API
+    API --> Identity[Identity and authorization]
+    API --> Commercial[Quotations / Governance / Orders]
+    API --> Operations[Fulfillment / Billing]
+    API --> Insight[Deal health / Reporting]
+    Commercial --> PG[(PostgreSQL)]
+    Operations --> PG
+    Identity --> PG
+    Insight --> PG
+    Scheduler[Same-codebase scheduler process] --> Operations
+    Scheduler --> Insight
+```
+
+### Data flow
+
+UI event → feature query/mutation hook → typed service → REST request → security/validation → controller → application service → domain calculator/policy → repository → PostgreSQL. Controller returns an explicit DTO; errors become standard envelopes. Committed mutation invalidates affected frontend query keys. Polling refreshes approvals/stock/health; no WebSockets are needed initially.
+
+### Integrations and deployment
+
+Proposed production shape: TLS reverse proxy serves frontend static assets and proxies `/api/v1` to one Express service. API and optional scheduler share code, database and migration history. PostgreSQL resides on a private network with TLS/verified certificates as appropriate. Database credentials are deployment secrets. The supplied Compose file provisions **local PostgreSQL only**, never deploys the application.
+
+Scheduler leases work from PostgreSQL using `FOR UPDATE SKIP LOCKED` or advisory lock for singleton scans. Due billing has unique period keys independent of job leases. External delivery/gateway adapters are future scope; internal nudges and recorded payments must not claim external delivery or transfer.
+
+## 10. Backend Architecture
+
+### Boundaries and ownership
+
+| Module | Owns / public functions | Does not own | Dependencies / entities | Routes | Rules and security |
+|---|---|---|---|---|---|
+| identity | signup, activateUser, login, logout, authenticate, authorizeScope | Commercial rules | users, roles, teams, sessions | `/auth`, `/admin/users`, `/admin/teams` | BR-008; hash passwords; scoped identities |
+| catalog | customers, products/variants, price lists, plan/policy configuration publication | Historical quote recomputation, billing execution | tiers, customers, products, prices, plan/policy versions | `/customers`, `/catalog`, `/settings` | BR-001/003/017; Admin/config Manager |
+| quotations | createDraft, preview, revise, submit, send, getScopedQuote | Approval decisions, stock or invoice posting | catalog reads, governance evaluator; quotes/revisions/lines | `/quotations` | BR-001–005/012/017; assigned team scope |
+| governance | evaluateRisk, openCase, decideStep | Editing customer terms | identity, quote snapshot; policy/cases/steps | `/approvals` | BR-003–006; no self-approval |
+| recommendations | rankSuggestions, dismissSuggestion | Mutating quotes or inventing costs | catalog, quote calculator, order history | quote suggestions + `/settings/recommendations` | BR-019; customer-safe isolation |
+| portal | projectQuote, comment, propose, accept | Direct price mutation, internal DTO serialization | identity scope; quotes/proposals/acceptances; order confirmation service | `/portal` | BR-005/007/008; every lookup customer-scoped |
+| orders | confirmEligibleRevision, snapshotOrder | Reviewer decisions, actual dispatch | quote/governance/acceptance reads; orders/lines | `/orders` | BR-007/015/017; transaction orchestrator |
+| fulfillment | previewSplit, reserve, override, ship, receiveStock, consolidate | Price/approval or invoice rules | orders; warehouses, balances, movements, reservations, shipments | `/fulfillment`, `/warehouses` | BR-009–011/015; Operations write |
+| billing | createSchedule, generateInvoice, changeSubscription, cancel, recordPayment, credit | Moving real money through a provider | orders and plan snapshots; subscriptions/periods/invoices/payments/credits | `/subscriptions`, `/invoices` | BR-012–016/017; Finance write |
+| deal-health | evaluateAlerts, nudge, acknowledge, resolve | Repricing deals or external delivery claims | scoped quote/order reads; alerts, notifications/jobs | `/deal-health`, `/notifications` | BR-018; scoped alerts |
+| reporting | aggregateSales, exportReport | Financial mutations or duplicate canonical totals | read-only scoped repositories | `/reports` | BR-020; export scope/limits |
+
+`shared/audit`, `shared/errors`, request IDs, decimal/date utilities and idempotency helpers are cross-cutting infrastructure, not domain modules. Do not build a generic workflow engine for this finite process.
+
+### Module dependency rules
+
+- Only an owning repository writes its tables. Services expose operations; other modules do not import route/controller internals.
+- Pure quote pricing and governance evaluation accept snapshots and return results; they perform no database writes.
+- Application orchestration lives in services. Order confirmation receives a transaction context and coordinates snapshots/acceptance uniqueness; fulfillment and invoice creation occur as explicit transactions/jobs afterward.
+- Repositories accept a Prisma transaction client for atomic cross-module workflows; they never open hidden nested transactions.
+- Audit writes participate in the caller transaction. Optional asynchronous side effects are represented as durable jobs after canonical state is persisted.
+- Avoid circular services: portal invokes order confirmation; orders reads quote/approval/acceptance through repositories or narrow interfaces, never invokes portal.
+
+### Responsibilities
+
+Routes declare HTTP wiring and required permission. Validators parse body/query/params. Controllers translate DTOs, services orchestrate and enforce rules, pure domain functions calculate, repositories own queries, migrations own database constraints. Exceptions carry domain codes; HTTP mapping belongs in middleware. Avoid one giant router and avoid seven empty files per module.
+
+### Observability
+
+Structured JSON logs: timestamp, level, request ID, route, status, duration and safe actor/resource IDs. Exclude passwords, cookies, tokens, full customer comments and request bodies. Audit history is separate from diagnostic logs. `/health/live` checks process; `/health/ready` checks DB connectivity and expected migration baseline. Track failed jobs, pending-approval age, reservation conflicts and overdue billing. Graceful shutdown stops accepting requests and releases job leases after transactions finish.
+
+## 11. PostgreSQL Architecture
+
+Prisma is the proposed ORM; PostgreSQL remains the only business datastore. [Database.md](Database.md) specifies tables, typed fields, ownership, relationships, constraints, indexes, transactions and deletion. Fixed-precision numeric fields, `timestamptz`, foreign keys, immutable submitted snapshots and uniqueness constraints are mandatory. Advanced check/partial-index/locking constraints can use reviewed SQL migrations; ORM convenience must not weaken integrity.
+
+Do not maintain authoritative totals in browser storage. Query caching is ephemeral. Database migrations are committed and applied separately from API startup. Baseline schema is **designed, not migrated**, in this task.
+
+## 12. REST API Architecture
+
+[API.md](API.md) is the proposed complete endpoint contract inventory. Prefix `/api/v1`. Workflow mutations use explicit actions such as submit, decision, accept, allocation and record-payment. Money is string-encoded decimal. Pagination uses bounded cursor/limit; dates use ISO formats. Response envelopes are consistent, and safe DTOs differ between internal and portal views.
+
+Optimistic concurrency uses `expectedVersion` on edits/state transitions; stale writes receive `409 STALE_VERSION`. Critical operations require `Idempotency-Key` scoped to actor, operation and resource, with payload-hash comparison. Repositories enforce ownership before returning existence details. Frontend requests never supply trusted roles, costs or approval results.
+
+## 13. Frontend Architecture
+
+React/TypeScript with Vite as proposed build tool; React Router for route/state and TanStack Query for server-state coordination. These dependencies are planned, not installed yet. HTML5 and authored CSS3 provide the design system; no global state library, chart package or animation framework without a concrete need.
+
+Feature ownership: `identity`, `quotations`, `approvals`, `fulfillment`, `billing`, `portal`, `deal-health`, `catalog`, `reporting`. Layouts own internal navigation versus customer shell. Shared components own accessible fields, dialogs, tables, badges and state panels; domain features own the calculations shown and workflows invoked.
+
+| State | Owner | Example |
+|---|---|---|
+| Server | Query cache | Quote snapshot, inventory and approval case |
+| Route | URL/search params | Quote ID, pipeline stage, report filters |
+| Identity | `/auth/me` query and permission helpers | Visible navigation; never security authority |
+| Draft form | Feature/component state | Unsaved quantities and comments |
+| View preference | Optional device-local preference only | List versus pipeline; no business persistence |
+| Transient UI | Component state | Modal open, focused row, validation message |
+
+API calls reside in `services/http.ts` and feature services/hooks, not scattered effects. Cancel obsolete preview requests and ignore out-of-order responses. Financial mutations pessimistically await the authoritative result. Draft dirty-state prompts prevent accidental loss; successful mutations invalidate related list/detail/health queries. No mock-service fallback when API fails.
+
+## 14. Screen / UX Architecture
+
+[Design.md](Design.md) maps all 18 reference screens, additional required setup surfaces, actors, routes, data/API needs and loading/empty/success/error/permission/responsive states. The board is a functional wireframe. Proposed visual language is a calm operational ledger: warm neutral backgrounds, graphite text, restrained teal action color, amber review and red exceptions. Blue navigation in the reference is not treated as a branding requirement.
+
+Keep exception reason, financial cadence and next action visible. Customer shell excludes internal navigation and internal financial metrics. Charts are optional representations of actual report data, never decorative invented series. Responsive browser layouts are required; this does not introduce a mobile application.
+
+## 15. Security Model
+
+Identity is explicitly required. Proposed opaque random session cookie (`HttpOnly`, `Secure` in production, `SameSite=Lax`, path `/`), storing only hash in PostgreSQL. Rotate on login/privilege change; revoke on logout/deactivation. Proposed limits: 12-hour absolute, 30-minute idle expiry. Passwords use Argon2id with current vetted parameters when implemented; no plaintext seed credentials in production.
+
+Mutations require session and CSRF token bound to session plus Origin validation; CORS allows exactly configured frontend origin in development, same-origin production. Public signup cannot choose privileged roles. Admin provisions Customer account ownership and activates internal users. Customers see only explicitly projected DTOs; cross-customer guesses get 404. Internal access requires team/ownership scope, not just role flags.
+
+Helmet, bounded JSON bodies (proposed 256 KiB, no arbitrary uploads), rate limits on auth and expensive endpoints, validation, parametrized queries and redacted logs. React escapes text; no raw HTML comments. Spreadsheet exports neutralize formula injection. Browser cookies never enter localStorage. Password reset/email delivery is an explicit future integration, not a fake success form.
+
+Production Admin bootstrap is a one-time controlled command using environment input and no default production password. Database application role excludes schema DDL; migration role is separate. Audit tables are append-only through application permissions/DB policy where practical. Backups must be encrypted and restore-tested.
+
+## 16. Error / Failure Model
+
+| Failure | Response / behavior | Recovery |
+|---|---|---|
+| Invalid body/filter | 400/422 field error with safe details | Correct fields, retain form input |
+| No/expired session | 401 `AUTH_REQUIRED` | Login then return to safe route |
+| Insufficient permission | 403 `FORBIDDEN`; portal unknown resource 404 | Show restricted state; no retry loop |
+| Stale version | 409 `STALE_VERSION` | Fetch latest and reconcile explicitly |
+| Invalid transition | 409 `INVALID_STATE` | Explain current state and allowed next action |
+| Same key, different payload | 409 `IDEMPOTENCY_CONFLICT` | Use a new key only for a genuinely new intended action |
+| Missing pricing/cost/policy | 422 `CONFIGURATION_REQUIRED` | Admin fixes configuration; no silent zero/default |
+| Approval reviewer missing | 409 `REVIEWER_UNAVAILABLE` or blocked case | Assign eligible reviewer; never bypass approval |
+| Stock race | 409 `STOCK_CHANGED` | Roll back, return fresh availability and preview |
+| Invoice overpayment | 422 `AMOUNT_EXCEEDS_BALANCE` | Refresh balance and enter appropriate payment |
+| Database unavailable | 503 `SERVICE_UNAVAILABLE`; safe request ID | Preserve user form, bounded retry for reads |
+| Unexpected internal failure | 500 `INTERNAL_ERROR`, no stack/SQL | Log request ID and rolled-back transaction |
+| Scheduler partial failure | Job remains retryable, unique business key protects duplicates | Bounded exponential retry; dead-letter status visible to operator |
+| Browser offline/API timeout | Honest connectivity state; do not claim save success | Retry with original mutation key |
+
+Transactions establish all-or-nothing behavior. No external side effect is inside a retried DB transaction. External providers, if later added, require durable dispatch and reconciliation rules before shipping.
+
+## 17. Testing Strategy
+
+[TestPlan.md](TestPlan.md) defines risk-based tests and evidence gates. Priority: calculations/routing; revision-bound approval; server authorization; stock/payment concurrency; calendar proration; API contracts; end-to-end flows. PostgreSQL integration tests use a separate disposable database, never SQLite. Browser tests target the actual React/Express application once implemented. No coverage vanity target; assert meaningful failure cases and business invariants.
+
+The current repository check validates documentation integrity and configuration only. It is **not** an application test suite or evidence of domain implementation.
+
+## 18. Dependency Graph
+
+```mermaid
+flowchart TD
+    P0[P0 Architecture baseline] --> P1[P1 Identity and runtime foundation]
+    P1 --> P2[P2 Sales configuration]
+    P2 --> P3[P3 Quote and live suggestions]
+    P3 --> P4[P4 Discount governance]
+    P4 --> P5[P5 Portal negotiation and order confirmation]
+    P5 --> P6[P6 Fulfillment and backorders]
+    P5 --> P7[P7 Hybrid billing and payments]
+    P6 --> P8[P8 Deal health and reporting]
+    P7 --> P8
+    P8 --> P9[P9 Hardening and two-flow demo]
+```
+
+P6 and P7 can be developed independently after order contracts stabilize; no parallel-agent work is implied or required. P8 consumes real events/state rather than generating dashboard fixtures.
+
+## 19. Development Phases
+
+Ten dependency-driven phases, including this architecture baseline, are specified in [Phases.md](Phases.md). Each has goal, reason, dependencies, scope, backend/PostgreSQL/frontend/API work, business rules, tests, security, documentation, exclusions, acceptance, exit gate and demo state. This task completes P0 only. Starting P1 requires the user's application-implementation instruction.
+
+## 20. Final Repository Structure
+
+### Materialized in this task
+
+```text
+DealOS/
+├── frontend/
+│   ├── package.json                 # workspace metadata; runtime not implemented
+│   ├── tsconfig.json                # planned browser compiler boundary
+│   └── README.md
+├── backend/
+│   ├── package.json                 # workspace metadata; runtime not implemented
+│   ├── tsconfig.json                # planned Node compiler boundary
+│   └── README.md
+├── docs/
+│   ├── PRD.md
+│   ├── Architecture.md
+│   ├── Domain.md
+│   ├── Database.md
+│   ├── API.md
+│   ├── Rules.md
+│   ├── Phases.md
+│   ├── Design.md
+│   ├── Memory.md
+│   ├── TestPlan.md
+│   ├── Traceability.md
+│   ├── ArchitectureDiagram.md
+│   └── references/
+├── scripts/check-repository.mjs      # documentation/configuration validation
+├── .github/workflows/repository.yml
+├── .editorconfig
+├── .gitattributes
+├── .gitignore
+├── .env.example
+├── .nvmrc
+├── AGENTS.md
+├── compose.yaml                     # opt-in local PostgreSQL only
+├── package.json
+├── package-lock.json
+├── tsconfig.base.json
+└── README.md
+```
+
+### Target application structure, added only as phases require
+
+```text
+frontend/src/
+├── app/                             # router/query providers
+├── features/
+│   ├── identity/                    # authentication and role-aware shell
+│   ├── quotations/                  # builder, pipeline, suggestions
+│   ├── approvals/                   # review list/detail
+│   ├── fulfillment/                 # stock/split/backorder surfaces
+│   ├── billing/                     # subscriptions/invoices/payments
+│   ├── portal/                      # separate customer views
+│   ├── deal-health/                 # alerts and internal nudges
+│   ├── catalog/                     # products/prices/configuration
+│   └── reporting/                   # scoped reports and exports
+├── components/                      # shared accessible primitives
+├── layouts/                         # internal and portal shells
+├── services/                        # HTTP boundary
+└── styles/                          # tokens/base/components
+backend/
+├── src/
+│   ├── app.ts                       # Express composition, no socket side effects
+│   ├── server.ts                    # lifecycle and graceful shutdown
+│   ├── config/                      # validated environment
+│   ├── database/                    # Prisma client and transaction helpers
+│   ├── middleware/                  # identity, CSRF, validation, errors
+│   ├── modules/                     # modules from section 10
+│   └── shared/                      # audit, money, date, idempotency, errors
+├── prisma/
+│   ├── schema.prisma
+│   ├── migrations/
+│   └── seed.ts
+└── tests/                           # unit + PostgreSQL integration/API tests
+```
+
+Do not materialize empty speculative folders. No frontend imports from backend implementation. DTO schemas/types may be generated from API contracts inside frontend later; no third application-level shared package is needed.
+
+## 21. Documentation Plan
+
+PRD owns what/why/classification; Domain owns vocabulary/rules/workflows; Architecture owns boundaries/decisions; Database owns persistence contract; API owns HTTP contract; Design owns screen/interaction contract; Phases owns implementation gates; Rules owns engineering constraints; Memory owns current evidence and next safe task. Traceability cross-checks scope; TestPlan defines verification; ArchitectureDiagram gives the one-page deliverable. Root AGENTS requires future agents to read Memory/Rules and inspect current code before changes.
+
+Product branding is **DealOS**, explicitly selected by the user. Preserve original source files unchanged even though they say DealFlow360.
+
+Current reusable context is project-specific. For the next problem, follow the same reasoning sequence, replace requirements/domain/schema and explicitly retire this project's assumptions; never copy DealOS rules into an unrelated domain.
+
+## 22. Architecture Consistency Review
+
+[Traceability.md](Traceability.md) links every confirmed requirement to workflow, module, persistence, endpoint/screen and phase. Review results:
+
+- Requirements → workflows: every R-001–R-022 has treatment, including signup, replenishment configuration, refunds as credit obligations, exports and payment recording.
+- Workflows → modules: W-01–W-10 have owning services; audit/idempotency are infrastructure.
+- Domain → database: commercial revisions, variant attributes, policy versions, proposal lines, reservations, recurring periods and payment allocations are modeled.
+- Database → backend: table ownership is explicit; transactional mutations use owning repositories and shared transaction context.
+- Backend → API: all user actions are contracted; internal scheduler jobs are not exposed as unprotected public endpoints.
+- API → frontend: the 18 screens plus required setup surfaces have API support and restricted customer projections.
+- Architecture → phases: identity/configuration precede quotes, governance precedes execution, order precedes fulfillment/billing, reports follow real data.
+- Problem → everything: optional/future features are marked; no third datastore, mobile app, AI service or speculative messaging integration.
+
+### Open business decisions before affected implementation
+
+1. Confirm/change proposed risk bands, aggregate caps and margin floors in P2/P4.
+2. Confirm/change proration timezone, initial invoice trigger, cancellation timing and unused-period credit policy before P7.
+3. Confirm team visibility and account activation policy before P1/P2.
+4. Confirm whether literal legacy `.xls` is required or `.xlsx` is acceptable before export implementation; current contract retains requested XLS.
+5. Portal invoice visibility is inferred from quotation-to-payment context; document any customer-account access changes.
+
+These do not block the architecture package. They must not be silently represented as sourced requirements. No external deployment, payment-provider integration, source export or business-data mutation has occurred in this phase.
