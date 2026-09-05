@@ -100,7 +100,7 @@ function GoogleAuth({ mode, organizationName = "", email = "", hideDivider = fal
       <button
         type="button"
         className="google-signup-fallback"
-        aria-label={mode === "signup" ? "Sign up with Google" : "Sign in with Google"}
+        aria-label={mode === "signup" ? "Sign up with Google" : mode === "customer" ? "Continue with Google Sign-In ID" : "Sign in with Google"}
         onClick={() => onError(configurationLoaded
           ? "Google authentication is not configured yet. Add GOOGLE_CLIENT_ID to backend/.env and restart the backend."
           : "Google authentication is still loading. Please try again in a moment.")}
@@ -111,7 +111,7 @@ function GoogleAuth({ mode, organizationName = "", email = "", hideDivider = fal
           <path fill="#FBBC05" d="M6.39 13.93A6.01 6.01 0 0 1 6.08 12c0-.67.12-1.32.31-1.93V7.44H3.04A10 10 0 0 0 2 12c0 1.61.39 3.14 1.04 4.56l3.35-2.63Z" />
           <path fill="#EA4335" d="M12 5.94c1.47 0 2.79.5 3.83 1.5l2.87-2.88A9.64 9.64 0 0 0 12 2a10 10 0 0 0-8.96 5.44l3.35 2.63C7.18 7.7 9.39 5.94 12 5.94Z" />
         </svg>
-        {mode === "signup" ? "Sign up with Google" : "Sign in with Google"}
+        {mode === "signup" ? "Sign up with Google" : mode === "customer" ? "Continue with Google Sign-In ID" : "Sign in with Google"}
       </button>
       {!hideDivider&&<div className="auth-divider"><span>or continue with work email</span></div>}
     </>
@@ -136,15 +136,16 @@ export function CustomerAuthPage({ onSuccess, signedInRole }: { onSuccess: () =>
       <div className="customer-auth-mark"><ShieldCheck/></div>
       <span className="section-label">SECURE DEAL ROOM</span>
       <h1>Everything shared with you, in one place.</h1>
-      <p>Use the email address that received your DealOS invitation. Google verifies the address before any quotation or invoice is shown.</p>
+      <p>Enter your customer Email ID, then continue with the same Google Sign-In ID. DealOS opens quotations and invoices only after both emails match.</p>
       {signedInRole&&signedInRole!=="CUSTOMER"&&<div className="auth-error" role="alert">This session belongs to an internal workspace. Sign out there before entering the customer portal.</div>}
-      <label className="customer-email-field">Invited email address<input type="email" autoComplete="email" placeholder="you@company.com" value={email} onChange={event=>{setEmail(event.target.value);setError("")}}/></label>
+      <label className="customer-email-field">Customer Email ID<input type="email" autoComplete="email" placeholder="you@company.com" value={email} onChange={event=>{setEmail(event.target.value);setError("")}}/></label>
+      {ready&&<small className="customer-email-hint">Continue with the Google account for {email.trim().toLowerCase()}.</small>}
       <div className={!ready?"customer-google-disabled":""}>
         <GoogleAuth mode="customer" email={email.trim().toLowerCase()} hideDivider onComplete={onSuccess} onError={setError}/>
       </div>
-      {!ready&&<small>Enter your invited email to enable Google sign-in.</small>}
+      {!ready&&<small>Enter your Email ID to enable Google sign-in.</small>}
       {error&&<div className="auth-error" role="alert">{error}</div>}
-      <div className="customer-auth-trust"><span><Check/>Verified email only</span><span><LockKeyhole/>Customer-scoped access</span></div>
+      <div className="customer-auth-trust"><span><Check/>Email ID must match Google</span><span><LockKeyhole/>Customer-scoped access</span></div>
     </section>
     <footer>Invitations are issued by the business that shared a quotation or invoice with you.</footer>
   </main>;

@@ -228,7 +228,7 @@ app.post('/api/v1/auth/google/customer', async (req: AuthRequest, res) => {
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter the invited email and continue with Google.');
   try {
     const profile = await verifyGoogleSignupCredential(parsed.data.credential, googleClientId);
-    if (profile.email !== parsed.data.email) return fail(req, res, 401, 'EMAIL_MISMATCH', 'Choose the same Google account that received the customer invitation.');
+    if (profile.email !== parsed.data.email) return fail(req, res, 401, 'EMAIL_MISMATCH', `Google signed in as ${profile.email}. Enter that Email ID above or choose the Google account for ${parsed.data.email}.`);
     const user = await acceptCustomerGoogleInvitation(profile);
     if (!user) return fail(req, res, 401, 'INVITATION_REQUIRED', 'No active customer invitation was found for this email. Ask the sender to invite this address again.');
     const token = await startSession(user, res);
@@ -690,10 +690,10 @@ app.post('/api/v1/subscriptions/:id/change', authenticate, requireModule('subscr
 
 app.post('/api/v1/invoices', authenticate, requireModule('invoices'), requireRole('FINANCE', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
   const parsed = z.object({
-    quoteId: z.string().uuid().optional(),
-    customerId: z.string().uuid().optional(),
+    quoteId: z.string().min(1).optional(),
+    customerId: z.string().min(1).optional(),
     dueAt: z.string().datetime().or(z.string().date()),
-    lines: z.array(z.object({ productId: z.string().uuid(), quantity: z.number().int().positive(), discount: z.number().min(0).max(100).default(0) }).strict()).min(1).max(100),
+    lines: z.array(z.object({ productId: z.string().min(1), quantity: z.number().int().positive(), discount: z.number().min(0).max(100).default(0) }).strict()).min(1).max(100),
     sendReceipt: z.boolean().default(false),
   }).strict().safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Select a customer or quotation, due date, and invoice lines.', parsed.error.flatten());
@@ -716,6 +716,29 @@ app.post('/api/v1/invoices', authenticate, requireModule('invoices'), requireRol
   const receiptCustomer = quote?.customerId ? await db.customer.findFirst({ where: { id: quote.customerId, organizationId: req.user!.organizationId } }) : customer;
   if (parsed.data.sendReceipt && !receiptCustomer?.email) return fail(req, res, 422, 'CUSTOMER_EMAIL_REQUIRED', 'Add a valid customer email before sending an invoice receipt.');
   const invoice = await db.$transaction(async (tx) => {
+    const stockLines = parsed.data.lines
+      .filter((line) => !products.find((product) => product.id === line.productId)!.recurring)
+      .reduce((map, line) => map.set(line.productId, (map.get(line.productId) ?? 0) + line.quantity), new Map<string, number>());
+    if (stockLines.size) {
+      const stockIds = await tx.stockBalance.findMany({ where: { productId: { in: [...stockLines.keys()] }, warehouse: { organizationId: req.user!.organizationId } }, select: { id: true }, orderBy: { id: 'asc' } });
+      if (stockIds.length) await tx.$queryRaw`SELECT "id" FROM "StockBalance" WHERE "id" IN (${Prisma.join(stockIds.map((item) => item.id))}) ORDER BY "id" FOR UPDATE`;
+      const balances = await tx.stockBalance.findMany({ where: { id: { in: stockIds.map((item) => item.id) } }, include: { warehouse: true }, orderBy: [{ productId: 'asc' }, { warehouse: { priority: 'asc' } }] });
+      for (const [productId, required] of stockLines) {
+        const product = products.find((item) => item.id === productId)!;
+        const productBalances = balances.filter((balance) => balance.productId === productId);
+        const available = productBalances.reduce((sum, balance) => sum + Math.max(0, balance.onHand - balance.reserved), 0);
+        if (required > available) throw new DomainError(422, 'INSUFFICIENT_STOCK', `${product.name} has only ${available} units available. Reduce the invoice quantity.`);
+        let remaining = required;
+        for (const balance of productBalances) {
+          if (remaining <= 0) break;
+          const take = Math.min(remaining, Math.max(0, balance.onHand - balance.reserved));
+          if (!take) continue;
+          const changed = await tx.stockBalance.updateMany({ where: { id: balance.id, onHand: { gte: balance.reserved + take } }, data: { onHand: { decrement: take } } });
+          if (changed.count !== 1) throw new DomainError(409, 'STOCK_CHANGED', 'Stock changed while creating the invoice. Refresh and try again.');
+          remaining -= take;
+        }
+      }
+    }
     const fallbackQuote = quote ?? await tx.quote.create({ data: { organizationId: req.user!.organizationId, number: `Q-INV-${Date.now().toString().slice(-8)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`, customer: customer!.name, customerId: customer!.id, customerTier: customer!.tier, ownerId: req.user!.id, stage: 'CONFIRMED', total: calculation.total, taxTotal: calculation.taxTotal, totalsByCadence: asJson(calculation.totalsByCadence), margin: calculation.margin, riskScore: 0 } });
     const created = await tx.invoice.create({ data: { organizationId: req.user!.organizationId, number: `INV-${Date.now().toString().slice(-8)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`, quoteId: fallbackQuote.id, orderId: quote?.order?.id, customer: quote?.customer ?? customer!.name, customerId: quote?.customerId ?? customer!.id, amount: calculation.total, dueAt: new Date(parsed.data.dueAt), lines: asJson(invoiceLines) }, include: { payments: true } });
     if (receiptCustomer) await ensureCustomerPortalInvite(tx, req, receiptCustomer);
@@ -769,8 +792,20 @@ app.post('/api/v1/products', authenticate, requireModule('products'), requireRol
   const product = await db.$transaction(async (tx) => {
     const { openingStock, minAlertLevel, maxCapacity, ...productData } = parsed.data;
     const created = await tx.product.create({ data: { ...productData, organizationId: req.user!.organizationId } });
-    const warehouse = await tx.warehouse.findFirst({ where: { organizationId: req.user!.organizationId }, orderBy: { priority: 'asc' } });
-    if (warehouse && (openingStock > 0 || minAlertLevel > 0 || maxCapacity)) await tx.stockBalance.create({ data: { warehouseId: warehouse.id, productId: created.id, onHand: openingStock, reserved: 0, minAlertLevel, maxCapacity: maxCapacity ?? null } });
+    const needsStockBalance = !productData.recurring && (openingStock > 0 || minAlertLevel > 0 || maxCapacity);
+    if (needsStockBalance) {
+      const warehouse = await tx.warehouse.findFirst({ where: { organizationId: req.user!.organizationId }, orderBy: { priority: 'asc' } })
+        ?? await tx.warehouse.upsert({
+          where: { organizationId_name: { organizationId: req.user!.organizationId, name: 'Main Warehouse' } },
+          update: {},
+          create: { organizationId: req.user!.organizationId, name: 'Main Warehouse', priority: 1, shippingCost: 0 },
+        });
+      await tx.stockBalance.upsert({
+        where: { warehouseId_productId: { warehouseId: warehouse.id, productId: created.id } },
+        update: { onHand: openingStock, reserved: 0, minAlertLevel, maxCapacity: maxCapacity ?? null },
+        create: { warehouseId: warehouse.id, productId: created.id, onHand: openingStock, reserved: 0, minAlertLevel, maxCapacity: maxCapacity ?? null },
+      });
+    }
     await audit(tx, req, 'PRODUCT_CREATED', 'Product', created.id);
     return tx.product.findUniqueOrThrow({ where: { id: created.id }, include: { stocks: { include: { warehouse: true } } } });
   });
