@@ -67,11 +67,14 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  assets:
+    - assets/branding/dealos_logo.png
+
 flutter_launcher_icons:
   android: true
   ios: true
   image_path: assets/branding/dealos_icon_1024.png
-  adaptive_icon_background: "#171713"
+  adaptive_icon_background: "#151B2B"
   adaptive_icon_foreground: assets/branding/dealos_icon_1024.png
   remove_alpha_ios: true
 

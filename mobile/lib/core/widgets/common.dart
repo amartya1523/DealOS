@@ -31,57 +31,25 @@ class DealOsMark extends StatelessWidget {
   final bool light;
 
   @override
-  Widget build(BuildContext context) => Semantics(
-    label: 'DealOS',
-    header: true,
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [DealOsColors.blue, DealOsColors.violet],
-            ),
-            borderRadius: BorderRadius.circular(11),
-            boxShadow: [
-              BoxShadow(
-                color: DealOsColors.blue.withValues(alpha: .22),
-                blurRadius: 12,
-                offset: const Offset(0, 5),
-              ),
-            ],
-          ),
-          alignment: Alignment.center,
-          child: const Text(
-            'D',
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w900,
-              fontSize: 18,
-            ),
-          ),
+  Widget build(BuildContext context) {
+    final useLight = light || Theme.of(context).brightness == Brightness.dark;
+    return Semantics(
+      label: 'DealOS',
+      header: true,
+      child: SizedBox(
+        width: compact ? 92 : 132,
+        height: compact ? 40 : 56,
+        child: Image.asset(
+          'assets/branding/dealos_logo.png',
+          fit: BoxFit.contain,
+          filterQuality: FilterQuality.high,
+          color: useLight ? const Color(0xFFF7F4EC) : null,
+          colorBlendMode: useLight ? BlendMode.srcIn : null,
+          excludeFromSemantics: true,
         ),
-        if (!compact) ...[
-          const SizedBox(width: 10),
-          Text(
-            'DealOS',
-            style: TextStyle(
-              color: light
-                  ? Colors.white
-                  : Theme.of(context).colorScheme.onSurface,
-              fontSize: 21,
-              letterSpacing: -.7,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ],
-    ),
-  );
+      ),
+    );
+  }
 }
 
 class SectionHeader extends StatelessWidget {
