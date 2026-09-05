@@ -71,7 +71,6 @@ void main() {
       ),
     );
 
-    expect(find.text('Platform Owner sign in'), findsNothing);
     await tester.tap(find.text('Customer portal'));
     await tester.pump();
 
@@ -80,6 +79,7 @@ void main() {
     expect(find.text('Password'), findsNothing);
     expect(find.text('Continue with Google'), findsOneWidget);
     expect(find.text('Email ID must match the invitation'), findsOneWidget);
+    expect(find.byTooltip('Back to login options'), findsOneWidget);
 
     await tester.enterText(find.byType(TextFormField), 'buyer@vertex.test');
     await tester.pump();
@@ -90,6 +90,13 @@ void main() {
       ),
     );
     expect(button.onPressed, isNotNull);
+
+    await tester.tap(find.byTooltip('Back to login options'));
+    await tester.pump();
+    expect(find.text('SECURE DEAL ROOM'), findsNothing);
+    expect(find.text('Your deals, moving forward.'), findsOneWidget);
+    expect(find.text('Password'), findsOneWidget);
+    expect(find.text('Customer portal'), findsOneWidget);
   });
 
   testWidgets('customer messages and profile mirror website portal modules', (

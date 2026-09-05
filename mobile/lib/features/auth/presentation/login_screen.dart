@@ -73,9 +73,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Align(
-                        alignment: Alignment.centerLeft,
-                        child: DealOsMark(),
+                      Row(
+                        children: [
+                          if (_customer) ...[
+                            IconButton(
+                              onPressed: session.busy
+                                  ? null
+                                  : () => _switchMode(_LoginMode.organization),
+                              icon: const Icon(Icons.arrow_back_rounded),
+                              tooltip: 'Back to login options',
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                          const DealOsMark(),
+                        ],
                       ),
                       const SizedBox(height: 30),
                       if (_customer) ...[
