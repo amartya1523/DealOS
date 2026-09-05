@@ -77,7 +77,7 @@ async function main() {
   assert.equal(await db.fulfillment.count({ where: { orderId: rollbackOrder.id } }), 0, 'forced failure must not persist fulfillment');
   await db.$executeRawUnsafe(`DROP TRIGGER "force_reservation_failure" ON "${schema}"."Reservation"`);
   await db.$executeRawUnsafe(`DROP FUNCTION "${schema}"."fail_second_reservation"()`);
-  const manualResult = await db.$transaction((tx) => reserveStock(tx, { organizationId: organization.id, actorId: actor.id, orderId: rollbackOrder.id, idempotencyKey: 'pg-manual-reservation', mode: 'MANUAL', split: rollbackPreview.split.split.map((row: any) => ({ orderLineId: row.orderLineId, warehouseId: row.warehouseId, quantity: row.quantity })), reason: 'Use both regional warehouses for this order.' }));
+  const manualResult: any = await db.$transaction((tx) => reserveStock(tx, { organizationId: organization.id, actorId: actor.id, orderId: rollbackOrder.id, idempotencyKey: 'pg-manual-reservation', mode: 'MANUAL', split: rollbackPreview.split.split.map((row: any) => ({ orderLineId: row.orderLineId, warehouseId: row.warehouseId, quantity: row.quantity })), reason: 'Use both regional warehouses for this order.' }));
   assert.equal(manualResult.overridden, true, 'manual reservation must be marked as overridden');
   assert.equal((await db.auditEvent.findFirstOrThrow({ where: { resource: 'Order', resourceId: rollbackOrder.id, action: 'STOCK_ALLOCATION_OVERRIDDEN' } })).reason, 'Use both regional warehouses for this order.', 'manual reason must be retained in audit');
 
