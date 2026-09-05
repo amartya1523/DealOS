@@ -63,6 +63,36 @@ describe("DealOS public routes", () => {
     );
     expect(screen.getByLabelText("Email or user ID")).toHaveValue("test@example.com");
   });
+  it("offers customer email and Google sign-in and opens all email-linked documents", async () => {
+    window.history.replaceState({}, "", "/customer");
+    const workspace = {
+      user:{id:'customer-user',name:'Buyer User',email:'buyer@example.com',role:'CUSTOMER',customerId:'customer-1',moduleAccess:[],actorType:'USER',platformSuperAdmin:false,viewContext:null},
+      organization:{id:'org-1',name:'Acme'},users:[],customers:[],products:[],policies:[],warehouses:[],subscriptions:[],alerts:[],audits:[],
+      quotes:[{id:'quote-1',number:'Q-EMAIL-1',customer:'Buyer Company',customerTier:'Gold',stage:'APPROVED',version:1,orderDiscount:0,total:1180,margin:0,riskScore:0,updatedAt:'2026-09-05T00:00:00.000Z',lines:[],approvals:[],negotiation:[],invoices:[]}],
+      invoices:[{id:'invoice-1',number:'INV-EMAIL-1',customer:'Buyer Company',amount:1180,paidAmount:0,state:'UNPAID',dueAt:'2026-09-20T00:00:00.000Z',lines:[],payments:[]}],
+    };
+    let authenticated = false;
+    fetchMock.mockImplementation((url:string, options?:RequestInit) => Promise.resolve({
+      ok: url.endsWith('/auth/google/config') || (url.endsWith('/auth/customer/login') && options?.method==='POST') || (authenticated && (url.endsWith('/auth/me') || url.endsWith('/workspace'))),
+      json: async()=>{
+        if(url.endsWith('/auth/google/config'))return {success:true,data:{enabled:false,clientId:null}};
+        if(url.endsWith('/auth/customer/login')){authenticated=true;return {success:true,data:{role:'CUSTOMER',destination:'/customer'}};}
+        if(authenticated&&url.endsWith('/auth/me'))return {success:true,data:workspace.user};
+        if(authenticated&&url.endsWith('/workspace'))return {success:true,data:workspace};
+        return {success:false,error:{message:'Please sign in'}};
+      },
+    }));
+    render(<App/>);
+    expect(await screen.findByRole('button',{name:'Sign in with Email ID'})).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'Continue with Google Sign-In ID'})).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Customer Email ID'),{target:{value:'buyer@example.com'}});
+    fireEvent.change(screen.getByLabelText('Password'),{target:{value:'CustomerPass12!'}});
+    fireEvent.click(screen.getByRole('button',{name:'Sign in with Email ID'}));
+    expect((await screen.findAllByText('Q-EMAIL-1')).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button',{name:/Invoices/}));
+    expect((await screen.findAllByText('INV-EMAIL-1')).length).toBeGreaterThan(0);
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/auth/customer/login',expect.objectContaining({method:'POST',body:JSON.stringify({email:'buyer@example.com',password:'CustomerPass12!'})}));
+  });
   it("creates an organization admin and opens the isolated admin dashboard", async () => {
     window.history.replaceState({}, "", "/sign-up");
     fetchMock.mockImplementation((url: string) =>

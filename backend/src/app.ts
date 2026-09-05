@@ -346,19 +346,40 @@ app.post('/api/v1/auth/google/login', async (req: AuthRequest, res) => {
 app.post('/api/v1/auth/google/customer', async (req: AuthRequest, res) => {
   if (req.headers.origin !== allowedOrigin) return fail(req, res, 403, 'ORIGIN_INVALID', 'This request origin is not allowed.');
   if (!googleClientId) return fail(req, res, 503, 'AUTH_PROVIDER_UNAVAILABLE', 'Google sign-in is not configured.');
-  const parsed = z.object({ credential: z.string().trim().min(1).max(8192), email: z.string().trim().email().toLowerCase() }).strict().safeParse(req.body);
-  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter the invited email and continue with Google.');
+  const parsed = z.object({ credential: z.string().trim().min(1).max(8192), email: z.string().trim().email().toLowerCase().optional() }).strict().safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'A valid Google credential is required.');
   try {
     const profile = await verifyGoogleSignupCredential(parsed.data.credential, googleClientId);
-    if (profile.email !== parsed.data.email) return fail(req, res, 401, 'EMAIL_MISMATCH', `Google signed in as ${profile.email}. Enter that Email ID above or choose the Google account for ${parsed.data.email}.`);
+    if (parsed.data.email && profile.email !== parsed.data.email) return fail(req, res, 401, 'EMAIL_MISMATCH', `Google signed in as ${profile.email}. Enter that Email ID above or choose the Google account for ${parsed.data.email}.`);
     const user = await acceptCustomerGoogleInvitation(profile);
-    if (!user) return fail(req, res, 401, 'INVITATION_REQUIRED', 'No active customer invitation was found for this email. Ask the sender to invite this address again.');
+    if (!user) return fail(req, res, 401, 'CUSTOMER_ACCESS_NOT_FOUND', 'No shared quotation, invoice, or active customer invitation was found for this Google email.');
     const token = await startSession(user, res);
     return ok(req, res, { id: user.id, name: user.name, email: user.email, role: user.role, destination: '/customer', csrfToken: csrfForToken(token) });
   } catch (error) {
     if (res.headersSent) return;
     return fail(req, res, 401, 'INVALID_GOOGLE_CREDENTIAL', 'Google could not verify this customer sign-in.');
   }
+});
+
+app.post('/api/v1/auth/customer/login', async (req: AuthRequest, res) => {
+  if (req.headers.origin !== allowedOrigin) return fail(req, res, 403, 'ORIGIN_INVALID', 'This request origin is not allowed.');
+  const key = `customer:${req.ip}:${String(req.body?.email ?? '').toLowerCase()}`;
+  const attempt = loginAttempts.get(key);
+  if (attempt && attempt.resetAt > Date.now() && attempt.count >= 10) {
+    res.setHeader('Retry-After', Math.ceil((attempt.resetAt - Date.now()) / 1000));
+    return fail(req, res, 429, 'RATE_LIMITED', 'Too many login attempts. Try again later.');
+  }
+  const parsed = z.object({ email: z.string().trim().email().toLowerCase(), password: z.string().min(8).max(128) }).strict().safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter a valid customer email and password.');
+  const user = await db.user.findUnique({ where: { email: parsed.data.email } });
+  if (!user || user.role !== 'CUSTOMER' || !user.customerId || !(await bcrypt.compare(parsed.data.password, user.passwordHash))) {
+    loginAttempts.set(key, { count: (attempt?.resetAt ?? 0) > Date.now() ? attempt!.count + 1 : 1, resetAt: Date.now() + 15 * 60_000 });
+    return fail(req, res, 401, 'INVALID_CUSTOMER_CREDENTIALS', 'Customer email or password is incorrect. You can also continue with Google.');
+  }
+  if (user.status !== 'ACTIVE') return fail(req, res, 403, 'ACCOUNT_INACTIVE', 'This customer account is not active. Continue with Google or ask the sender to share access again.');
+  loginAttempts.delete(key);
+  const token = await startSession(user, res);
+  return ok(req, res, { id: user.id, name: user.name, email: user.email, role: user.role, destination: '/customer', csrfToken: csrfForToken(token) });
 });
 
 app.post('/api/v1/auth/login', async (req: AuthRequest, res) => {

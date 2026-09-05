@@ -57,7 +57,7 @@ function GoogleAuth({ mode, organizationName = "", email = "", hideDivider = fal
           try {
             await request(`/auth/google/${mode}`, {
               method: "POST",
-              body: JSON.stringify(mode === "signup" ? { credential, organizationName } : mode === "customer" ? { credential, email } : { credential }),
+              body: JSON.stringify(mode === "signup" ? { credential, organizationName } : mode === "customer" ? { credential, ...(email ? { email } : {}) } : { credential }),
             });
             await onComplete();
           } catch (error) {
@@ -128,26 +128,42 @@ function GoogleAuth({ mode, organizationName = "", email = "", hideDivider = fal
 
 export function CustomerAuthPage({ onSuccess, signedInRole }: { onSuccess: () => void | Promise<void>; signedInRole?: string | null }) {
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [visible, setVisible] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const ready = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await request("/auth/customer/login", { method: "POST", body: JSON.stringify({ email: email.trim().toLowerCase(), password }) });
+      await onSuccess();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Customer sign-in could not be completed.");
+    } finally {
+      setBusy(false);
+    }
+  }
   return <main className="customer-auth-page">
     <div className="customer-auth-brand"><Brand/><span>Customer portal</span></div>
     <section className="customer-auth-card">
       <div className="customer-auth-mark"><ShieldCheck/></div>
       <span className="section-label">SECURE DEAL ROOM</span>
       <h1>Everything shared with you, in one place.</h1>
-      <p>Enter your customer Email ID, then continue with the same Google Sign-In ID. DealOS opens quotations and invoices only after both emails match.</p>
-      {signedInRole&&signedInRole!=="CUSTOMER"&&<div className="auth-error" role="alert">This session belongs to an internal workspace. Sign out there before entering the customer portal.</div>}
-      <label className="customer-email-field">Customer Email ID<input type="email" autoComplete="email" placeholder="you@company.com" value={email} onChange={event=>{setEmail(event.target.value);setError("")}}/></label>
-      {ready&&<small className="customer-email-hint">Continue with the Google account for {email.trim().toLowerCase()}.</small>}
-      <div className={!ready?"customer-google-disabled":""}>
-        <GoogleAuth mode="customer" email={email.trim().toLowerCase()} hideDivider onComplete={onSuccess} onError={setError}/>
-      </div>
-      {!ready&&<small>Enter your Email ID to enable Google sign-in.</small>}
+      <p>Sign in with your customer Email ID or Google. Every quotation shared with that email and every invoice issued to it will appear automatically.</p>
+      {signedInRole&&signedInRole!=="CUSTOMER"&&<div className="auth-error" role="status">Signing in below will switch this browser from the internal workspace to the customer portal.</div>}
+      <form className="customer-login-form" onSubmit={submit}>
+        <label className="customer-email-field">Customer Email ID<input required type="email" autoComplete="email" placeholder="you@company.com" value={email} onChange={event=>{setEmail(event.target.value);setError("")}}/></label>
+        <label className="customer-email-field">Password<span className="customer-password-field"><input required minLength={8} type={visible?"text":"password"} autoComplete="current-password" placeholder="Enter your password" value={password} onChange={event=>{setPassword(event.target.value);setError("")}}/><button type="button" aria-label={visible?"Hide password":"Show password"} onClick={()=>setVisible(!visible)}>{visible?<EyeOff/>:<Eye/>}</button></span></label>
+        <button className="customer-email-submit" disabled={busy}>{busy?"Signing in…":"Sign in with Email ID"}</button>
+      </form>
+      <div className="customer-auth-divider"><span>or continue with Google</span></div>
+      <GoogleAuth mode="customer" email={email.trim().toLowerCase()} hideDivider onComplete={onSuccess} onError={setError}/>
       {error&&<div className="auth-error" role="alert">{error}</div>}
-      <div className="customer-auth-trust"><span><Check/>Email ID must match Google</span><span><LockKeyhole/>Customer-scoped access</span></div>
+      <div className="customer-auth-trust"><span><Check/>Documents matched by verified email</span><span><LockKeyhole/>Customer-scoped access</span></div>
     </section>
-    <footer>Invitations are issued by the business that shared a quotation or invoice with you.</footer>
+    <footer>Access is available after a business shares a quotation, issues an invoice, or sends a portal invitation.</footer>
   </main>;
 }
 
