@@ -145,6 +145,8 @@ The backend reads the following values from `backend/.env`:
 | `PLATFORM_OWNER_LOGIN_ID` | Platform Owner login ID | Set explicitly; no secure default |
 | `PLATFORM_OWNER_PASSWORD` | Platform Owner password (minimum 16 characters) | Set explicitly; no secure default |
 | `GOOGLE_CLIENT_ID` | Google OAuth web client ID | Required for Google authentication |
+| `GOOGLE_IOS_CLIENT_ID` | Registered iOS OAuth client ID accepted by backend verification | Required for iOS customer authentication |
+| `GOOGLE_ANDROID_CLIENT_ID` | Registered Android OAuth client ID accepted by backend verification | Required when Android issues tokens to its native audience |
 | `NODE_ENV` | Runtime environment | `development` |
 
 Never commit real credentials or production secrets.
@@ -162,7 +164,8 @@ For Google authentication:
 1. Create a Web application OAuth client in Google Cloud Console.
 2. Add `http://localhost:5173` as an authorized JavaScript origin.
 3. Set the client ID as `GOOGLE_CLIENT_ID` in `backend/.env`.
-4. Restart the backend and frontend development servers.
+4. Create native OAuth clients in the same Google project and set their IDs as `GOOGLE_IOS_CLIENT_ID` and `GOOGLE_ANDROID_CLIENT_ID` when those apps are enabled.
+5. Restart the backend and frontend development servers.
 
 Google identity tokens are verified by the backend before a session is created.
 

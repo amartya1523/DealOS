@@ -27,6 +27,11 @@ class DomainError extends Error {
 const cookieName = process.env.SESSION_COOKIE_NAME ?? 'dealos_session';
 const allowedOrigin = process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173';
 const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim() ?? '';
+const googleClientAudiences = [
+  googleClientId,
+  process.env.GOOGLE_IOS_CLIENT_ID?.trim() ?? '',
+  process.env.GOOGLE_ANDROID_CLIENT_ID?.trim() ?? '',
+].filter((clientId, index, values) => clientId.length > 0 && values.indexOf(clientId) === index);
 const modules = ['dashboard','quotations','approvals','fulfillment','subscriptions','invoices','health','reports','products','customers','policies'] as const;
 const provisionableRoles = ['REP','MANAGER','FINANCE'] as const;
 const roleModulePresets: Record<typeof provisionableRoles[number], Array<typeof modules[number]>> = {
@@ -321,7 +326,7 @@ app.post('/api/v1/auth/google/signup', async (req: AuthRequest, res) => {
   const parsed = googleSignupSchema.safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'A valid Google credential is required.');
   try {
-    const profile = await verifyGoogleSignupCredential(parsed.data.credential, googleClientId);
+    const profile = await verifyGoogleSignupCredential(parsed.data.credential, googleClientAudiences);
     const organization = await createGoogleOrganizationAdmin(profile, parsed.data.organizationName);
     if (!organization) return fail(req, res, 409, 'ACCOUNT_EXISTS', 'An account already exists for this Google email. Sign in instead.');
     const token = await startSession(organization.users[0]!, res);
@@ -335,7 +340,7 @@ app.post('/api/v1/auth/google/login', async (req: AuthRequest, res) => {
   const parsed = z.object({ credential: z.string().trim().min(1).max(8192) }).strict().safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'A valid Google credential is required.');
   try {
-    const profile = await verifyGoogleSignupCredential(parsed.data.credential, googleClientId);
+    const profile = await verifyGoogleSignupCredential(parsed.data.credential, googleClientAudiences);
     const user = await findOrLinkGoogleLoginUser(profile);
     if (!user) return fail(req, res, 401, 'INVALID_CREDENTIALS', 'No active workspace was found for this Google account. Create an account first or sign in with work email.');
     const token = await startSession(user, res);
@@ -349,7 +354,7 @@ app.post('/api/v1/auth/google/customer', async (req: AuthRequest, res) => {
   const parsed = z.object({ credential: z.string().trim().min(1).max(8192), email: z.string().trim().email().toLowerCase() }).strict().safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter the invited email and continue with Google.');
   try {
-    const profile = await verifyGoogleSignupCredential(parsed.data.credential, googleClientId);
+    const profile = await verifyGoogleSignupCredential(parsed.data.credential, googleClientAudiences);
     if (profile.email !== parsed.data.email) return fail(req, res, 401, 'EMAIL_MISMATCH', `Google signed in as ${profile.email}. Enter that Email ID above or choose the Google account for ${parsed.data.email}.`);
     const user = await acceptCustomerGoogleInvitation(profile);
     if (!user) return fail(req, res, 401, 'INVITATION_REQUIRED', 'No active customer invitation was found for this email. Ask the sender to invite this address again.');

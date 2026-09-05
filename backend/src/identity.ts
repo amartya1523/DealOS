@@ -52,8 +52,8 @@ export async function createOrganizationAdmin(input: z.infer<typeof signupSchema
   return createAdminOrganization({ organizationName: input.organizationName, displayName: input.displayName, email: input.email, passwordHash });
 }
 
-export async function verifyGoogleSignupCredential(credential: string, clientId: string): Promise<GoogleSignupProfile> {
-  const ticket = await googleClient.verifyIdToken({ idToken: credential, audience: clientId });
+export async function verifyGoogleSignupCredential(credential: string, clientIds: string | string[]): Promise<GoogleSignupProfile> {
+  const ticket = await googleClient.verifyIdToken({ idToken: credential, audience: clientIds });
   const payload = ticket.getPayload();
   if (!payload?.sub || !payload.email || payload.email_verified !== true) {
     throw new Error('Google did not return a verified email address.');

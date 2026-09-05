@@ -24,7 +24,7 @@ Subscriptions, approvals, products, costs, margin, internal risk notes, policy d
 
 ## Native Google configuration
 
-The backend `GOOGLE_CLIENT_ID` is the web OAuth client ID used as the ID-token audience and is returned by `/auth/google/config` as the mobile `serverClientId`.
+The backend `GOOGLE_CLIENT_ID` is the web OAuth client ID returned by `/auth/google/config` as the mobile `serverClientId`. `GOOGLE_IOS_CLIENT_ID` and `GOOGLE_ANDROID_CLIENT_ID` declare the other native audiences the backend is allowed to verify. Only explicitly configured clients are trusted.
 
 For Android, register these package names as needed and add the signing certificate SHA fingerprints in the same Google project:
 
