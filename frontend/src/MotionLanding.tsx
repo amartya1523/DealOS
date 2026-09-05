@@ -68,7 +68,7 @@ export function Landing(){
     setActive(index);
     const sequence=scrollSequence.current;
     if(sequence){window.scrollTo({top:sequence.start+(sequence.end-sequence.start)*index/3,behavior:'auto'})}
-    else document.getElementById(`chapter-${index}`)?.scrollIntoView({behavior:paused?'auto':'smooth',block:'center'});
+    else { const chapter=document.getElementById(`chapter-${index}`); if(typeof chapter?.scrollIntoView==='function') chapter.scrollIntoView({behavior:paused?'auto':'smooth',block:'center'}); }
   }
   return <div ref={root} className={`cinematic ${paused?'motion-paused':''}`}>
     <a className="skip-link" href="#main">Skip to content</a>

@@ -1,5 +1,7 @@
 # DealOS design and workflow verification
 
+> **Repair update (5 September 2026):** the reproducible backend defects in this report now pass 44/44 isolated workflow checks while preserving the original 24 passing cases. See [REPAIR-REPORT.md](REPAIR-REPORT.md) and [QA-REGRESSION-RESULTS.md](QA-REGRESSION-RESULTS.md). This historical report remains unchanged below so the original findings are auditable.
+
 **Audit date:** 5 September 2026 • **Verdict:** Functional foundation present; end-to-end acceptance fails.
 
 The main screens and several basic transitions work, but the application cannot yet be treated as a reliably connected quotation-to-cash system. Customer isolation, commercial recalculation, approval history, stock reservation, and payment consistency have reproducible defects. Several visible controls are placeholders.

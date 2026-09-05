@@ -28,12 +28,12 @@ describe("DealOS public routes", () => {
   it("renders the landing page and interactive workflow", () => {
     render(<App />);
     expect(
-      screen.getByRole("heading", { name: /Less friction/ }),
+      screen.getByRole("heading", { name: /Every deal\. In motion\./ }),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: /Approve/ }));
-    expect(screen.getByRole("tabpanel")).toHaveTextContent(
-      "Make every decision accountable.",
-    );
+    const approve = screen.getByRole("button", { name: /Explore Approve/ });
+    fireEvent.click(approve);
+    expect(approve).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("heading", { name: /Find your green light/ })).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Make your next move" }),
     ).toHaveAttribute("href", "/sign-up");

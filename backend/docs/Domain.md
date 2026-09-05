@@ -210,3 +210,12 @@ Condition: request suggestions. Behavior: rank active valid products by co-purch
 
 ### BR-020 — Scope-preserving reporting [C/I]
 Condition: report/export. Behavior: apply role/team/customer constraints before grouping; reuse report calculation; group incompatible currency/cadence. Reason: exports must not widen access or misstate revenue. Owner: reporting; W-10. Edge cases: untrusted spreadsheet strings beginning `=`, `+`, `-`, `@` are escaped; export dates/filters shown.
+
+## Implemented audit-repair decisions — 2026-09-05
+
+- [Inferred] Customer ownership is now a real foreign key; portal resource misses outside that customer return 404.
+- [Proposed, existing documented default] finance routing uses the published tier policy's finance threshold for worst/weighted excess and a 12% minimum margin floor. Any excess still requires Manager; a low-margin quote can require Finance without Manager.
+- [Inferred] Customer comments never mutate terms. A counter-discount is an open proposal; owner adoption creates a new calculated draft revision.
+- [Inferred] Confirmation requires the current sent and approved revision and atomically creates acceptance/order/billing records. Retries return the existing order result.
+- [Proposed, existing documented default] generated invoice due date is acceptance plus 14 days until a configurable issue/due policy is introduced.
+- [Proposed] recurring calendar display uses UTC anchor-day month advancement (1/3/12 months for Monthly/Quarterly/Yearly). Proration/credit policy remains unimplemented pending the documented business decision.

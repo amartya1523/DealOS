@@ -137,3 +137,7 @@ The user requires application content inside `frontend/` and `backend/`. Each ow
 ## Confirmed visual expansion — 2026-09-05
 
 The user explicitly requested an English landing page, polished site-wide visuals, parallax and scroll animation inspired by the supplied GSAP reference, and sign-in/sign-up routes. This adds the public landing page alongside the existing application. Confirmed: retain all business screens. Inferred design choices: forest green, lime and warm paper, Manrope typography, original product illustrations, GSAP ScrollTrigger, reduced-motion support, and mobile layouts. Public preview values are illustrative, never live workspace metrics.
+
+## Confirmed audit repair instruction — 2026-09-05
+
+The user instructed implementation of the backend audit findings and supplied a QA gate requiring preservation of 24 previously passing cases. The repair preserves those cases and separately validates formerly failing customer isolation, commercial recalculation, approval history, owner scope, inventory retry/duplicate demand, payment retry/concurrency, cadence/tax, and downstream billing. Larger unimplemented product verticals remain governed by the open business decisions above and are not mislabeled as completed by this repair.
