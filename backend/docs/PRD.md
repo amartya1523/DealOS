@@ -63,7 +63,7 @@ Confidence means confidence in the interpretation, not implementation status. C 
 | R-023 | Quote versioning and approval/acceptance binding to exact terms | I | Prevent negotiation from bypassing approvals | High |
 | R-024 | Atomic stock reservation and duplicate prevention for billing/payment | I | Prevent overselling and duplicate money movements | High |
 | R-025 | Product cost snapshots and cadence-specific margins | I | Required to compute meaningful margin impact | High |
-| R-026 | Single organization with assigned teams and one configured transaction currency per quote | P | Smallest coherent initial deployment; no multi-company requirement | High |
+| R-026 | Multiple isolated organizations with one configured transaction currency per quote | C | Explicit Platform Owner direction supersedes the earlier single-organization proposal | High |
 | R-027 | Opaque database-backed cookie sessions with CSRF protection | P | Revocable browser sessions fit the same-origin deployment | High |
 | R-028 | Approval formula combines worst-line excess and value-weighted excess | P | Brief gives examples but no mathematical formula; see BR-004 | Medium |
 | R-029 | Day-based proration using actual billing-period length | P | Exact proration convention not specified | Medium |
@@ -72,6 +72,10 @@ Confidence means confidence in the interpretation, not implementation status. C 
 | R-032 | In-app nudges with durable PostgreSQL job records; no external messages by default | P | Meets alert-action flow without pretending email/SMS is configured | High |
 | R-033 | Single service deploy, no Redis/Kafka/microservices | P | Low operational complexity; no requirement justifies them | High |
 | R-034 | Offer verified Google account creation only on the public sign-up page; keep sign-in email/password only | C | User request, 2026-09-05 | High |
+| R-035 | Dedicated environment-authenticated Platform Owner, separate from every organization user and role | C | Corrected explicit Super Admin direction | High |
+| R-036 | Global organization/member control plane with live metrics, search, status, paging and privileged audit | C | Explicit Super Admin request | High |
+| R-037 | Read-only View As Organization/User retains the real owner actor and blocks writes | C | Explicit Super Admin request | High |
+| R-038 | Organization credentials can never authenticate to the owner console | C | Corrected explicit Super Admin direction | High |
 
 ## Actors, outcomes and access
 
@@ -80,6 +84,7 @@ Confidence means confidence in the interpretation, not implementation status. C 
 - Finance/Operations: second-level discount approval, stock allocation, billing changes, payment recording and credit notes.
 - Customer: only quotations/orders/invoices associated with their linked customer account; see commercial prices but not internal costs, margins, risk or reviewer notes.
 - Admin: activate identities, manage configuration and organization reporting. Admin status alone does not bypass approval segregation; a separately assigned reviewer role is required.
+- Platform Super Admin / Platform Owner: authenticate only at `/login/super-admin` with server environment credentials, administer all organizations from a separate global control plane, and enter explicitly read-only tenant/user contexts. This identity is never an organization user or role.
 
 Multi-role internal users are supported; permissions compose, but self-approval restrictions still apply.
 

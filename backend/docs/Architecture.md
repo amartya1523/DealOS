@@ -1,6 +1,6 @@
 # DealOS — Architecture baseline
 
-Status: architecture and repository setup only. This file follows the master's required 22-section order. Supporting documents provide implementation-level contracts. No application, API, migration or deployed service is claimed to exist yet.
+Status: living architecture contract with a functional React/Express/Prisma slice implemented locally. Sections describing the larger quotation-to-cash model remain target architecture; current implementation and limitations are recorded in `memory.me`.
 
 ## 1. Problem Interpretation
 
@@ -8,11 +8,11 @@ DealOS coordinates B2B quotation preparation, discount review, negotiation, ware
 
 ## 2. Confirmed / Inferred / Proposed Requirements
 
-The R-001–R-033 register in [PRD.md](PRD.md#requirements-classification) is authoritative for classification. Confirmed capabilities come from the PDF and 18-screen board. Versioning, reservations and idempotency are inferred correctness needs. Session mechanism, aggregate risk formula, billing convention and deployment are proposed technical decisions. Proposed decisions remain marked when implemented; new requirements need an entry rather than a silent addition.
+The R-001–R-038 register in [PRD.md](PRD.md#requirements-classification) is authoritative for classification. Confirmed capabilities come from the PDF, 18-screen board and the user's Platform Owner direction. Versioning, reservations and idempotency are inferred correctness needs. Session mechanism, aggregate risk formula, billing convention and deployment are proposed technical decisions. Proposed decisions remain marked when implemented; new requirements need an entry rather than a silent addition.
 
 ## 3. Actors and Stakeholders
 
-Five explicit roles: Sales Rep, Sales Manager, Finance/Operations, Customer and Admin. The [actor matrix](Domain.md#actor-matrix) specifies decisions, information visibility and restrictions. Customer purchasing teams, warehouse and financial leadership are stakeholders; they do not automatically become new software roles. A scheduler is a noninteractive system actor, not an account with a reusable password.
+Five organization roles are explicit: Sales Rep, Sales Manager, Finance/Operations, Customer and Admin. The independent Platform Owner is a separate environment-authenticated actor, not a sixth organization role. The [actor matrix](Domain.md#actor-matrix) specifies decisions, information visibility and restrictions. A scheduler is a noninteractive system actor, not an account with a reusable password.
 
 ## 4. Core Workflows
 
@@ -142,7 +142,7 @@ Structured JSON logs: timestamp, level, request ID, route, status, duration and 
 
 Prisma is the proposed ORM; PostgreSQL remains the only business datastore. [Database.md](Database.md) specifies tables, typed fields, ownership, relationships, constraints, indexes, transactions and deletion. Fixed-precision numeric fields, `timestamptz`, foreign keys, immutable submitted snapshots and uniqueness constraints are mandatory. Advanced check/partial-index/locking constraints can use reviewed SQL migrations; ORM convenience must not weaken integrity.
 
-Do not maintain authoritative totals in browser storage. Query caching is ephemeral. Database migrations are committed and applied separately from API startup. Baseline schema is **designed, not migrated**, in this task.
+Do not maintain authoritative totals in browser storage. Query caching is ephemeral. Database migrations are committed and applied separately from API startup. Five migrations currently implement the functional subset described in [Database.md](Database.md#current-database-state); the larger baseline remains a target contract.
 
 ## 12. REST API Architecture
 
@@ -181,7 +181,7 @@ Mutations require session and CSRF token bound to session plus Origin validation
 
 Helmet, bounded JSON bodies (proposed 256 KiB, no arbitrary uploads), rate limits on auth and expensive endpoints, validation, parametrized queries and redacted logs. React escapes text; no raw HTML comments. Spreadsheet exports neutralize formula injection. Browser cookies never enter localStorage. Password reset/email delivery is an explicit future integration, not a fake success form.
 
-Production Admin bootstrap is a one-time controlled command using environment input and no default production password. Database application role excludes schema DDL; migration role is separate. Audit tables are append-only through application permissions/DB policy where practical. Backups must be encrypted and restore-tested.
+Production Platform Owner credentials come from deployment secrets with no code default; organization Admins are ordinary tenant-scoped users. The database application role excludes schema DDL; migration role is separate. Audit tables are append-only through application permissions/DB policy where practical. Backups must be encrypted and restore-tested.
 
 ## 16. Error / Failure Model
 
@@ -317,9 +317,9 @@ Current reusable context is project-specific. For the next problem, follow the s
 
 ## 22. Architecture Consistency Review
 
-[Traceability.md](Traceability.md) links every confirmed requirement to workflow, module, persistence, endpoint/screen and phase. Review results:
+The mappings below summarize requirement-to-implementation traceability. Review results:
 
-- Requirements → workflows: every R-001–R-022 has treatment, including signup, replenishment configuration, refunds as credit obligations, exports and payment recording.
+- Requirements → workflows: R-001–R-033 retain their phased treatment; R-034–R-038 are implemented through the independent environment-authenticated owner identity, organization context, read-only View As and privileged audit described below.
 - Workflows → modules: W-01–W-10 have owning services; audit/idempotency are infrastructure.
 - Domain → database: commercial revisions, variant attributes, policy versions, proposal lines, reservations, recurring periods and payment allocations are modeled.
 - Database → backend: table ownership is explicit; transactional mutations use owning repositories and shared transaction context.
@@ -337,6 +337,21 @@ Current reusable context is project-specific. For the next problem, follow the s
 5. Portal invoice visibility is inferred from quotation-to-payment context; document any customer-account access changes.
 
 These do not block the architecture package. They must not be silently represented as sourced requirements. No external deployment, payment-provider integration, source export or business-data mutation has occurred in this phase.
+
+## Platform Super Admin implementation — 2026-09-05
+
+The supplied control-plane brief was written for Odoo, but this repository contains no Odoo runtime, addons, models, ACL CSV files or company context. DealOS is a React/Express/Prisma modular monolith. The compatible design implements the same authorization guarantees using native boundaries instead of inventing an unusable Odoo addon. The initially implemented database-user platform group was superseded after the owner clarified that no organization user may authenticate as Super Admin:
+
+- The Platform Owner exists only as `PLATFORM_OWNER_LOGIN_ID` and `PLATFORM_OWNER_PASSWORD` in the server environment. It is not a `User`, `OrganizationMembership` or business `Role`.
+- `backend/src/env.ts` loads `backend/.env` relative to the backend module, independent of the command's working directory. Deployment-injected variables are not overwritten. The login ID must be non-empty and the owner password must contain at least 16 characters.
+- `PlatformOwnerSession` stores a random opaque token hash, CSRF hash, configured login ID, four-hour expiry and optional View As context. Its HttpOnly cookie is separate from organization-user sessions, and each login path clears the other cookie.
+- `User.organizationId` remains the compatibility business-route scope from latest `main`, while `OrganizationMembership` provides the richer control-plane access class, business role and lifecycle status. Signup, generated-user creation, role changes and seed data keep both representations synchronized; every tenant-owned query is still constrained by server-resolved `organizationId`.
+- `backend/src/authorization.ts` is the centralized policy enforcement point. It accepts platform authority only from a valid `PlatformOwnerSession`, resolves the real owner/effective read-only identity and organization, rejects manipulated organization IDs, blocks suspended tenants and simulated-context writes, and validates same-origin CSRF tokens.
+- `backend/src/platform.ts` is the small allowlisted elevated service. It exposes only explicit organization, membership, account and View As operations. It does not expose arbitrary database access or any path for creating another Platform Owner.
+- `PrivilegedAudit` is append-only at the application surface. No update/delete route exists. Owner actions store the environment login ID rather than a user foreign key, plus safe allowlisted before/after values, optional simulated user, request ID, IP/user-agent metadata and success/failure.
+- `/login/super-admin` is a separate React login. Constant-time credential comparison and a five-failure/15-minute process-local throttle protect the endpoint. UI separation is supplemental: every platform endpoint requires the independent owner session server-side.
+
+There is no bootstrap or grant/revoke path for organization users. Production deployment should additionally use a secret manager instead of a filesystem `.env`, add proxy/distributed rate limiting, MFA, centralized security monitoring, database-level row security if the operational environment supports it, and an external email provider for invitation/reset delivery.
 
 ## Public frontend routes — 2026-09-05
 

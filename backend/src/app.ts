@@ -1,3 +1,4 @@
+import './env.js';
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import cors from 'cors';
@@ -8,8 +9,11 @@ import { z } from 'zod';
 import { db } from './db.js';
 import { createGoogleOrganizationAdmin, createOrganizationAdmin, googleSignupSchema, signupSchema, verifyGoogleSignupCredential } from './identity.js';
 import { allocateStock, billingSchedule, calculateQuote } from './rules.js';
+import { authenticate as authenticatePlatform, csrfCookieName, hashToken as hashPlatformToken, identityDto, platformSessionCookieName } from './authorization.js';
+import { platformRouter } from './platform.js';
+import { clearPlatformLoginFailures, platformLoginAllowed, platformOwnerCredentialsMatch, readPlatformOwnerCredentials, recordPlatformLoginFailure } from './platform-owner.js';
 
-type Actor = { id: string; name: string; email: string; loginId: string | null; role: string; customerId: string | null; organizationId: string; moduleAccess: string[]; csrfToken: string };
+type Actor = { id: string; name: string; email: string; loginId: string | null; role: string; customerId: string | null; organizationId: string; moduleAccess: string[]; csrfToken: string; actorType: 'USER' | 'PLATFORM_OWNER'; platformSuperAdmin: boolean; readOnlyView: boolean; organization: { id: string; name: string; status: string } | null; viewContext: { readOnly: true; organizationId: string; organizationName: string; simulatedUserId: string | null; realActor: { id: string; name: string } } | null };
 type AuthRequest = Request & { user?: Actor; requestId?: string };
 type Tx = Prisma.TransactionClient;
 
@@ -36,6 +40,7 @@ async function startSession(user: { id: string }, res: Response) {
   const token = crypto.randomBytes(32).toString('hex');
   await db.session.create({ data: { userId: user.id, tokenHash: hash(token), expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000) } });
   res.setHeader('Set-Cookie', `${cookieName}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=43200${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+  res.append('Set-Cookie', `${platformSessionCookieName}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);
   return token;
 }
 
@@ -50,11 +55,34 @@ app.use(cors({ origin: allowedOrigin, credentials: true }));
 app.use(express.json({ limit: '256kb' }));
 
 async function authenticate(req: AuthRequest, res: Response, next: NextFunction) {
-  const token = parseCookies(req.headers.cookie)[cookieName];
+  const cookies = parseCookies(req.headers.cookie);
+  const platformToken = cookies[platformSessionCookieName];
+  if (platformToken) {
+    const session = await db.platformOwnerSession.findUnique({ where: { tokenHash: hashPlatformToken(platformToken) } });
+    if (!session || session.expiresAt < new Date()) return fail(req, res, 401, 'PLATFORM_AUTH_REQUIRED', 'Sign in through the Platform Owner portal.');
+    const csrfToken = cookies[csrfCookieName] ?? '';
+    if (!csrfToken || hashPlatformToken(csrfToken) !== session.csrfHash) return fail(req, res, 401, 'PLATFORM_AUTH_REQUIRED', 'Refresh the Platform Owner session.');
+    const organization = session.viewAsOrganizationId ? await db.organization.findUnique({ where: { id: session.viewAsOrganizationId } }) : null;
+    if (session.viewAsOrganizationId && !organization) return fail(req, res, 409, 'VIEW_CONTEXT_INVALID', 'The simulated organization no longer exists. Exit View As mode.');
+    const simulated = session.viewAsUserId ? await db.user.findFirst({ where: { id: session.viewAsUserId, organizationId: session.viewAsOrganizationId ?? undefined, status: 'ACTIVE' } }) : null;
+    if (session.viewAsUserId && !simulated) return fail(req, res, 409, 'VIEW_CONTEXT_INVALID', 'The simulated user is no longer active in this organization. Exit View As mode.');
+    const ownerId = `platform-owner:${hashPlatformToken(session.loginId).slice(0, 16)}`;
+    req.user = {
+      id: simulated?.id ?? ownerId, name: simulated?.name ?? 'Platform Owner', email: simulated?.email ?? session.loginId,
+      loginId: simulated?.loginId ?? session.loginId, role: simulated?.role ?? 'ADMIN', customerId: simulated?.customerId ?? null,
+      organizationId: organization?.id ?? '', moduleAccess: simulated?.moduleAccess ?? [...modules], csrfToken,
+      actorType: 'PLATFORM_OWNER', platformSuperAdmin: true, readOnlyView: Boolean(organization),
+      organization: organization ? { id: organization.id, name: organization.name, status: organization.status } : null,
+      viewContext: organization ? { readOnly: true, organizationId: organization.id, organizationName: organization.name, simulatedUserId: simulated?.id ?? null, realActor: { id: ownerId, name: 'Platform Owner' } } : null,
+    };
+    return next();
+  }
+  const token = cookies[cookieName];
   if (!token) return fail(req, res, 401, 'AUTH_REQUIRED', 'Please sign in to continue.');
-  const session = await db.session.findUnique({ where: { tokenHash: hash(token) }, include: { user: true } });
+  const session = await db.session.findUnique({ where: { tokenHash: hash(token) }, include: { user: { include: { organization: true } } } });
   if (!session || !session.user.organizationId || session.user.status !== 'ACTIVE' || session.expiresAt < new Date()) return fail(req, res, 401, 'AUTH_REQUIRED', 'Your session has expired.');
-  req.user = { id: session.user.id, name: session.user.name, email: session.user.email, loginId: session.user.loginId, role: session.user.role, customerId: session.user.customerId, organizationId: session.user.organizationId, moduleAccess: session.user.moduleAccess, csrfToken: csrfForToken(token) };
+  if (session.user.organization?.status !== 'ACTIVE') return fail(req, res, 423, 'ORGANIZATION_SUSPENDED', 'This organization is not active.');
+  req.user = { id: session.user.id, name: session.user.name, email: session.user.email, loginId: session.user.loginId, role: session.user.role, customerId: session.user.customerId, organizationId: session.user.organizationId, moduleAccess: session.user.moduleAccess, csrfToken: csrfForToken(token), actorType: 'USER', platformSuperAdmin: false, readOnlyView: false, organization: session.user.organization ? { id: session.user.organization.id, name: session.user.organization.name, status: session.user.organization.status } : null, viewContext: null };
   return next();
 }
 
@@ -62,6 +90,7 @@ const requireRole = (...roles: string[]) => (req: AuthRequest, res: Response, ne
 const hasModule = (actor: Actor | undefined, module: typeof modules[number]) => actor?.role === 'ADMIN' || actor?.moduleAccess.includes(module);
 const requireModule = (module: typeof modules[number]) => (req: AuthRequest, res: Response, next: NextFunction) => hasModule(req.user, module) ? next() : fail(req, res, 403, 'FORBIDDEN', 'This module is not enabled for your account.');
 const requireCsrf = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (req.user?.readOnlyView) return fail(req, res, 403, 'VIEW_AS_READ_ONLY', 'Exit View As mode before making changes.');
   if (req.headers.origin !== allowedOrigin || req.headers['x-csrf-token'] !== req.user?.csrfToken) return fail(req, res, 403, 'CSRF_INVALID', 'Refresh the workspace and try again.');
   return next();
 };
@@ -157,10 +186,41 @@ app.post('/api/v1/auth/login', async (req: AuthRequest, res) => {
   return ok(req, res, { id: user.id, name: user.name, email: user.email, role: user.role, customerId: user.customerId, csrfToken: csrfForToken(token) });
 });
 
+app.post('/api/v1/auth/super-admin/login', async (req: AuthRequest, res) => {
+  if (req.headers.origin !== allowedOrigin) return fail(req, res, 403, 'ORIGIN_INVALID', 'This request origin is not allowed.');
+  const parsed = z.object({ loginId: z.string().trim().min(1).max(200), password: z.string().min(1).max(256) }).strict().safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter the configured Platform Owner login ID and password.');
+  const credentials = readPlatformOwnerCredentials();
+  if (!credentials) return fail(req, res, 503, 'PLATFORM_OWNER_NOT_CONFIGURED', 'Platform Owner credentials are not configured securely on the server.');
+  const attemptKey = `${req.ip}:${parsed.data.loginId.toLowerCase()}`;
+  if (!platformLoginAllowed(attemptKey)) return fail(req, res, 429, 'TOO_MANY_ATTEMPTS', 'Too many Platform Owner login attempts. Try again later.');
+  if (!platformOwnerCredentialsMatch(parsed.data, credentials)) {
+    recordPlatformLoginFailure(attemptKey);
+    return fail(req, res, 401, 'INVALID_PLATFORM_CREDENTIALS', 'Platform Owner login ID or password is incorrect.');
+  }
+  clearPlatformLoginFailures(attemptKey);
+  const token = crypto.randomBytes(32).toString('hex');
+  const csrfToken = crypto.randomBytes(32).toString('hex');
+  const session = await db.platformOwnerSession.create({ data: { tokenHash: hashPlatformToken(token), csrfHash: hashPlatformToken(csrfToken), loginId: credentials.loginId, expiresAt: new Date(Date.now() + 4 * 60 * 60 * 1000) } });
+  await db.privilegedAudit.create({ data: { actorId: null, platformActorId: credentials.loginId, action: 'PLATFORM_OWNER_LOGIN', affectedModel: 'PlatformOwnerSession', recordId: session.id, reason: 'Platform Owner authenticated through the dedicated environment-controlled login.', requestId: req.requestId ?? crypto.randomUUID(), ipAddress: req.ip?.slice(0, 64), userAgent: req.get('user-agent')?.slice(0, 255), result: 'SUCCESS' } });
+  res.setHeader('Set-Cookie', `${platformSessionCookieName}=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=14400${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+  res.append('Set-Cookie', `${cookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+  res.append('Set-Cookie', `${csrfCookieName}=${encodeURIComponent(csrfToken)}; SameSite=Strict; Path=/; Max-Age=14400${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+  return ok(req, res, { actorType: 'PLATFORM_OWNER', loginId: credentials.loginId, name: 'Platform Owner' });
+});
+
+app.get('/api/v1/auth/super-admin/me', authenticatePlatform, (req, res) => ok(req as AuthRequest, res, identityDto(req)));
+app.use('/api/v1/platform', authenticatePlatform, platformRouter);
+
 app.post('/api/v1/auth/logout', authenticate, requireCsrf, async (req: AuthRequest, res) => {
-  const token = parseCookies(req.headers.cookie)[cookieName];
-  if (token) await db.session.deleteMany({ where: { tokenHash: hash(token) } });
+  const cookies = parseCookies(req.headers.cookie);
+  const token = cookies[cookieName];
+  const platformToken = cookies[platformSessionCookieName];
+  if (platformToken) await db.platformOwnerSession.deleteMany({ where: { tokenHash: hashPlatformToken(platformToken) } });
+  else if (token) await db.session.deleteMany({ where: { tokenHash: hash(token) } });
   res.setHeader('Set-Cookie', `${cookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+  res.append('Set-Cookie', `${platformSessionCookieName}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);
+  res.append('Set-Cookie', `${csrfCookieName}=; SameSite=Strict; Path=/; Max-Age=0`);
   return ok(req, res, { loggedOut: true });
 });
 app.get('/api/v1/auth/me', authenticate, (req: AuthRequest, res) => ok(req, res, req.user));
@@ -180,6 +240,7 @@ app.patch('/api/v1/admin/users/:id', authenticate, requireRole('ADMIN'), require
   if (nextRole !== 'CUSTOMER' && nextCustomerId) return fail(req, res, 422, 'VALIDATION_ERROR', 'Internal accounts cannot be linked to a portal customer.');
   const updated = await db.$transaction(async (tx) => {
     const user = await tx.user.update({ where: { id: target.id }, data: { ...parsed.data, customerId: nextRole === 'CUSTOMER' ? nextCustomerId : null } });
+    await tx.organizationMembership.upsert({ where: { organizationId_userId: { organizationId: req.user!.organizationId, userId: target.id } }, update: { businessRole: nextRole, accessRole: nextRole === 'ADMIN' ? 'ORGANIZATION_ADMIN' : nextRole === 'CUSTOMER' ? 'PORTAL_USER' : 'ORGANIZATION_MEMBER', status: user.status === 'ACTIVE' ? 'ACTIVE' : 'SUSPENDED' }, create: { organizationId: req.user!.organizationId, userId: target.id, businessRole: nextRole, accessRole: nextRole === 'ADMIN' ? 'ORGANIZATION_ADMIN' : nextRole === 'CUSTOMER' ? 'PORTAL_USER' : 'ORGANIZATION_MEMBER', status: user.status === 'ACTIVE' ? 'ACTIVE' : 'SUSPENDED' } });
     if (parsed.data.status || parsed.data.role || parsed.data.customerId !== undefined) await tx.session.deleteMany({ where: { userId: target.id } });
     await audit(tx, req, 'ACCOUNT_UPDATED', 'User', target.id, `${user.status}/${user.role}`);
     return { id: user.id, name: user.name, email: user.email, loginId: user.loginId, role: user.role, status: user.status, moduleAccess: user.moduleAccess, customerId: user.customerId };
@@ -195,6 +256,7 @@ app.post('/api/v1/admin/users', authenticate, requireRole('ADMIN'), requireCsrf,
   const passwordHash = await bcrypt.hash(password, 12);
   const user = await db.$transaction(async (tx) => {
     const created = await tx.user.create({ data: { organizationId: req.user!.organizationId, name: parsed.data.name, email: `${loginId.toLowerCase()}@users.dealos.local`, loginId, passwordHash, status: 'ACTIVE', role: 'REP', moduleAccess: parsed.data.modules } });
+    await tx.organizationMembership.create({ data: { organizationId: req.user!.organizationId, userId: created.id, accessRole: 'ORGANIZATION_MEMBER', businessRole: 'REP' } });
     await audit(tx, req, 'USER_ACCESS_CREATED', 'User', created.id, parsed.data.modules.join(','));
     return created;
   });
@@ -202,6 +264,9 @@ app.post('/api/v1/admin/users', authenticate, requireRole('ADMIN'), requireCsrf,
 });
 
 app.get('/api/v1/workspace', authenticate, async (req: AuthRequest, res) => {
+  if (req.user!.actorType === 'PLATFORM_OWNER' && !req.user!.organizationId) {
+    return ok(req, res, { user: req.user, organization: null, users: [], quotes: [], products: [], policies: [], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] });
+  }
   const portal = req.user!.role === 'CUSTOMER';
   if (portal && !req.user!.customerId) return fail(req, res, 403, 'FORBIDDEN', 'This portal account is not linked to a customer.');
   const quoteWhere = portal ? { organizationId: req.user!.organizationId, customerId: req.user!.customerId!, sentAt: { not: null } } : internalQuoteWhere(req.user!);

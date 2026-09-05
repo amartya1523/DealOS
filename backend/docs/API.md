@@ -1,6 +1,6 @@
 # DealOS — REST API contracts
 
-Status: **designed, not implemented**. This is the baseline endpoint inventory for future phases; there are no running endpoints in P0. Endpoint IDs below are stable traceability references. Any implemented contract change must update this document in the same change.
+Status: living API contract. The inventory describes the target API; implemented compatibility endpoints and the Platform Owner control plane are identified at the end of this document.
 
 ## Shared HTTP contract
 
@@ -1064,3 +1064,9 @@ AUTH-01 is implemented as organization onboarding: `POST /api/v1/auth/signup` ac
 ## Audit repair implementation update — 2026-09-05
 
 Implemented in the compatibility API: session-derived CSRF tokens and Origin checks for mutations; request IDs; bounded login throttling; Admin user listing/activation; owner/customer-scoped workspace projections; customer-safe quotation/invoice DTOs; explicit `POST /quotations/:id/send`; proposal adoption/decline; immutable revision/cycle approval behavior; atomic confirmation creating Acceptance/Order/OrderLines/Invoice/Subscriptions; retry-safe allocation; and locked/idempotent payment posting. Existing `/approvals/:id/decision`, `/portal/quotations/:id/message`, `/portal/quotations/:id/confirm`, and `/fulfillment/:quoteId/allocate` compatibility paths remain available while enforcing the stronger state model.
+
+## Platform Owner implementation update — 2026-09-05
+
+`POST /api/v1/auth/super-admin/login` is the only Platform Owner login endpoint. It accepts strict `{loginId,password}` from server environment configuration, requires a password of at least 16 characters, applies constant-time comparison and a five-failure/15-minute process-local throttle, and issues a separate four-hour `dealos_platform_session`. `GET /api/v1/auth/super-admin/me` accepts only that session. Organization users cannot be promoted to Platform Owner through the database or an API.
+
+All `/api/v1/platform/*` routes require the independent owner session and CSRF/Origin validation. Implemented operations include global dashboard/search, organization detail/create/status changes, member and invitation management, session reset, privileged audit, and read-only View As Organization/User. Business writes return `VIEW_AS_READ_ONLY` until the owner explicitly exits the simulated context. Normal business routes remain constrained by `organizationId`.

@@ -7,14 +7,14 @@ Repository documentation is the source of truth. Do not depend on previous chat 
 ## Current State
 
 - **Product name:** DealOS.
-- **Current objective:** Completed the reproducible backend audit repair and preserved-case QA gate on 2026-09-05. Continue from the revision/order/concurrency-safe implementation.
+- **Current objective:** Continue from the merged revision/order hardening, Google organization onboarding and independent Platform Owner control plane without weakening tenant isolation.
 - **Repository:** Independent `frontend/` and `backend/` npm projects; only `README.md`, `compose.yaml`, and `.gitignore` are root files. Shared documentation and original references live in `backend/docs/`.
-- **Existing implementation:** React UI, Express API, Prisma/PostgreSQL with Customer/Revision/Acceptance/Order provenance, decimal cadence/tax calculation, revision-bound approvals, restricted portal DTOs, retry-safe stock/payment posting, generated billing, and hardened session mutations.
-- **Database/API changes this session:** Added migration `20260905190000_audit_backend_hardening` and hardened compatibility endpoints. After disposable validation, the migration was deployed to the local development schema without reseeding; five demo users and three demo quotes were preserved.
-- **Validation:** 44/44 isolated PostgreSQL workflow checks; preserved QA cases 24/24; backend tests 9/9 and build; frontend tests 5/5 and production build; Prisma client generation; three-migration deploy on a disposable schema.
-- **Local configuration:** Existing backend `.env` preserved. Former root `.env` preserved as ignored `backend/.env.root-backup`; missing backend keys were copied from it. No environment values were printed.
+- **Existing implementation:** React UI; Express API; Prisma/PostgreSQL with Customer/Revision/Acceptance/Order provenance; Google organization signup; organization-scoped user/module access; independent environment-authenticated Platform Owner; global organization/member control; privileged audit; and read-only View As.
+- **Database/API changes this session:** Merged `feature/super-admin` onto latest `main`. Consolidated the overlapping feature migration history into `20260905200000_platform_owner_control_plane`, which extends the latest-main schema and backfills memberships safely.
+- **Validation:** Fresh six-migration deployment and merged seed passed on a disposable PostgreSQL database. Backend tests 24/24 and frontend tests 6/6 passed; both production builds passed. Live owner login/dashboard/View As/exit/logout succeeded; View As writes returned 403; organization login/workspace succeeded and its platform request returned 403 `PLATFORM_OWNER_REQUIRED`.
+- **Local configuration:** Existing ignored `backend/.env` is loaded relative to the backend module. Platform Owner login ID must be non-empty and password at least 16 characters. Deployment-injected variables retain precedence.
 - **Limits:** Manual browser journeys were not rerun. Team configuration, operational shipment/receipt flows, billing proration/credits, alert tasks, and report exports remain product-expansion work requiring the documented open decisions.
-- **Next safe task:** Decide the open team-scope, proration/cancellation, and XLS format policies, then implement the remaining vertical expansion listed in `docs/audit/REPAIR-REPORT.md`.
+- **Next safe task:** Continue the remaining vertical expansion listed in `docs/audit/REPAIR-REPORT.md`; add browser coverage for the merged owner and Google onboarding paths.
 
 ## Authoritative Inputs
 
@@ -230,3 +230,12 @@ Harden the current vertical flow without replacing it:
 - **Validation:** Backend Vitest 6/6 passed; backend TypeScript build passed; frontend Vitest 7/7 passed; frontend TypeScript/Vite production build passed. Runtime smoke check on a temporary port returned the configured Google client ID from AUTH-01A. Chrome verification at `http://localhost:5173/sign-up` visibly showed “Continue with Google” above the email form while the live backend reported unconfigured; `/sign-in` remains excluded. Production dependency audit still reports the previously documented Prisma CLI/deepmerge-ts advisory; no unreviewed upgrade was applied.
 - **Limits:** A real Google consent flow was not exercised because no user OAuth client ID was available. Administrator activation and password/bootstrap UX remain previously documented work; a Google-created pending user does not gain workspace access.
 - **Next safe task:** Configure a Google OAuth Web client for the target environment and exercise one real pending signup, then add audited administrator activation and the remaining auth hardening.
+
+### SESSION: Merge Platform Owner into latest main
+
+- **Date:** 2026-09-05.
+- **Objective:** Resolve conflicts and merge `feature/super-admin` into the latest remote `main` without pushing.
+- **Resolution:** Preserved latest-main Google organization onboarding, customer/revision/order provenance, module access, idempotency and locking. Added independent environment-only Platform Owner login, global organization/member controls, privileged audit, separate CSRF-bound session, synchronized organization memberships and read-only View As.
+- **Migration decision:** Removed the feature branch's overlapping pre-main migration sequence and consolidated its final schema delta into `20260905200000_platform_owner_control_plane`. This allows the canonical latest-main migration chain to apply cleanly from an empty database and upgrades existing main-shaped databases without recreating organization tables.
+- **Validation:** Six migrations and merged seed passed on a disposable PostgreSQL database. Backend tests 24/24 and build passed; frontend tests 6/6 and build passed. Live HTTP checks passed owner login/dashboard/View As/exit/logout, organization login/workspace, View As write denial and organization-user platform denial.
+- **Git:** Local `main` contains the merge resolution. No remote push was performed.

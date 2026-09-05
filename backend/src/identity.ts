@@ -24,21 +24,31 @@ export type GoogleSignupProfile = {
   email: string;
 };
 
+const organizationSlug = (name: string) => `${name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'organization'}-${crypto.randomBytes(4).toString('hex')}`;
+
+async function createAdminOrganization(input: { organizationName: string; displayName: string; email: string; passwordHash: string; googleSubject?: string }) {
+  return db.$transaction(async (tx) => {
+    const organization = await tx.organization.create({ data: { name: input.organizationName, slug: organizationSlug(input.organizationName) } });
+    const user = await tx.user.create({ data: {
+      organizationId: organization.id,
+      email: input.email,
+      name: input.displayName,
+      passwordHash: input.passwordHash,
+      googleSubject: input.googleSubject,
+      status: 'ACTIVE',
+      role: 'ADMIN',
+      moduleAccess: [],
+    } });
+    await tx.organizationMembership.create({ data: { organizationId: organization.id, userId: user.id, accessRole: 'ORGANIZATION_ADMIN', businessRole: 'ADMIN' } });
+    return { ...organization, users: [user] };
+  });
+}
+
 export async function createOrganizationAdmin(input: z.infer<typeof signupSchema>) {
   const passwordHash = await bcrypt.hash(input.password, 12);
   const existing = await db.user.findUnique({ where: { email: input.email } });
   if (existing) return null;
-  return db.organization.create({ data: {
-    name: input.organizationName,
-    users: { create: {
-      email: input.email,
-      name: input.displayName,
-      passwordHash,
-      status: 'ACTIVE',
-      role: 'ADMIN',
-      moduleAccess: [],
-    } },
-  }, include: { users: true } });
+  return createAdminOrganization({ organizationName: input.organizationName, displayName: input.displayName, email: input.email, passwordHash });
 }
 
 export async function verifyGoogleSignupCredential(credential: string, clientId: string): Promise<GoogleSignupProfile> {
@@ -58,16 +68,5 @@ export async function createGoogleOrganizationAdmin(profile: GoogleSignupProfile
   const existing = await db.user.findUnique({ where: { email: profile.email } });
   if (existing) return null;
   const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
-  return db.organization.create({ data: {
-    name: organizationName,
-    users: { create: {
-      email: profile.email,
-      name: profile.displayName,
-      passwordHash,
-      googleSubject: profile.subject,
-      status: 'ACTIVE',
-      role: 'ADMIN',
-      moduleAccess: [],
-    } },
-  }, include: { users: true } });
+  return createAdminOrganization({ organizationName, displayName: profile.displayName, email: profile.email, passwordHash, googleSubject: profile.subject });
 }

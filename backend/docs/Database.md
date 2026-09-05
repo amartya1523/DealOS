@@ -1,12 +1,12 @@
 # DealOS — PostgreSQL persistence design
 
-Status: proposed logical/physical schema contract; no Prisma schema or migration has been executed. PostgreSQL is authoritative. Tables are plural snake_case; Prisma models may use PascalCase with explicit mappings. Domain comes first: see [Domain.md](Domain.md).
+Status: living persistence contract. Six migrations implement the current functional subset; the broader entity catalog remains target architecture. PostgreSQL is authoritative.
 
 ## Shared field conventions
 
 Unless a table explicitly represents a join, each table has `id uuid PRIMARY KEY DEFAULT gen_random_uuid()`, `created_at timestamptz NOT NULL DEFAULT now()` and `updated_at timestamptz NOT NULL`. Join tables also use UUID IDs initially for uniform audit referencing and enforce their natural composite uniqueness. Append-only tables use created/occurred time and do not permit updates; an unused updated_at need not be added to those tables. `?` means nullable, otherwise NOT NULL. `U` means UNIQUE. Every FK is explicitly named in migration and indexed unless already the leading key of an index. Numeric money values use `numeric(19,4)` internal precision and currency rounding at posting; rates use fixed precision, never float. Quantities use `numeric(14,3)` with integer enforcement for stock-tracked unit products. ISO currency, IANA timezone and email constraints are validated at the boundary. PostgreSQL `citext` is proposed for case-insensitive email; if unavailable use normalized email plus unique lower(email), documented in migration.
 
-Lifecycle enums below are application enums plus DB CHECK constraints (or reviewed native PostgreSQL enums). No unvalidated arbitrary status strings. All ownership filters derive from authenticated user/team/customer records. Single organization is proposed; there is no decorative tenant_id column pretending to implement multi-company isolation.
+Lifecycle enums below are application enums plus DB CHECK constraints (or reviewed native PostgreSQL enums). Tenant-owned records carry required organization foreign keys. Normal access derives from server-side organization identity and membership; the independent Platform Owner crosses that boundary only through allowlisted control-plane operations.
 
 ## Entity catalog
 
@@ -399,11 +399,15 @@ List queries constrain team/customer/state/date and use stable `(created_at,id)`
 
 ## Current database state
 
-No server started, database created, extension enabled, schema migrated, fixture seeded or persistent business data written by this architecture task. `compose.yaml` is opt-in local infrastructure configuration. The table inventory is a contract for phased implementation, not an assertion that tables exist.
+The merged history contains six ordered migrations through `20260905200000_platform_owner_control_plane`. The final migration adds organization status/slug, `OrganizationMembership`, `OrganizationInvitation`, `PlatformOwnerSession`, `PrivilegedAudit`, CSRF/View As session fields and organization-scoped uniqueness. It backfills memberships from the latest-main `User.organizationId` relationship and does not persist the Platform Owner password.
+
+The former feature-only `20260905130000`–`20260905150000` migration sequence was consolidated because it independently created tables later introduced on `main`. Retaining both sequences would make fresh and existing-main deployments fail. The consolidated migration was verified from an empty PostgreSQL database followed by the merged deterministic seed.
+
+The merged migration chain and deterministic seed were executed against a disposable PostgreSQL database. The developer's primary database was not reset during conflict resolution. The larger table inventory remains a phased contract beyond the implemented Prisma models.
 
 ## Implemented identity delta — 2026-09-05
 
-Migration `20260905120000_pending_accounts` adds PostgreSQL `AccountStatus` (PENDING, ACTIVE, DISABLED) and `User.status`. Existing identities are backfilled ACTIVE; future inserts default PENDING. Seed users explicitly set ACTIVE. Public signup stores a bcrypt hash and nonprivileged REP role with PENDING status; both login and session middleware require ACTIVE. No other schema or records are reset.
+Migration `20260905120000_pending_accounts` adds PostgreSQL `AccountStatus` (PENDING, ACTIVE, DISABLED) and `User.status`. Latest-main onboarding creates a new organization and its first ACTIVE Admin through email/password or verified Google signup; generated organization users are also ACTIVE and module-scoped. Login and session middleware require ACTIVE.
 
 ## Implemented audit-hardening delta — 2026-09-05
 

@@ -41,6 +41,7 @@ Status: design baseline. C/I/P classifications refer to [PRD.md](PRD.md). Propos
 | Finance/Operations | Control high-risk discounts, stock and receivables | Approved commercial details, stock, invoices, plans | Second review, allocate, ship, receive stock, change subscriptions, record payment/credit | Sequential approval and immutable ledger restrictions; receives reconciliation results |
 | Customer | Understand and agree commercial offer | Own business's sent quotes, allowed terms/comments and invoices | Submit proposal/comment, accept current revision | Cannot access draft quotes, other customers, internal notes/cost/risk; receives confirmation/pending-review state |
 | Admin | Maintain correct setup and identities | Organization configuration, identities and reports | Activate accounts; assign roles/team/customer links; configure catalog, warehouses/plans/policies | No implicit reviewer bypass; cannot edit issued financial history; receives configuration audit |
+| Platform Super Admin / Platform Owner | Securely oversee the complete installation | Global organization/member and tenant operational summaries | Create/suspend/archive organizations; manage memberships; inspect records; enter read-only View As | Independent environment identity and session, never an organization user or role; privileged mutations are audited |
 | System scheduler | Process due billing and health rules | Only job-required domain data | Claim due jobs, generate recurring invoices, resolve/reopen alerts | No interactive login; transaction/idempotency protections apply; receives durable job status |
 
 ## Entities and relationships
@@ -210,6 +211,15 @@ Condition: request suggestions. Behavior: rank active valid products by co-purch
 
 ### BR-020 — Scope-preserving reporting [C/I]
 Condition: report/export. Behavior: apply role/team/customer constraints before grouping; reuse report calculation; group incompatible currency/cadence. Reason: exports must not widen access or misstate revenue. Owner: reporting; W-10. Edge cases: untrusted spreadsheet strings beginning `=`, `+`, `-`, `@` are escaped; export dates/filters shown.
+
+### BR-021 — Tenant isolation [C]
+Condition: a request reads or changes tenant data. Behavior: resolve the organization server-side and constrain every business query by `organizationId`; caller-supplied identifiers never create access. Suspended organizations retain history but reject normal operations. The Platform Owner may inspect another organization only through its independent session and explicit View As context.
+
+### BR-022 — Protected Platform Owner administration [C]
+Condition: owner login or a high-risk organization/user change. Behavior: accept only the exact environment login ID and password at `/login/super-admin`, require a password of at least 16 characters, compare credentials in constant time, throttle failures, require the independent owner session and audit privileged changes. No organization user—including an Admin—can be granted owner access.
+
+### BR-023 — Read-only View As [C]
+Condition: the Platform Owner enters View As Organization/User. Behavior: retain the environment owner as the real audit actor, expose the selected tenant context, show a persistent banner, and reject all business and privileged writes until explicit exit.
 
 ## Implemented audit-repair decisions — 2026-09-05
 

@@ -10,13 +10,14 @@ DealOS is a browser-based B2B quotation-to-cash workspace. It connects quotation
 
 ## Start locally
 
-Requirements: Node.js 22 and Docker.
+Requirements: Node.js 22 and Docker Desktop. Start Docker Desktop and wait for its engine before running the database commands.
 
 ```bash
-cp backend/.env.example backend/.env  # first setup only; preserve existing configuration
+test -f backend/.env || cp backend/.env.example backend/.env
 npm ci --prefix backend
 npm ci --prefix frontend
 docker compose up -d postgres
+docker compose exec postgres pg_isready -U dealos -d dealos
 npm --prefix backend run db:generate
 npm --prefix backend run db:migrate
 npm --prefix backend run db:seed
@@ -40,8 +41,19 @@ To enable Google on the sign-up page, create a Google OAuth 2.0 Web client, add 
 | Finance / Operations | `finance@dealos.demo` |
 | Admin | `admin@dealos.demo` |
 | Customer | `customer@dealos.demo` |
+| Northstar Organization Admin | `orgadmin@northstar.demo` |
+| Northstar Sales Rep | `rep@northstar.demo` |
 
 The credentials are development seed data only. Replace the seed and bootstrap process before production use.
+
+The Platform Super Admin is an independent Platform Owner identity, not an organization user. Configure it only in ignored `backend/.env`:
+
+```dotenv
+PLATFORM_OWNER_LOGIN_ID="superadmin"
+PLATFORM_OWNER_PASSWORD="set-a-unique-password-of-at-least-16-characters"
+```
+
+Open `http://localhost:5173/login/super-admin`. Organization credentials are rejected by this endpoint. Owner login uses a separate four-hour session and can inspect every organization or enter an explicitly read-only View As context.
 
 ## Commands
 
@@ -72,6 +84,6 @@ Read [agent instructions](backend/docs/agent.md) and [project memory](backend/do
 
 ## Current scope
 
-The implementation is a functional demo of the reference flow with durable PostgreSQL records and role-specific actions. It includes the 18 reference screens and core transitions. Before production deployment, complete the hardening items in `backend/docs/memory.me`, including CSRF enforcement, full quote-revision tables, idempotency storage, transaction locking, production account bootstrap, export generation, and expanded end-to-end coverage.
+The implementation is a functional demo with durable PostgreSQL records, organization isolation, revision-bound quote workflows, CSRF protection, selected idempotency/locking controls, Google organization signup and an environment-authenticated Platform Owner control plane. Before production deployment, complete the remaining hardening items in `backend/docs/memory.me`, including a secret manager, MFA, distributed throttling, export generation and expanded end-to-end coverage.
 
-Frontend hosting must use SPA fallback to `index.html` for `/sign-in`, `/sign-up`, `/app`, and aliases while proxying `/api` to the backend. Apply the pending-account migration with `npx prisma migrate deploy` inside `backend/` before running the updated API.
+Frontend hosting must use SPA fallback to `index.html` for `/sign-in`, `/sign-up`, `/login/super-admin`, `/app`, and aliases while proxying `/api` to the backend. Apply all committed migrations with `npm --prefix backend run db:migrate` before running the API.

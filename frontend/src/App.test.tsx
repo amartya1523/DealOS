@@ -114,6 +114,18 @@ describe("DealOS public routes", () => {
       await screen.findByRole("heading", { name: "Welcome back." }),
     ).toBeInTheDocument();
   });
+  it("uses the dedicated Platform Owner login and opens global control", async () => {
+    window.history.replaceState({}, "", "/login/super-admin");
+    const ownerWorkspace = { user: { id: "platform-owner", name: "Platform Owner", email: "superadmin", role: "ADMIN", moduleAccess: [], actorType: "PLATFORM_OWNER", platformSuperAdmin: true, viewContext: null }, organization: null, users: [], quotes: [], products: [], policies: [], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] };
+    const dashboard = { metrics: { totalOrganizations: 2, activeOrganizations: 2, suspendedOrganizations: 0, activeUsers: 7, pendingInvitations: 1, blockedDeals: 1 }, organizations: [], pagination: { page: 1, pages: 1, total: 0 }, recentActions: [] };
+    fetchMock.mockImplementation((url: string) => Promise.resolve({ ok: true, json: async () => ({ success: true, data: url.includes("/platform/dashboard") ? dashboard : url.includes("/workspace") ? ownerWorkspace : { actorType: "PLATFORM_OWNER" } }) }));
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Platform login ID"), { target: { value: "superadmin" } });
+    fireEvent.change(screen.getByLabelText("Platform password"), { target: { value: "ConfiguredOwnerPassword!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Enter Platform Control" }));
+    expect(await screen.findByRole("heading", { name: "Global organizations" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/auth/super-admin/login", expect.objectContaining({ method: "POST", body: JSON.stringify({ loginId: "superadmin", password: "ConfiguredOwnerPassword!" }) }));
+  });
   it("renders a recovery link on unknown routes", () => {
     window.history.replaceState({}, "", "/missing");
     render(<App />);

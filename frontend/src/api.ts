@@ -1,5 +1,5 @@
 export type Workspace = {
-  user: { id: string; name: string; email: string; loginId?: string; role: string; moduleAccess: string[] };
+  user: { id: string; name: string; email: string; loginId?: string; role: string; moduleAccess: string[]; actorType:'USER'|'PLATFORM_OWNER'; platformSuperAdmin:boolean; viewContext:{readOnly:true;organizationId:string;organizationName:string;simulatedUserId:string|null;realActor:{id:string;name:string}}|null };
   organization: { id: string; name: string };
   users: Array<{ id:string; name:string; loginId?:string; status:string; moduleAccess:string[]; createdAt:string }>;
   quotes: Quote[];
@@ -26,7 +26,9 @@ let csrfToken = '';
 export async function request<T>(path:string, options:RequestInit = {}):Promise<T> {
   const method = (options.method ?? 'GET').toUpperCase();
   const mutating = !['GET','HEAD','OPTIONS'].includes(method);
-  const response = await fetch(`/api/v1${path}`, { ...options, credentials:'include', headers:{'Content-Type':'application/json', ...(mutating && csrfToken ? {'X-CSRF-Token':csrfToken} : {}), ...(mutating && !options.headers ? {'Idempotency-Key':crypto.randomUUID()} : {}), ...(options.headers ?? {})} });
+  const cookieCsrf = document.cookie.split('; ').find((part)=>part.startsWith('dealos_csrf='))?.split('=').slice(1).join('=');
+  const activeCsrf = cookieCsrf ? decodeURIComponent(cookieCsrf) : csrfToken;
+  const response = await fetch(`/api/v1${path}`, { ...options, credentials:'include', headers:{'Content-Type':'application/json', ...(mutating && activeCsrf ? {'X-CSRF-Token':activeCsrf} : {}), ...(mutating && !options.headers ? {'Idempotency-Key':crypto.randomUUID()} : {}), ...(options.headers ?? {})} });
   const body = await response.json();
   if (!response.ok || !body.success) throw new Error(body.error?.message ?? 'Request failed');
   if (body.data?.csrfToken) csrfToken = body.data.csrfToken;
