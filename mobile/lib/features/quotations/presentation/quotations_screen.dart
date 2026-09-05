@@ -64,25 +64,33 @@ class _QuotationsScreenState extends State<QuotationsScreen> {
               ),
             ),
             const SizedBox(width: 10),
-            DropdownButton<String>(
-              value: stage,
-              items:
-                  [
-                        'ALL',
-                        'DRAFT',
-                        'PENDING_APPROVAL',
-                        'APPROVED',
-                        'NEGOTIATION',
-                        'CONFIRMED',
-                      ]
-                      .map(
-                        (value) => DropdownMenuItem(
-                          value: value,
-                          child: Text(label(value)),
-                        ),
-                      )
-                      .toList(),
-              onChanged: (value) => setState(() => stage = value ?? 'ALL'),
+            SizedBox(
+              width: 136,
+              child: DropdownButtonFormField<String>(
+                initialValue: stage,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Status'),
+                items:
+                    [
+                          'ALL',
+                          'DRAFT',
+                          'PENDING_APPROVAL',
+                          'APPROVED',
+                          'NEGOTIATION',
+                          'CONFIRMED',
+                        ]
+                        .map(
+                          (value) => DropdownMenuItem(
+                            value: value,
+                            child: Text(
+                              label(value),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                onChanged: (value) => setState(() => stage = value ?? 'ALL'),
+              ),
             ),
           ],
         ),
@@ -111,11 +119,15 @@ class _QuotationsScreenState extends State<QuotationsScreen> {
                             children: [
                               Row(
                                 children: [
-                                  Text(
-                                    quote.number,
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.labelMedium,
+                                  Expanded(
+                                    child: Text(
+                                      quote.number,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.labelMedium,
+                                    ),
                                   ),
                                   const SizedBox(width: 8),
                                   StatusPill(quote.stage),
@@ -518,8 +530,9 @@ class _QuoteDetailScreenState extends ConsumerState<QuoteDetailScreen> {
           const SizedBox(height: 10),
           ...quote.approvals.map(
             (approval) => Card(
+              margin: const EdgeInsets.only(bottom: 10),
               child: ListTile(
-                leading: const Icon(Icons.approval_outlined),
+                leading: const IconBadge(icon: Icons.approval_outlined),
                 title: Text('${approval.step} review'),
                 subtitle: Text(
                   '${approval.decisionSummary}${approval.reason == null ? '' : '\n${approval.reason}'}\n${shortDate(approval.decidedAt ?? approval.createdAt)}',
@@ -531,8 +544,9 @@ class _QuoteDetailScreenState extends ConsumerState<QuoteDetailScreen> {
           ),
           ...quote.negotiation.map(
             (message) => Card(
+              margin: const EdgeInsets.only(bottom: 10),
               child: ListTile(
-                leading: const Icon(Icons.forum_outlined),
+                leading: const IconBadge(icon: Icons.forum_outlined),
                 title: Text(message.author),
                 subtitle: Text(
                   '${message.message}\n${shortDate(message.createdAt)}${message.counterDiscount == null ? '' : ' · ${message.counterDiscount}% proposed'}',

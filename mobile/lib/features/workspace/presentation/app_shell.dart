@@ -134,18 +134,34 @@ class DealOsShell extends ConsumerWidget {
             : null,
         title: large
             ? const DealOsMark()
-            : Text(
-                allSections
-                        .where((item) => item.id == current)
-                        .firstOrNull
-                        ?.label ??
-                    'DealOS',
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    allSections
+                            .where((item) => item.id == current)
+                            .firstOrNull
+                            ?.label ??
+                        'DealOS',
+                  ),
+                  if (workspace.organization != null)
+                    Text(
+                      workspace.organization!.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                ],
               ),
         actions: [
-          if (workspace.organization != null)
+          if (large && workspace.organization != null)
             Center(
               child: Padding(
-                padding: const EdgeInsets.only(right: 4),
+                padding: const EdgeInsets.only(right: 8),
                 child: Chip(
                   avatar: const Icon(Icons.apartment, size: 16),
                   label: Text(workspace.organization!.name),
@@ -156,11 +172,24 @@ class DealOsShell extends ConsumerWidget {
             onPressed: state.busy
                 ? null
                 : () => ref.read(sessionControllerProvider.notifier).refresh(),
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Refresh',
           ),
           PopupMenuButton<String>(
             tooltip: 'Account',
+            icon: CircleAvatar(
+              radius: 17,
+              backgroundColor: Theme.of(
+                context,
+              ).colorScheme.primary.withValues(alpha: .11),
+              foregroundColor: Theme.of(context).colorScheme.primary,
+              child: Text(
+                workspace.user.name.isEmpty
+                    ? '?'
+                    : workspace.user.name[0].toUpperCase(),
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
             onSelected: (value) {
               if (value == 'logout') {
                 ref.read(sessionControllerProvider.notifier).logout();
@@ -172,9 +201,11 @@ class DealOsShell extends ConsumerWidget {
             itemBuilder: (_) => [
               PopupMenuItem(
                 enabled: false,
-                child: Text(
-                  '${workspace.user.name}\n${label(workspace.user.role)}',
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.account_circle_outlined),
+                  title: Text(workspace.user.name),
+                  subtitle: Text(label(workspace.user.role)),
                 ),
               ),
               if (workspace.user.readOnlyView)
@@ -207,9 +238,26 @@ class DealOsShell extends ConsumerWidget {
                 context.go('/workspace/${allSections[index].id}');
               },
               children: [
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(28, 20, 16, 16),
-                  child: DealOsMark(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(28, 24, 20, 18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const DealOsMark(),
+                      const SizedBox(height: 22),
+                      Text(
+                        workspace.user.name,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${label(workspace.user.role)} · ${workspace.organization?.name ?? 'DealOS'}',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 ...allSections.map(
                   (item) => NavigationDrawerDestination(
@@ -222,21 +270,30 @@ class DealOsShell extends ConsumerWidget {
       body: Row(
         children: [
           if (large)
-            NavigationRail(
-              extended: MediaQuery.sizeOf(context).width >= 1180,
-              selectedIndex: allSections.indexWhere(
-                (item) => item.id == current,
+            DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border(
+                  right: BorderSide(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                ),
               ),
-              onDestinationSelected: (index) =>
-                  context.go('/workspace/${allSections[index].id}'),
-              destinations: allSections
-                  .map(
-                    (item) => NavigationRailDestination(
-                      icon: Icon(item.icon),
-                      label: Text(item.label),
-                    ),
-                  )
-                  .toList(),
+              child: NavigationRail(
+                extended: MediaQuery.sizeOf(context).width >= 1180,
+                selectedIndex: allSections.indexWhere(
+                  (item) => item.id == current,
+                ),
+                onDestinationSelected: (index) =>
+                    context.go('/workspace/${allSections[index].id}'),
+                destinations: allSections
+                    .map(
+                      (item) => NavigationRailDestination(
+                        icon: Icon(item.icon),
+                        label: Text(item.label),
+                      ),
+                    )
+                    .toList(),
+              ),
             ),
           Expanded(
             child: Column(
@@ -278,7 +335,15 @@ class DealOsShell extends ConsumerWidget {
                     ],
                   ),
                 if (state.busy) const LinearProgressIndicator(minHeight: 2),
-                Expanded(child: _screen(current)),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 1280),
+                      child: _screen(current),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -286,6 +351,8 @@ class DealOsShell extends ConsumerWidget {
       ),
       bottomNavigationBar: !large && primary.isNotEmpty
           ? NavigationBar(
+              labelBehavior:
+                  NavigationDestinationLabelBehavior.onlyShowSelected,
               selectedIndex: selectedPrimary < 0 ? 0 : selectedPrimary,
               onDestinationSelected: (index) =>
                   context.go('/workspace/${primary[index].id}'),

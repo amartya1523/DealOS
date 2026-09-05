@@ -38,17 +38,28 @@ class DealOsMark extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 34,
-          height: 34,
+          width: 36,
+          height: 36,
           decoration: BoxDecoration(
-            color: DealOsColors.coral,
-            borderRadius: BorderRadius.circular(9),
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [DealOsColors.blue, DealOsColors.violet],
+            ),
+            borderRadius: BorderRadius.circular(11),
+            boxShadow: [
+              BoxShadow(
+                color: DealOsColors.blue.withValues(alpha: .22),
+                blurRadius: 12,
+                offset: const Offset(0, 5),
+              ),
+            ],
           ),
           alignment: Alignment.center,
           child: const Text(
             'D',
             style: TextStyle(
-              color: DealOsColors.ink,
+              color: Colors.white,
               fontWeight: FontWeight.w900,
               fontSize: 18,
             ),
@@ -62,8 +73,8 @@ class DealOsMark extends StatelessWidget {
               color: light
                   ? Colors.white
                   : Theme.of(context).colorScheme.onSurface,
-              fontSize: 22,
-              letterSpacing: -1,
+              fontSize: 21,
+              letterSpacing: -.7,
               fontWeight: FontWeight.w800,
             ),
           ),
@@ -86,22 +97,16 @@ class SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 20),
+    padding: const EdgeInsets.only(bottom: 18),
     child: Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                title,
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -1,
-                ),
-              ),
-              const SizedBox(height: 6),
+              Text(title, style: Theme.of(context).textTheme.headlineMedium),
+              const SizedBox(height: 5),
               Text(
                 subtitle,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -111,9 +116,52 @@ class SectionHeader extends StatelessWidget {
             ],
           ),
         ),
+        if (action != null) ...[const SizedBox(width: 12), action!],
+      ],
+    ),
+  );
+}
+
+class SectionTitle extends StatelessWidget {
+  const SectionTitle(this.title, {super.key, this.action});
+  final String title;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(title, style: Theme.of(context).textTheme.titleLarge),
+        ),
         ?action,
       ],
     ),
+  );
+}
+
+class IconBadge extends StatelessWidget {
+  const IconBadge({
+    super.key,
+    required this.icon,
+    this.color = DealOsColors.blue,
+    this.size = 42,
+  });
+  final IconData icon;
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: size,
+    height: size,
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: .11),
+      borderRadius: BorderRadius.circular(size * .32),
+    ),
+    child: Icon(icon, color: color, size: size * .5),
   );
 }
 
@@ -142,14 +190,16 @@ class StatusPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: .13),
+        color: color.withValues(alpha: .1),
         borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: .12)),
       ),
       child: Text(
         label(value),
         style: TextStyle(
           color: color,
-          fontSize: 11,
+          fontSize: 10.5,
+          letterSpacing: .15,
           fontWeight: FontWeight.w800,
         ),
       ),
@@ -173,23 +223,33 @@ class MetricCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Card(
     child: Padding(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: accent ?? Theme.of(context).colorScheme.secondary),
-          const Spacer(),
+          IconBadge(
+            icon: icon,
+            color: accent ?? Theme.of(context).colorScheme.primary,
+            size: 38,
+          ),
+          const SizedBox(height: 14),
           Text(
             value,
-            style: Theme.of(
-              context,
-            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+            ),
           ),
-          const SizedBox(height: 3),
+          const SizedBox(height: 2),
           Text(
             label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.labelMedium?.copyWith(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],

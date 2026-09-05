@@ -37,7 +37,7 @@ class InvoicesScreen extends StatelessWidget {
           child: Card(
             child: ListTile(
               contentPadding: const EdgeInsets.all(16),
-              leading: const Icon(Icons.receipt_long_outlined),
+              leading: const IconBadge(icon: Icons.receipt_long_outlined),
               title: Text(
                 '${invoice.number} · ${invoice.customer}',
                 style: const TextStyle(fontWeight: FontWeight.w800),
@@ -151,6 +151,7 @@ class _InvoiceDetailScreenState extends ConsumerState<InvoiceDetailScreen> {
           const SizedBox(height: 10),
           ...invoice.lines.map(
             (line) => Card(
+              margin: const EdgeInsets.only(bottom: 10),
               child: ListTile(
                 title: Text(line.description),
                 subtitle: Text(

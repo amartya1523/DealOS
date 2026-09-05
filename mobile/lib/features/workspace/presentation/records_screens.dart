@@ -140,8 +140,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
             child: Card(
               child: ListTile(
                 contentPadding: const EdgeInsets.all(16),
-                leading: Icon(
-                  product.recurring
+                leading: IconBadge(
+                  icon: product.recurring
                       ? Icons.autorenew
                       : Icons.inventory_2_outlined,
                 ),
@@ -205,7 +205,7 @@ class SubscriptionsScreen extends ConsumerWidget {
           child: Card(
             child: ListTile(
               contentPadding: const EdgeInsets.all(16),
-              leading: const Icon(Icons.autorenew),
+              leading: const IconBadge(icon: Icons.autorenew),
               title: Text(
                 '${item.customer} · ${item.productName}',
                 style: const TextStyle(fontWeight: FontWeight.w700),
@@ -411,6 +411,7 @@ class AuditScreen extends StatelessWidget {
       ),
       ...workspace.audits.map(
         (item) => Card(
+          margin: const EdgeInsets.only(bottom: 10),
           child: ListTile(
             leading: const Icon(Icons.history),
             title: Text(label(item.action)),
@@ -444,6 +445,7 @@ class PoliciesScreen extends ConsumerWidget {
       ),
       ...workspace.policies.map(
         (policy) => Card(
+          margin: const EdgeInsets.only(bottom: 10),
           child: ListTile(
             contentPadding: const EdgeInsets.all(16),
             leading: const Icon(Icons.policy_outlined),
@@ -488,6 +490,7 @@ class MembersScreen extends StatelessWidget {
       ),
       ...workspace.users.map(
         (user) => Card(
+          margin: const EdgeInsets.only(bottom: 10),
           child: ListTile(
             leading: CircleAvatar(
               child: Text(user.name.isEmpty ? '?' : user.name[0]),

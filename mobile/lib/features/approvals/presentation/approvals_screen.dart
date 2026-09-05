@@ -29,9 +29,7 @@ class ApprovalsScreen extends StatelessWidget {
             child: Card(
               child: ListTile(
                 contentPadding: const EdgeInsets.all(16),
-                leading: const CircleAvatar(
-                  child: Icon(Icons.approval_outlined),
-                ),
+                leading: const IconBadge(icon: Icons.approval_outlined),
                 title: Text(
                   '${quote.number} · ${quote.customer}',
                   style: const TextStyle(fontWeight: FontWeight.w800),
@@ -134,6 +132,7 @@ class _ApprovalDetailScreenState extends ConsumerState<ApprovalDetailScreen> {
           ...quote.lines.map((line) {
             final excess = line.discount - line.allowedDiscount;
             return Card(
+              margin: const EdgeInsets.only(bottom: 10),
               child: ListTile(
                 title: Text(line.product.name),
                 subtitle: Text(
@@ -157,6 +156,7 @@ class _ApprovalDetailScreenState extends ConsumerState<ApprovalDetailScreen> {
           const SizedBox(height: 10),
           ...quote.approvals.map(
             (approval) => Card(
+              margin: const EdgeInsets.only(bottom: 10),
               child: ListTile(
                 leading: Icon(
                   approval.state == 'APPROVED'

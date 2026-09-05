@@ -34,9 +34,10 @@ class FulfillmentScreen extends ConsumerWidget {
         const SizedBox(height: 10),
         ...orders.map(
           (quote) => Card(
+            margin: const EdgeInsets.only(bottom: 10),
             child: ListTile(
               contentPadding: const EdgeInsets.all(16),
-              leading: const Icon(Icons.local_shipping_outlined),
+              leading: const IconBadge(icon: Icons.local_shipping_outlined),
               title: Text(
                 '${quote.order?['number'] ?? quote.number} · ${quote.customer}',
               ),
@@ -67,8 +68,9 @@ class FulfillmentScreen extends ConsumerWidget {
         const SizedBox(height: 10),
         ...workspace.warehouses.map(
           (warehouse) => Card(
+            margin: const EdgeInsets.only(bottom: 10),
             child: ExpansionTile(
-              leading: const Icon(Icons.warehouse_outlined),
+              leading: const IconBadge(icon: Icons.warehouse_outlined),
               title: Text(warehouse.name),
               subtitle: Text(
                 'Priority ${warehouse.priority} · shipping ${money(warehouse.shippingCost)}',
