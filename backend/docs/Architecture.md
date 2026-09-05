@@ -8,7 +8,7 @@ DealOS coordinates B2B quotation preparation, discount review, negotiation, ware
 
 ## 2. Confirmed / Inferred / Proposed Requirements
 
-The R-001–R-038 register in [PRD.md](PRD.md#requirements-classification) is authoritative for classification. Confirmed capabilities come from the PDF, 18-screen board and the user's Platform Owner direction. Versioning, reservations and idempotency are inferred correctness needs. Session mechanism, aggregate risk formula, billing convention and deployment are proposed technical decisions. Proposed decisions remain marked when implemented; new requirements need an entry rather than a silent addition.
+The R-001–R-046 register in [PRD.md](PRD.md#requirements-classification) is authoritative for classification. Confirmed capabilities come from the PDF, 18-screen board and the user's subsequent phase directions. Versioning, reservations and idempotency are inferred correctness needs. Session mechanism, aggregate risk formula, the 14-day initial invoice term and deployment are proposed technical decisions. Proposed decisions remain marked when implemented; new requirements need an entry rather than a silent addition.
 
 ## 3. Actors and Stakeholders
 
@@ -26,7 +26,7 @@ Quotation is the stable deal; revision is the commercial snapshot. Approval and 
 
 ## 6. Business Rules
 
-BR-001–BR-020 in [Domain.md](Domain.md#numbered-business-rules) cover calculation, combined discounts, effective caps, risk, revisions, reviewer independence, confirmation, isolation, stock, splitting, consolidation, cadence, proration, credits, idempotency, payments, audit, alerts, suggestions and exports. Each rule has owner/workflow/edge cases. A rule change requires updated examples, tests, API effects and migration assessment.
+BR-001–BR-026 in [Domain.md](Domain.md#numbered-business-rules) cover calculation, combined discounts, effective caps, risk, revisions, reviewer independence, confirmation, isolation, stock, splitting, consolidation, cadence, proration, credits, idempotency, payments, audit, alerts, suggestions, exports, customer relationships, portal onboarding and portal RFQ processing. Each rule has owner/workflow/edge cases. A rule change requires updated examples, tests, API effects and migration assessment.
 
 ## 7. Capability Map
 
@@ -40,6 +40,9 @@ DealOS
 ├── Quotation preparation
 │   ├── Pricing, discounts and cadence-specific margin
 │   └── Cross-sell / upsell suggestions
+├── Customer portal intake
+│   ├── Raw quotation requests and customer-safe status
+│   └── Admin-selected Lead-first or Direct-draft processing
 ├── Discount governance
 │   └── Ordered review and audit
 ├── Customer negotiation
@@ -51,6 +54,22 @@ DealOS
 ├── Deal health
 │   └── Rule-based alerts and internal nudges
 └── Reporting and exports
+```
+
+The earlier source-diagram annotation “Future portal intake” / “GAP / OPTIONAL EXTENSION” is superseded by the implemented v1 flow below. The branch choice is explicit organization configuration, not an inferred default:
+
+```mermaid
+flowchart LR
+    Setup[Organization catalog setup] --> Profile[Customer profile]
+    Profile --> Assign[Primary team and active Rep]
+    Assign --> Invite[Accepted portal invitation]
+    Invite --> Request[Raw PortalRequest]
+    Request --> Mode{RfqHandlingMode}
+    Mode -->|LEAD_FIRST - Proposed default| Lead[Assigned Lead]
+    Lead -->|Assigned Rep converts once| Draft[Private quotation Draft]
+    Mode -->|DIRECT_DRAFT| Draft
+    Draft --> Govern[Normal save / approval / send lifecycle]
+    Request --> Safe[Customer-safe Received / In progress / Declined]
 ```
 
 No chatbot, social messaging, mobile application or unrelated analytics platform is included. A public marketing landing page was explicitly added by the user on 2026-09-05.
@@ -107,15 +126,16 @@ Scheduler leases work from PostgreSQL using `FOR UPDATE SKIP LOCKED` or advisory
 
 | Module | Owns / public functions | Does not own | Dependencies / entities | Routes | Rules and security |
 |---|---|---|---|---|---|
-| identity | signup, activateUser, login, logout, authenticate, authorizeScope | Commercial rules | users, roles, teams, sessions | `/auth`, `/admin/users`, `/admin/teams` | BR-008; hash passwords; scoped identities |
-| catalog | customers, products/variants, price lists, plan/policy configuration publication | Historical quote recomputation, billing execution | tiers, customers, products, prices, plan/policy versions | `/customers`, `/catalog`, `/settings` | BR-001/003/017; Admin/config Manager |
-| quotations | createDraft, preview, revise, submit, send, getScopedQuote | Approval decisions, stock or invoice posting | catalog reads, governance evaluator; quotes/revisions/lines | `/quotations` | BR-001–005/012/017; assigned team scope |
-| governance | evaluateRisk, openCase, decideStep | Editing customer terms | identity, quote snapshot; policy/cases/steps | `/approvals` | BR-003–006; no self-approval |
+| identity | signup, activateUser, login, logout, authenticate, authorizeScope; team membership reads | Commercial rules or customer-assignment writes | users, roles, teams, sessions | `/auth`, `/admin/users`, `/admin/teams`, `/sales-teams` | BR-008/021/024; hash passwords; scoped identities |
+| catalog | customers, customerRelationship assignment service, products/variants, price lists, plan/policy configuration publication | Historical Quote rewrites, billing execution | tiers, customers, CustomerRepresentative history, products, prices, plan/policy versions | `/customers`, `/catalog`, `/settings` | BR-001/003/017/024; Manager/Admin assignment boundary |
+| quotations | shared createDraft with server-derived customer relationship snapshot, preview, revise, submit, send, getScopedQuote | CustomerRepresentative writes, raw portal-request mutation, approval decisions, stock or invoice posting | catalog relationship reads, governance evaluator; quotes/revisions/lines | `/quotations` | BR-001–005/012/017/024/026; portal and Lead paths reuse this service rather than cloning price/ownership rules |
+| governance | evaluateRisk, openCase, decideStep, createReturnedDraft | Editing customer terms outside the explicit returned-revision transition | identity, immutable quote snapshot; policy/cases/steps | `/approvals` | BR-003–006; Manager-first, no self-approval |
 | recommendations | rankSuggestions, dismissSuggestion | Mutating quotes or inventing costs | catalog, quote calculator, order history | quote suggestions + `/settings/recommendations` | BR-019; customer-safe isolation |
-| portal | projectQuote, comment, propose, accept | Direct price mutation, internal DTO serialization | identity scope; quotes/proposals/acceptances; order confirmation service | `/portal` | BR-005/007/008; every lookup customer-scoped |
+| portal | issue/inspect/accept/revoke invitation, submit/list PortalRequest, safe request catalog/status, projectQuote, comment, propose, accept | Direct price mutation, internal DTO serialization, email delivery | identity/account scope; OrganizationInvitation, PortalRequest/lines, quotes/proposals/acceptances; quotation/order services | `/portal`, customer invitation actions | BR-005/007/008/025/026; every lookup customer-scoped; current assignment revalidated on submit |
+| leads (small portal-intake surface) | list/get scoped Leads, convert once, reasoned dismiss; Admin RFQ mode update | Qualification scoring/stages, independent pricing or ownership rules | PortalRequest; shared quotations.createDraft; recipient Alert and AuditEvent | `/leads`, `/settings/rfq-handling` | BR-017/021/024/026; Rep-own and managed-team scope; setting Admin-only |
 | orders | confirmEligibleRevision, snapshotOrder | Reviewer decisions, actual dispatch | quote/governance/acceptance reads; orders/lines | `/orders` | BR-007/015/017; transaction orchestrator |
-| fulfillment | previewSplit, reserve, override, ship, receiveStock, consolidate | Price/approval or invoice rules | orders; warehouses, balances, movements, reservations, shipments | `/fulfillment`, `/warehouses` | BR-009–011/015; Operations write |
-| billing | createSchedule, generateInvoice, changeSubscription, cancel, recordPayment, credit | Moving real money through a provider | orders and plan snapshots; subscriptions/periods/invoices/payments/credits | `/subscriptions`, `/invoices` | BR-012–016/017; Finance write |
+| fulfillment | previewSplit, reserve, override, receiveStock, consolidate; ship remains the next phase | Price/approval or invoice rules | immutable OrderLines; warehouses, balances, receipt movements, reservations, backorders | `/fulfillment`, `/warehouses` | BR-009–011/015; Finance/Admin write; `FULFILLED` currently means reservation-complete only |
+| billing | createConfirmationBilling, changeSubscription, recordPayment, reversePayment, requestInvoiceDueDateChange | Moving real money through a provider; recurring-period scheduling/proration until separately approved | accepted Order snapshots; subscriptions/change history/invoices/notes/payments | `/subscriptions`, `/invoices` | BR-012–016/017; Finance/Admin write |
 | deal-health | evaluateAlerts, nudge, acknowledge, resolve | Repricing deals or external delivery claims | scoped quote/order reads; alerts, notifications/jobs | `/deal-health`, `/notifications` | BR-018; scoped alerts |
 | reporting | aggregateSales, exportReport | Financial mutations or duplicate canonical totals | read-only scoped repositories | `/reports` | BR-020; export scope/limits |
 
@@ -125,8 +145,9 @@ Scheduler leases work from PostgreSQL using `FOR UPDATE SKIP LOCKED` or advisory
 
 - Only an owning repository writes its tables. Services expose operations; other modules do not import route/controller internals.
 - Pure quote pricing and governance evaluation accept snapshots and return results; they perform no database writes.
-- Application orchestration lives in services. Order confirmation receives a transaction context and coordinates snapshots/acceptance uniqueness; fulfillment and invoice creation occur as explicit transactions/jobs afterward.
+- Application orchestration lives in services. Order confirmation receives a transaction context and coordinates snapshot/acceptance uniqueness plus the combined first invoice and recurring-line subscription setup atomically. Fulfillment remains a separate downstream transaction. Future recurring-period invoices remain scheduler-owned and are not disguised as part of confirmation.
 - Repositories accept a Prisma transaction client for atomic cross-module workflows; they never open hidden nested transactions.
+- Portal RFQ processing is synchronous in one database transaction. The portal service persists the raw request, calls the narrow shared `quotations.createDraft` boundary only when required, links the resulting Lead/Quote, creates the recipient Alert and writes audit/idempotency before commit. There is no queue or external email side effect to reconcile in v1.
 - Audit writes participate in the caller transaction. Optional asynchronous side effects are represented as durable jobs after canonical state is persisted.
 - Avoid circular services: portal invokes order confirmation; orders reads quote/approval/acceptance through repositories or narrow interfaces, never invokes portal.
 
@@ -142,7 +163,7 @@ Structured JSON logs: timestamp, level, request ID, route, status, duration and 
 
 Prisma is the proposed ORM; PostgreSQL remains the only business datastore. [Database.md](Database.md) specifies tables, typed fields, ownership, relationships, constraints, indexes, transactions and deletion. Fixed-precision numeric fields, `timestamptz`, foreign keys, immutable submitted snapshots and uniqueness constraints are mandatory. Advanced check/partial-index/locking constraints can use reviewed SQL migrations; ORM convenience must not weaken integrity.
 
-Do not maintain authoritative totals in browser storage. Query caching is ephemeral. Database migrations are committed and applied separately from API startup. Five migrations currently implement the functional subset described in [Database.md](Database.md#current-database-state); the larger baseline remains a target contract.
+Do not maintain authoritative totals in browser storage. Query caching is ephemeral. Database migrations are committed and applied separately from API startup. Twenty-two migrations currently implement the functional subset described in [Database.md](Database.md#current-database-state); the larger baseline remains a target contract.
 
 ## 12. REST API Architecture
 
@@ -150,11 +171,13 @@ Do not maintain authoritative totals in browser storage. Query caching is epheme
 
 Optimistic concurrency uses `expectedVersion` on edits/state transitions; stale writes receive `409 STALE_VERSION`. Critical operations require `Idempotency-Key` scoped to actor, operation and resource, with payload-hash comparison. Repositories enforce ownership before returning existence details. Frontend requests never supply trusted roles, costs or approval results.
 
+Customer account assignment is an optimistic catalog aggregate. `customer-relationships.ts` is the sole runtime writer for CustomerRepresentative history and writes its before/after privileged audit in the same transaction. Quotation creation reads that aggregate but writes only quotation-owned records. This preserves the catalog/quotation boundary and prevents account reassignment from mutating historical or open deals.
+
 ## 13. Frontend Architecture
 
 React/TypeScript with Vite as proposed build tool; React Router for route/state and TanStack Query for server-state coordination. These dependencies are planned, not installed yet. HTML5 and authored CSS3 provide the design system; no global state library, chart package or animation framework without a concrete need.
 
-Feature ownership: `identity`, `quotations`, `approvals`, `fulfillment`, `billing`, `portal`, `deal-health`, `catalog`, `reporting`. Layouts own internal navigation versus customer shell. Shared components own accessible fields, dialogs, tables, badges and state panels; domain features own the calculations shown and workflows invoked.
+Feature ownership: `identity`, `quotations` (including its small Lead inbox), `approvals`, `fulfillment`, `billing`, `portal` (including request form/history), `deal-health`, `catalog`, `reporting`. Layouts own internal navigation versus customer shell. Shared components own accessible fields, dialogs, tables, badges and state panels; domain features own the calculations shown and workflows invoked.
 
 | State | Owner | Example |
 |---|---|---|
@@ -179,7 +202,7 @@ Identity is explicitly required. Proposed opaque random session cookie (`HttpOnl
 
 Mutations require session and CSRF token bound to session plus Origin validation; CORS allows exactly configured frontend origin in development, same-origin production. Public signup cannot choose privileged roles. Google signup accepts only a Google ID credential and verifies its signature, audience, expiry, and verified email on the server; the client ID is runtime configuration. The sign-up page keeps the Google option visible when configuration is absent and reports the missing setup instead of initiating authentication. Admin provisions Customer account ownership and activates internal users. Customers see only explicitly projected DTOs; cross-customer guesses get 404. Internal access requires team/ownership scope, not just role flags.
 
-Helmet, bounded JSON bodies (proposed 256 KiB, no arbitrary uploads), rate limits on auth and expensive endpoints, validation, parametrized queries and redacted logs. React escapes text; no raw HTML comments. Spreadsheet exports neutralize formula injection. Browser cookies never enter localStorage. Password reset/email delivery is an explicit future integration, not a fake success form.
+Helmet, bounded JSON bodies (proposed 256 KiB, no arbitrary uploads), rate limits on auth and expensive endpoints, validation, parametrized queries and redacted logs. React escapes text; no raw HTML comments. Spreadsheet exports neutralize formula injection. Browser cookies never enter localStorage. Password reset/email delivery is an explicit future integration, not a fake success form. Portal invitation issuance returns a raw manual-share link once and stores only a SHA-256 token hash. The public inspection/acceptance routes disclose only customer name and invited email after a valid pending token, use one non-leaking unavailable error for every unusable token state, and atomically bind the resulting portal identity to `customerId` only. Portal RFQ submission locks the Customer and revalidates the active primary Rep/team, is limited to the Proposed five requests per customer/user/hour, resolves product IDs only against the tenant's active catalog, and explicitly projects a safe status DTO without owner/dismiss/internal-note/Draft data. The configured-customer assignment and quotation-create gates are reused; no second ownership or pricing rule exists in the portal module.
 
 Production Platform Owner credentials come from deployment secrets with no code default; organization Admins are ordinary tenant-scoped users. The database application role excludes schema DDL; migration role is separate. Audit tables are append-only through application permissions/DB policy where practical. Backups must be encrypted and restore-tested.
 
@@ -194,6 +217,8 @@ Production Platform Owner credentials come from deployment secrets with no code 
 | Invalid transition | 409 `INVALID_STATE` | Explain current state and allowed next action |
 | Same key, different payload | 409 `IDEMPOTENCY_CONFLICT` | Use a new key only for a genuinely new intended action |
 | Missing pricing/cost/policy | 422 `CONFIGURATION_REQUIRED` | Admin fixes configuration; no silent zero/default |
+| Missing current portal account assignment | 422 `CONFIGURATION_REQUIRED` | Manager/Admin restores an active primary team/Rep before the customer retries |
+| Portal request limit exceeded | 429 `RATE_LIMITED` plus `Retry-After` | Retry after the rolling window; no request is silently accepted/dropped |
 | Approval reviewer missing | 409 `REVIEWER_UNAVAILABLE` or blocked case | Assign eligible reviewer; never bypass approval |
 | Stock race | 409 `STOCK_CHANGED` | Roll back, return fresh availability and preview |
 | Invoice overpayment | 422 `AMOUNT_EXCEEDS_BALANCE` | Refresh balance and enter appropriate payment |
@@ -331,12 +356,13 @@ The mappings below summarize requirement-to-implementation traceability. Review 
 ### Open business decisions before affected implementation
 
 1. Confirm/change proposed risk bands, aggregate caps and margin floors in P2/P4.
-2. Confirm/change proration timezone, initial invoice trigger, cancellation timing and unused-period credit policy before P7.
-3. Confirm team visibility and account activation policy before P1/P2.
-4. Confirm whether literal legacy `.xls` is required or `.xlsx` is acceptable before export implementation; current contract retains requested XLS.
+2. The initial invoice trigger is implemented at confirmation with the explicitly Proposed +14-day due default. Confirm/change proration timezone, cancellation timing, mixed-invoice separation and unused-period credit policy before the recurring scheduler/proration phase.
+3. Broader team visibility and internal account activation policy remains open. Customer portal invitation activation is now confirmed: Manager/Admin only, after primary team/Rep assignment, with manual link delivery and a customer-only identity.
+4. Current export implements the requested HTML-based legacy `.xls`; confirm whether a later `.xlsx` package/output is required.
 5. Portal invoice visibility is inferred from quotation-to-payment context; document any customer-account access changes.
+6. `LEAD_FIRST` and five customer/user requests per rolling hour are implemented Proposed defaults. Confirm or change them explicitly; both modes remain supported regardless of the selected default.
 
-These do not block the architecture package. They must not be silently represented as sourced requirements. No external deployment, payment-provider integration, source export or business-data mutation has occurred in this phase.
+These do not block the architecture package. They must not be silently represented as sourced requirements. No external deployment or payment-provider integration has occurred; the active portal has no payment-processing endpoint.
 
 ## Platform Super Admin implementation — 2026-09-05
 

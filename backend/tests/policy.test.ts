@@ -8,6 +8,8 @@ describe('discount policy updates', () => {
     servicesLimit: 10,
     subscriptionLimit: 8,
     financeThreshold: 5,
+    aggregateDiscountLimit: 20,
+    minimumMarginPercent: 12,
     reason: '  Margin protection review.  ',
   };
 

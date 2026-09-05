@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allocateStock, allocationMetrics, billingSchedule, calculateQuote, manualAllocation } from '../src/rules.js';
+import { allocateStock, allocationMetrics, billingSchedule, calculateAddOnContribution, calculateQuote, manualAllocation } from '../src/rules.js';
 
 describe('quotation governance', () => {
   it('routes an 18% service discount over a 10% limit to finance', () => {
@@ -32,7 +32,14 @@ describe('quotation governance', () => {
     const lowMargin = calculateQuote([{ quantity: 1, unitPrice: 100, unitCost: 95, discount: 0, allowedDiscount: 10 }], 0, { financeThreshold: 99 });
     expect(excess.needsManager).toBe(true);
     expect(excess.needsFinance).toBe(false);
+    expect(lowMargin.needsManager).toBe(true);
     expect(lowMargin.needsFinance).toBe(true);
+  });
+
+  it('uses the quotation calculator as the single source for add-on margin contribution',()=>{
+    const line={quantity:1,unitPrice:400,unitCost:250,discount:0,allowedDiscount:10,taxRate:18,cadence:'One-time'};
+    const quote=calculateQuote([line],5);
+    expect(calculateAddOnContribution(line,5)).toEqual({netContribution:quote.subtotal,marginContribution:quote.margin,cadence:'One-time'});
   });
 });
 describe('warehouse allocation', () => {

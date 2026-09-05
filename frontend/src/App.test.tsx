@@ -78,7 +78,7 @@ describe("DealOS public routes", () => {
     const workspace = {
       user:{id:'customer-user',name:'Buyer User',email:'buyer@example.com',role:'CUSTOMER',customerId:'customer-1',moduleAccess:[],actorType:'USER',platformSuperAdmin:false,viewContext:null},
       organization:{id:'org-1',name:'Acme'},users:[],customers:[],products:[],policies:[],warehouses:[],subscriptions:[],alerts:[],audits:[],
-      quotes:[{id:'quote-1',number:'Q-EMAIL-1',customer:'Buyer Company',customerTier:'Gold',stage:'APPROVED',version:2,revisionNumber:2,orderDiscount:27,total:1180,margin:0,riskScore:0,updatedAt:'2026-09-05T00:00:00.000Z',lines:[],approvals:[],negotiation:[],invoices:[]}],
+      quotes:[{id:'quote-1',number:'Q-EMAIL-1',customer:'Buyer Company',customerTier:'Gold',stage:'APPROVED',version:2,revisionId:'revision-2',revisionNumber:2,termsHash:'terms-2',orderDiscount:27,total:1180,margin:0,riskScore:0,updatedAt:'2026-09-05T00:00:00.000Z',capabilities:{comment:true,accept:true,propose:true},lines:[],approvals:[],negotiation:[],invoices:[]}],
       invoices:[{id:'invoice-1',number:'INV-EMAIL-1',customer:'Buyer Company',amount:1180,paidAmount:0,state:'UNPAID',dueAt:'2026-09-20T00:00:00.000Z',lines:[],payments:[]}],
     };
     let authenticated = false;
@@ -99,13 +99,13 @@ describe("DealOS public routes", () => {
     fireEvent.change(screen.getByLabelText('Password'),{target:{value:'CustomerPass12!'}});
     fireEvent.click(screen.getByRole('button',{name:'Sign in with Email ID'}));
     expect((await screen.findAllByText('Q-EMAIL-1')).length).toBeGreaterThan(0);
-    expect(screen.getByText('27%')).toBeInTheDocument();
-    expect(screen.getByText('Negotiated order discount')).toBeInTheDocument();
+    expect(screen.getByText('Revision 2 · frozen customer copy')).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'Accept quotation'})).toBeEnabled();
     fireEvent.click(screen.getByRole('button',{name:/Invoices/}));
     expect((await screen.findAllByText('INV-EMAIL-1')).length).toBeGreaterThan(0);
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/auth/customer/login',expect.objectContaining({method:'POST',body:JSON.stringify({email:'buyer@example.com',password:'CustomerPass12!'})}));
   });
-  it("lets an admin create a customer with optional password portal access", async () => {
+  it("creates a customer without bypassing assignment-gated portal onboarding", async () => {
     window.history.replaceState({}, "", "/app");
     const workspace = { user:{id:'admin',name:'Admin User',email:'admin@example.com',role:'ADMIN',moduleAccess:[],actorType:'USER',platformSuperAdmin:false,viewContext:null}, organization:{id:'org',name:'Acme'}, users:[], customers:[], quotes:[], products:[], policies:[], warehouses:[], subscriptions:[], invoices:[], alerts:[], audits:[] };
     fetchMock.mockResolvedValue({ok:true,json:async()=>({success:true,data:workspace})});
@@ -116,13 +116,14 @@ describe("DealOS public routes", () => {
     expect(screen.getByLabelText("Tier")).not.toHaveTextContent("Enterprise");
     fireEvent.change(screen.getByLabelText("Company Name *"), {target:{value:"Portal Customer"}});
     fireEvent.change(screen.getByLabelText(/^Email ID/), {target:{value:"portal@example.com"}});
-    fireEvent.change(screen.getByLabelText(/^Customer portal password/), {target:{value:"CustomerPass12!"}});
     fireEvent.change(screen.getByPlaceholderText("e.g. 9876543210"), {target:{value:"9876543210"}});
     fireEvent.click(screen.getAllByRole("button", {name:/Add Customer/}).at(-1)!);
     await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith('/api/v1/customers',expect.objectContaining({
       method:'POST',
-      body:expect.stringContaining('"portalPassword":"CustomerPass12!"'),
+      body:expect.stringContaining('"email":"portal@example.com"'),
     })));
+    const requestCall=fetchMock.mock.calls.find(([url,options])=>url==='/api/v1/customers'&&options?.method==='POST');
+    expect(JSON.parse(String(requestCall?.[1]?.body))).not.toHaveProperty('portalPassword');
   });
   it("lets an admin edit and safely delete a customer from customer details", async () => {
     window.history.replaceState({}, "", "/app?screen=customer&record=customer-1");
@@ -178,9 +179,9 @@ describe("DealOS public routes", () => {
     expect(screen.getByRole("button", { name: "Add Invoice" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "View reports" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Add Invoice" }));
-    expect(screen.getByRole("heading", { name: "Create Invoice" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("heading", { name: "Create Invoice" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Issue invoice" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("heading", { name: "Issue invoice" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Overview" }));
     fireEvent.click(screen.getByRole("button", { name: "View reports" }));
     expect(screen.getByRole("heading", { name: "Sales reporting" })).toBeInTheDocument();
@@ -242,28 +243,28 @@ describe("DealOS public routes", () => {
   });
   it("filters the approval queue by pending, returned, and approved state", async () => {
     window.history.replaceState({}, "", "/app");
-    const quote = (id:string, stage:string, state:string) => ({ id, number:`Q-${id}`, customer:`${id} Customer`, customerTier:'Gold', stage, version:1, orderDiscount:0, total:100, margin:20, riskScore:1, updatedAt:'2026-09-05T00:00:00.000Z', lines:[], approvals:[{id:`approval-${id}`,step:'Sales Manager',sequence:1,state}], negotiation:[], invoices:[] });
-    const workspace = { user:{id:'admin',name:'Admin User',email:'admin@example.com',role:'ADMIN',moduleAccess:[],actorType:'USER',platformSuperAdmin:false,viewContext:null}, organization:{id:'org',name:'Acme'}, users:[], quotes:[quote('PENDING','PENDING_APPROVAL','PENDING'),quote('RETURNED','DRAFT','RETURNED'),quote('APPROVED','APPROVED','APPROVED'),quote('REJECTED','REJECTED','REJECTED')], products:[], policies:[], warehouses:[], subscriptions:[], invoices:[], alerts:[], audits:[] };
-    fetchMock.mockImplementation((url:string) => Promise.resolve({ok:true,json:async()=>({success:true,data:url.endsWith('/workspace')?workspace:{}})}));
+    const approvalCase = (state:string) => ({id:`case-${state}`,version:1,state,route:'MANAGER',revisionId:`revision-${state}`,policyId:'policy-1',createdAt:'2026-09-05T00:00:00.000Z',completedAt:null,quotation:{id:`quote-${state}`,number:`Q-${state}`,customer:`${state} Customer`,customerTier:'Gold',total:'100',currency:'INR',owner:{id:'rep',name:'Rep'},team:{id:'team',name:'Sales'}},submittedBy:{id:'rep',name:'Rep'},currentStep:null,managerStep:null,risk:{components:{},flags:[],reasons:[],policy:{}},lines:[],steps:[],audit:[]});
+    const workspace = { user:{id:'manager',name:'Manager User',email:'manager@example.com',role:'MANAGER',moduleAccess:['dashboard','approvals'],actorType:'USER',platformSuperAdmin:false,viewContext:null}, organization:{id:'org',name:'Acme'}, users:[], quotes:[], products:[], policies:[], warehouses:[], subscriptions:[], invoices:[], alerts:[], audits:[] };
+    fetchMock.mockImplementation((url:string) => Promise.resolve({ok:true,json:async()=>({success:true,data:url.endsWith('/workspace')?workspace:url.includes('/approvals?state=')?{items:[approvalCase(new URL(url,'http://local').searchParams.get('state')!)]}:{}})}));
     render(<App/>);
     expect(await screen.findByRole("heading", {name:"Sales dashboard"})).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", {name:"Approvals"}));
-    expect(screen.getByText("Q-PENDING")).toBeInTheDocument();
+    expect(await screen.findByText("Q-PENDING")).toBeInTheDocument();
     expect(screen.queryByText("Q-RETURNED")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", {name:"Pending"})).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", {name:"Pending"})).toHaveAttribute("aria-current", "page");
     fireEvent.click(screen.getByRole("button", {name:"Returned"}));
-    expect(screen.getByText("Q-RETURNED")).toBeInTheDocument();
+    expect(await screen.findByText("Q-RETURNED")).toBeInTheDocument();
     expect(screen.queryByText("Q-PENDING")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", {name:"Returned"})).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", {name:"Returned"})).toHaveAttribute("aria-current", "page");
     fireEvent.click(screen.getByRole("button", {name:"Approved"}));
-    expect(screen.getByText("Q-APPROVED")).toBeInTheDocument();
+    expect(await screen.findByText("Q-APPROVED")).toBeInTheDocument();
     expect(screen.queryByText("Q-RETURNED")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", {name:"Approved"})).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", {name:"Approved"})).toHaveAttribute("aria-current", "page");
     expect(screen.queryByText("Q-REJECTED")).not.toBeInTheDocument();
   });
   it("edits and publishes every discount ceiling with an audit reason", async () => {
     window.history.replaceState({}, "", "/app");
-    const policy = { id: "p1", tier: "Gold", maxDiscount: 15, hardwareLimit: 15, servicesLimit: 10, subscriptionLimit: 10, financeThreshold: 5, version: 2, publishedAt: "2026-09-05T08:00:00.000Z" };
+    const policy = { id: "p1", tier: "Gold", maxDiscount: 15, hardwareLimit: 15, servicesLimit: 10, subscriptionLimit: 10, financeThreshold: 5, aggregateDiscountLimit: 20, minimumMarginPercent: 12, version: 2, publishedAt: "2026-09-05T08:00:00.000Z" };
     const workspace = { user: { id: "a", name: "Admin", email: "admin@acme.test", role: "ADMIN", moduleAccess: [], actorType: "USER", platformSuperAdmin: false, viewContext: null }, organization: { id: "o", name: "Acme" }, users: [], quotes: [], products: [], policies: [policy], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] };
     fetchMock.mockImplementation((url: string, options?: RequestInit) => Promise.resolve({
       ok: true,
@@ -283,7 +284,7 @@ describe("DealOS public routes", () => {
       "/api/v1/policies/p1",
       expect.objectContaining({
         method: "PATCH",
-        body: JSON.stringify({ maxDiscount: 14, hardwareLimit: 14, servicesLimit: 9, subscriptionLimit: 8, financeThreshold: 4, reason: "Margin protection review." }),
+        body: JSON.stringify({ maxDiscount: 14, hardwareLimit: 14, servicesLimit: 9, subscriptionLimit: 8, financeThreshold: 4, aggregateDiscountLimit: 20, minimumMarginPercent: 12, reason: "Margin protection review." }),
       }),
     ));
   });
@@ -379,7 +380,7 @@ describe("DealOS public routes", () => {
     });
   });
 
-  it("opens the same manual-brand and automatic base-price form from invoice Add Item", async () => {
+  it("does not expose a free-form invoice builder outside a confirmed order", async () => {
     window.history.replaceState({}, "", "/app?screen=invoices");
     const workspace = { user: { id: "a", name: "Admin", email: "admin@acme.test", role: "ADMIN", moduleAccess: [], actorType: "USER", platformSuperAdmin: false, viewContext: null }, organization: { id: "o", name: "Acme" }, users: [], customers: [], quotes: [], products: [], policies: [], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] };
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ success: true, data: workspace }) });
@@ -389,45 +390,29 @@ describe("DealOS public routes", () => {
     expect(screen.queryByRole("button", { name: "All invoices" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Unpaid" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Paid" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Create invoice" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add Item" }));
-    fireEvent.click(screen.getByRole("button", { name: "Create New Product" }));
-
-    expect(screen.getByRole("dialog", { name: "Create Product" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Vendor / brand")).not.toHaveAttribute("list");
-    fireEvent.change(screen.getByLabelText("Price treatment"), { target: { value: "included" } });
-    fireEvent.change(screen.getByLabelText("Selling price"), { target: { value: "118" } });
-    expect(screen.getByLabelText("Base price (before GST)")).toHaveValue("100.00");
+    fireEvent.click(screen.getByRole("button", { name: "Issue invoice" }));
+    expect(screen.getByRole("dialog", { name: "Issue invoice" })).toBeInTheDocument();
+    expect(screen.getByText("No orders waiting for an invoice")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add Item" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create New Product" })).not.toBeInTheDocument();
   });
 
-  it("uses separate professional pickers and INR totals throughout invoice creation", async () => {
+  it("issues an invoice from an eligible confirmed order snapshot", async () => {
     window.history.replaceState({}, "", "/app?screen=invoices");
     const customer = { id: "c1", name: "Northstar Retail", contactPerson: "Asha Rao", email: "asha@northstar.test", phone: "9876543210", countryCode: "+91", gstin: "29ABCDE1234F1Z5", customerType: "Business", tier: "Gold", active: true, paymentTerms: 15, billingAddress: "Bengaluru", shippingAddress: "Bengaluru", createdAt: "2026-09-06T00:00:00.000Z" };
-    const product = { id: "p1", name: "Office Router", sku: "RTR-100", category: "Hardware", description: "Managed office router", unit: "Piece", price: 1000, cost: 700, taxRate: 18, recurring: false, cadence: null, active: true, storeVisible: true, featured: false, stocks: [{ onHand: 10, reserved: 2, minAlertLevel: 2, maxCapacity: 20, warehouse: { name: "Main" } }] };
-    const workspace = { user: { id: "a", name: "Admin", email: "admin@acme.test", role: "ADMIN", moduleAccess: [], actorType: "USER", platformSuperAdmin: false, viewContext: null }, organization: { id: "o", name: "Acme" }, users: [], customers: [customer], quotes: [], products: [product], policies: [], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] };
+    const quote = { id:"q1",number:"Q-1001",customer:"Northstar Retail",customerTier:"Gold",stage:"CONFIRMED",version:3,orderDiscount:0,total:1180,margin:300,riskScore:0,updatedAt:"2026-09-06T00:00:00.000Z",order:{id:"o1",number:"SO-1001",state:"CONFIRMED"},lines:[{id:"l1",productId:"p1",product:{id:"p1",name:"Office Router",sku:"RTR-100",category:"Hardware",description:"Managed office router",price:1000,cost:700,taxRate:18,recurring:false,cadence:null},quantity:1,unitPrice:1000,discount:0,allowedDiscount:5,net:1000}],approvals:[],negotiation:[],invoices:[] };
+    const workspace = { user: { id: "a", name: "Admin", email: "admin@acme.test", role: "ADMIN", moduleAccess: [], actorType: "USER", platformSuperAdmin: false, viewContext: null }, organization: { id: "o", name: "Acme" }, users: [], customers: [customer], quotes: [quote], products: [], policies: [], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] };
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ success: true, data: workspace }) });
     render(<App />);
 
     expect((await screen.findAllByRole("heading", { name: "Invoices" }))[0]).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Create invoice" }));
-    fireEvent.click(screen.getByRole("button", { name: "Select Customer" }));
-    const customerDialog = screen.getByRole("dialog", { name: "Select customer" });
-    expect(customerDialog).toBeInTheDocument();
-    expect(within(customerDialog).getByRole("textbox", { name: "Search customers" })).toBeInTheDocument();
-    fireEvent.click(within(customerDialog).getByRole("button", { name: /Northstar Retail/ }));
-
-    fireEvent.click(screen.getByRole("button", { name: "Add Item" }));
-    const itemDialog = screen.getByRole("dialog", { name: "Add invoice items" });
-    expect(within(itemDialog).getByText("₹1,000.00")).toBeInTheDocument();
-    expect(itemDialog).not.toHaveTextContent("$");
-    fireEvent.click(within(itemDialog).getByRole("button", { name: "Add" }));
-    expect(within(itemDialog).getAllByText("₹1,000.00").length).toBeGreaterThan(1);
-    fireEvent.click(within(itemDialog).getByRole("button", { name: "Add to invoice" }));
-
-    const totals = screen.getByLabelText("Invoice totals");
-    expect(totals).toHaveTextContent("₹180.00");
-    expect(totals).toHaveTextContent("₹1,180.00");
-    expect(totals).not.toHaveTextContent("$");
+    fireEvent.click(screen.getByRole("button", { name: "Issue invoice" }));
+    const dialog=screen.getByRole("dialog", { name: "Issue invoice" });
+    expect(within(dialog).getByText("Q-1001")).toBeInTheDocument();
+    expect(within(dialog).getByText("SO-1001 · Northstar Retail")).toBeInTheDocument();
+    const dueAt=(within(dialog).getByLabelText("Due date") as HTMLInputElement).value;
+    fireEvent.click(within(dialog).getByRole("button", { name: "Issue invoice" }));
+    await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith('/api/v1/orders/o1/invoices',expect.objectContaining({method:'POST',body:JSON.stringify({kind:'ONE_TIME',dueAt})})));
   });
 
   it("starts inventory numbers blank and supports an inline custom category", async () => {
@@ -485,14 +470,14 @@ describe("DealOS public routes", () => {
   it("renders live fulfillment stock and previews a warehouse split before reservation", async () => {
     window.history.replaceState({}, "", "/app");
     const product = { id: "p1", name: "Laptop Pro 14", sku: "LP14", category: "Hardware", description: "Laptop", unit: "unit", price: 1200, cost: 800, taxRate: 18, recurring: false, active: true, stocks: [] };
-    const quote = { id: "q1", number: "Q-1042", customer: "Acme Corp", customerTier: "Gold", stage: "CONFIRMED", version: 1, orderDiscount: 0, total: 1200, margin: 400, riskScore: 0, updatedAt: "2026-09-05T00:00:00.000Z", order: { id: "o1", number: "SO-1042" }, lines: [{ id: "l1", productId: "p1", quantity: 6, unitPrice: 1200, unitCost: 800, discount: 0, allowedDiscount: 15, product }], approvals: [], negotiation: [], invoices: [] };
+    const quote = { id: "q1", number: "Q-1042", customer: "Acme Corp", customerTier: "Gold", stage: "CONFIRMED", version: 1, orderDiscount: 0, total: 1200, margin: 400, riskScore: 0, updatedAt: "2026-09-05T00:00:00.000Z", order: { id: "o1", number: "SO-1042", state: "CONFIRMED" }, lines: [{ id: "l1", productId: "p1", quantity: 6, unitPrice: 1200, unitCost: 800, discount: 0, allowedDiscount: 15, product }], approvals: [], negotiation: [], invoices: [] };
     const warehouses = [
       { id: "w1", name: "Main Warehouse", priority: 1, shippingCost: 45, active: true, stocks: [{ onHand: 4, reserved: 0, available: 4, product }] },
       { id: "w2", name: "East Depot", priority: 2, shippingCost: 28, active: true, stocks: [{ onHand: 8, reserved: 1, available: 7, product }] },
     ];
     const workspace = { user: { id: "a", name: "Admin", email: "admin@acme.test", role: "ADMIN", moduleAccess: [], actorType: "USER", platformSuperAdmin: false, viewContext: null }, organization: { id: "o", name: "Acme" }, users: [], quotes: [quote], products: [product], policies: [], warehouses, subscriptions: [], invoices: [], alerts: [], audits: [] };
-    const preview = { state: "SPLIT_PENDING", split: { split: [{ productId: "p1", warehouseId: "w1", warehouseName: "Main Warehouse", quantity: 4 }, { productId: "p1", warehouseId: "w2", warehouseName: "East Depot", quantity: 2 }], backorders: [] }, estimatedCost: 73, shipmentCount: 2, preview: true };
-    fetchMock.mockImplementation((url: string) => Promise.resolve({ ok: true, json: async () => ({ success: true, data: url.endsWith("/fulfillment/q1/preview") ? preview : workspace }) }));
+    const preview = { state: "SPLIT_PENDING", split: { split: [{ orderLineId: "ol1", productId: "p1", warehouseId: "w1", warehouseName: "Main Warehouse", quantity: 4 }, { orderLineId: "ol1", productId: "p1", warehouseId: "w2", warehouseName: "East Depot", quantity: 2 }], backorders: [] }, items:[{orderLineId:"ol1",productId:"p1",productName:"Laptop Pro 14",orderedQuantity:6,reservedQuantity:6,fulfilledQuantity:6,backorderedQuantity:0}], estimatedCost: 73, shipmentCount: 2, stockFingerprint:"a".repeat(64), preview: true };
+    fetchMock.mockImplementation((url: string) => Promise.resolve({ ok: true, json: async () => ({ success: true, data: url.endsWith("/fulfillment/o1/preview") ? preview : workspace }) }));
     render(<App />);
     expect(await screen.findByRole("heading", { name: "Sales dashboard" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Fulfillment" }));
@@ -507,10 +492,10 @@ describe("DealOS public routes", () => {
     fireEvent.click(screen.getByRole("button", { name: "Record stock receipt" }));
     fireEvent.change(screen.getByLabelText("Quantity received"), { target: { value: "3" } });
     fireEvent.change(screen.getByLabelText("Receipt reason"), { target: { value: "PO-1042 received at dock" } });
-    fireEvent.click(screen.getByRole("button", { name: "Record Receipt" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/warehouses/w1/restock", expect.objectContaining({ method: "POST", body: JSON.stringify({ productId: "p1", quantity: 3, reason: "PO-1042 received at dock" }) })));
-    fireEvent.click(screen.getByRole("row", { name: /Q-1042.*Acme Corp.*Split Pending/ }));
-    expect(await screen.findByRole("heading", { name: "Fulfillment Detail: Q-1042 (Acme Corp)" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Record Receipt & Check Backorder" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/fulfillment/o1/receive", expect.objectContaining({ method: "POST", body: JSON.stringify({ warehouseId: "w1", productId: "p1", quantity: 3, reason: "PO-1042 received at dock" }) })));
+    fireEvent.click(screen.getByRole("row", { name: /SO-1042.*Acme Corp.*Split Pending/ }));
+    expect(await screen.findByRole("heading", { name: "Fulfillment Detail: SO-1042 (Acme Corp)" })).toBeInTheDocument();
     expect(await screen.findByRole("row", { name: /Main Warehouse.*4 units.*1.*₹45/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Accept Suggested Split" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Manual Override" }));
@@ -527,25 +512,14 @@ describe("DealOS public routes", () => {
   it("opens customer-scoped invoices in the new deal room", async () => {
     window.history.replaceState({}, "", "/customer");
     const portalWorkspace = { user:{id:'customer',name:'Priya Nair',email:'customer@dealos.demo',role:'CUSTOMER',moduleAccess:[],actorType:'USER',platformSuperAdmin:false,viewContext:null},organization:{id:'org',name:'DealOS Demo'},users:[],customers:[],quotes:[],products:[],policies:[],warehouses:[],subscriptions:[],invoices:[{id:'invoice',number:'INV-1042',customer:'Acme Corp',amount:'2520',paidAmount:'0',state:'UNPAID',dueAt:'2026-09-20T00:00:00.000Z',lines:[],payments:[]}],alerts:[],audits:[] };
-    let paid=false;
-    fetchMock.mockImplementation((url:string,options?:RequestInit)=>{
-      if(url.endsWith('/portal/invoices/invoice/pay')&&options?.method==='POST')paid=true;
-      const current=paid?{...portalWorkspace,invoices:[{...portalWorkspace.invoices[0],paidAmount:'2520',state:'PAID',payments:[{id:'payment',amount:'2520',reference:'PORTAL-DEMO',paidAt:'2026-09-06T00:00:00.000Z'}]}]}:portalWorkspace;
-      return Promise.resolve({ok:true,json:async()=>({success:true,data:current})});
-    });
+    fetchMock.mockResolvedValue({ok:true,json:async()=>({success:true,data:portalWorkspace})});
     render(<App />);
     expect(await screen.findByRole("heading", { name: "Review your quotations" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Invoices/ }));
     expect(screen.getByRole("heading", { name: "INV-1042" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Download PDF" })).toHaveAttribute("href", "/api/v1/invoices/invoice/pdf");
-    fireEvent.click(screen.getByRole("button", { name: "Pay now · ₹2,520" }));
-    expect(await screen.findByRole("heading", { name: "Successfully paid" })).toBeInTheDocument();
-    expect(screen.getByText("INV-1042 is now marked Paid in both the customer portal and the invoice workspace.")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/portal/invoices/invoice/pay',expect.objectContaining({method:'POST'}));
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
-    expect(screen.getByRole("button", { name: "Paid" })).toBeDisabled();
-    expect(screen.getByText("This invoice is fully paid and synchronized with the business account.")).toBeInTheDocument();
-    expect(window.localStorage.getItem('dealos.invoice.updated')).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Request due-date change" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /Pay now/ })).not.toBeInTheDocument();
   });
   it("uses the dedicated Platform Owner login and opens global control", async () => {
     window.history.replaceState({}, "", "/login/super-admin");

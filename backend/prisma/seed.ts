@@ -21,11 +21,13 @@ async function main() {
   await db.order.deleteMany();
   await db.customerAcceptance.deleteMany();
   await db.approval.deleteMany();
+  await db.approvalCase.deleteMany();
   await db.negotiation.deleteMany();
   await db.quote.updateMany({ data: { currentRevisionId: null } });
   await db.quoteRevision.deleteMany();
   await db.quoteLine.deleteMany();
   await db.quote.deleteMany();
+  await db.customerRepresentative.deleteMany();
   await db.salesTeamMember.deleteMany();
   await db.salesTeam.deleteMany();
   await db.stockBalance.deleteMany();
@@ -77,6 +79,12 @@ async function main() {
     { teamId: northstarTeam.id, userId: northstarRep.id },
     { teamId: northstarTeam.id, userId: northstarAdmin.id },
   ] });
+  await db.customer.updateMany({ where: { id: { in: [acme.id, beta.id, northstar.id] } }, data: { primarySalesTeamId: enterpriseTeam.id } });
+  await db.customer.update({ where: { id: orion.id }, data: { primarySalesTeamId: northstarTeam.id } });
+  await db.customerRepresentative.createMany({ data: [
+    ...[acme, beta, northstar].map((customer) => ({ customerId: customer.id, userId: rep.id, role: 'PRIMARY' as const, assignedById: organizationAdmin.id })),
+    { customerId: orion.id, userId: northstarRep.id, role: 'PRIMARY', assignedById: northstarAdmin.id },
+  ] });
 
   await Promise.all([
     ...users.slice(0, 5).map((user) => db.organizationMembership.create({ data: { organizationId: primaryOrganization.id, userId: user.id, accessRole: user.role === Role.ADMIN ? 'ORGANIZATION_ADMIN' : user.role === Role.CUSTOMER ? 'PORTAL_USER' : 'ORGANIZATION_MEMBER', businessRole: user.role } })),
@@ -92,7 +100,7 @@ async function main() {
     db.product.create({ data: { organizationId, name: 'Care Plan', sku: 'SUB-CARE', category: 'Subscriptions', description: 'Priority help desk and device monitoring.', unit: 'Seat', price: 40, cost: 12, taxRate: 18, recurring: true, cadence: 'Monthly' } }),
   ]);
   const northstarProduct = await db.product.create({ data: { organizationId: northstarOrganization.id, name: 'Northstar Edge Gateway', sku: 'NS-HW-EDGE', category: 'Hardware', description: 'Secure distribution edge appliance.', unit: 'Unit', price: 1800, cost: 1120, taxRate: 18 } });
-  await Promise.all([
+  const policies = await Promise.all([
     db.discountPolicy.create({ data: { organizationId, tier: 'Bronze', maxDiscount: 5, hardwareLimit: 5, servicesLimit: 5, subscriptionLimit: 3, financeThreshold: 5 } }),
     db.discountPolicy.create({ data: { organizationId, tier: 'Silver', maxDiscount: 10, hardwareLimit: 10, servicesLimit: 8, subscriptionLimit: 6, financeThreshold: 5 } }),
     db.discountPolicy.create({ data: { organizationId, tier: 'Gold', maxDiscount: 15, hardwareLimit: 15, servicesLimit: 10, subscriptionLimit: 10, financeThreshold: 5 } }),
@@ -114,16 +122,17 @@ async function main() {
     { product: care, quantity: 30, discount: 5, allowedDiscount: 10, cadence: 'Monthly' },
   ];
   const q102Calc = calculateQuote(q102Lines.map((line) => ({ quantity: line.quantity, unitPrice: line.product.price, unitCost: line.product.cost, discount: line.discount, allowedDiscount: line.allowedDiscount, taxRate: line.product.taxRate, cadence: line.cadence })), 0);
-  const q102 = await db.quote.create({ data: { organizationId, number: 'Q-0102', customer: acme.name, customerId: acme.id, customerTier: acme.tier, ownerId: rep.id, teamId: enterpriseTeam.id, stage: 'PENDING_APPROVAL', total: q102Calc.total, taxTotal: q102Calc.taxTotal, totalsByCadence: json(q102Calc.totalsByCadence), margin: q102Calc.margin, riskScore: q102Calc.riskScore, lines: { create: q102Lines.map((line) => ({ productId: line.product.id, quantity: line.quantity, unitPrice: line.product.price, unitCost: line.product.cost, discount: line.discount, allowedDiscount: line.allowedDiscount })) } } });
+  const q102 = await db.quote.create({ data: { organizationId, number: 'Q-0102', customer: acme.name, customerId: acme.id, customerTier: acme.tier, ownerId: rep.id, createdById: rep.id, teamId: enterpriseTeam.id, stage: 'PENDING_APPROVAL', total: q102Calc.total, taxTotal: q102Calc.taxTotal, totalsByCadence: json(q102Calc.totalsByCadence), margin: q102Calc.margin, riskScore: q102Calc.riskScore, lines: { create: q102Lines.map((line) => ({ productId: line.product.id, quantity: line.quantity, unitPrice: line.product.price, unitCost: line.product.cost, discount: line.discount, allowedDiscount: line.allowedDiscount })) } } });
   const q102Revision = await db.quoteRevision.create({ data: { quoteId: q102.id, revisionNumber: 1, state: 'SUBMITTED', currency: 'INR', validUntil: new Date('2026-10-05'), terms: 'Net 30. Prices include the governed commercial discounts shown.', orderDiscount: 0, subtotal: q102Calc.subtotal, taxTotal: q102Calc.taxTotal, total: q102Calc.total, margin: q102Calc.margin, riskScore: q102Calc.riskScore, totalsByCadence: json(q102Calc.totalsByCadence), linesSnapshot: json(q102Lines.map((line, index) => ({ ...q102Calc.lines[index], productId: line.product.id, name: line.product.name, sku: line.product.sku, category: line.product.category }))), policySnapshot: { tier: 'Gold', financeThreshold: '5.00' }, termsHash: hash({ quote: q102.id, calculation: q102Calc }), submittedById: rep.id } });
   await db.quote.update({ where: { id: q102.id }, data: { currentRevisionId: q102Revision.id } });
+  const q102Case = await db.approvalCase.create({ data: { quoteId:q102.id, revisionId:q102Revision.id, policyId:policies[2]!.id, cycle:1, state:'PENDING', route:'MANAGER_FINANCE', riskSnapshot:json({components:{worstExcess:q102Calc.worstExcess,weightedExcess:q102Calc.weightedExcess,aggregateDiscount:q102Calc.aggregateDiscount,marginPercent:q102Calc.marginPercent},flags:[],reasons:['Seeded governed review'],policy:{id:policies[2]!.id,tier:'Gold',version:1}}), submittedById:rep.id } });
   await db.approval.createMany({ data: [
-    { quoteId: q102.id, revisionId: q102Revision.id, cycle: 1, step: 'Sales Manager', sequence: 1, state: 'PENDING' },
-    { quoteId: q102.id, revisionId: q102Revision.id, cycle: 1, step: 'Finance', sequence: 2, state: 'WAITING' },
+    { quoteId: q102.id, revisionId: q102Revision.id, caseId:q102Case.id, cycle: 1, step: 'Sales Manager', sequence: 1, state: 'PENDING' },
+    { quoteId: q102.id, revisionId: q102Revision.id, caseId:q102Case.id, cycle: 1, step: 'Finance', sequence: 2, state: 'WAITING' },
   ] });
 
   for (const [number, customer, stage] of [['Q-0103', beta, 'DRAFT'], ['Q-0104', northstar, 'DRAFT']] as const) {
-    const quote = await db.quote.create({ data: { organizationId, number, customer: customer.name, customerId: customer.id, customerTier: customer.tier, ownerId: rep.id, teamId: enterpriseTeam.id, stage } });
+    const quote = await db.quote.create({ data: { organizationId, number, customer: customer.name, customerId: customer.id, customerTier: customer.tier, ownerId: rep.id, createdById: rep.id, teamId: enterpriseTeam.id, stage } });
     const revision = await db.quoteRevision.create({ data: { quoteId: quote.id, revisionNumber: 1, state: 'DRAFT', orderDiscount: 0, subtotal: 0, taxTotal: 0, total: 0, margin: 0, riskScore: 0, totalsByCadence: {}, linesSnapshot: [], policySnapshot: {}, termsHash: hash({ quote: quote.id, nonce: number }) } });
     await db.quote.update({ where: { id: quote.id }, data: { currentRevisionId: revision.id } });
   }
@@ -131,7 +140,7 @@ async function main() {
   async function createConfirmedHardwareOrder(number: string, customer: typeof acme, product: typeof laptop, quantity: number) {
     const subtotal = Number(product.price) * quantity;
     const taxTotal = subtotal * Number(product.taxRate) / 100;
-    const quote = await db.quote.create({ data: { organizationId, number, customer: customer.name, customerId: customer.id, customerTier: customer.tier, ownerId: rep.id, stage: 'CONFIRMED', total: subtotal + taxTotal, taxTotal, margin: (Number(product.price) - Number(product.cost)) * quantity, sentAt: new Date('2026-09-05'), lines: { create: [{ productId: product.id, quantity, unitPrice: product.price, unitCost: product.cost, discount: 0, allowedDiscount: 15 }] } } });
+    const quote = await db.quote.create({ data: { organizationId, number, customer: customer.name, customerId: customer.id, customerTier: customer.tier, ownerId: rep.id, createdById: rep.id, teamId: enterpriseTeam.id, stage: 'CONFIRMED', total: subtotal + taxTotal, taxTotal, margin: (Number(product.price) - Number(product.cost)) * quantity, sentAt: new Date('2026-09-05'), lines: { create: [{ productId: product.id, quantity, unitPrice: product.price, unitCost: product.cost, discount: 0, allowedDiscount: 15 }] } } });
     const terms = hash({ quoteId: quote.id, number, productId: product.id, quantity });
     const revision = await db.quoteRevision.create({ data: { quoteId: quote.id, revisionNumber: 1, state: 'SENT', sentAt: new Date('2026-09-05'), orderDiscount: 0, subtotal, taxTotal, total: subtotal + taxTotal, margin: (Number(product.price) - Number(product.cost)) * quantity, riskScore: 0, totalsByCadence: { 'One-time': { subtotal, tax: taxTotal, total: subtotal + taxTotal } }, linesSnapshot: [{ productId: product.id, quantity, unitPrice: product.price.toString() }], policySnapshot: { tier: customer.tier }, termsHash: terms, submittedById: rep.id } });
     await db.quote.update({ where: { id: quote.id }, data: { currentRevisionId: revision.id } });
@@ -142,10 +151,11 @@ async function main() {
   await createConfirmedHardwareOrder('Q-1042', acme, laptop, 10);
   await createConfirmedHardwareOrder('Q-1030', acme, docking, 12);
 
-  const northstarQuote = await db.quote.create({ data: { organizationId: northstarOrganization.id, number: 'NS-Q-0001', customer: orion.name, customerId: orion.id, customerTier: orion.tier, ownerId: northstarRep.id, teamId: northstarTeam.id, stage: 'PENDING_APPROVAL', total: 5400, margin: 2040, riskScore: 6, lines: { create: [{ productId: northstarProduct.id, quantity: 3, unitPrice: 1800, unitCost: 1120, discount: 0, allowedDiscount: 12 }] } } });
+  const northstarQuote = await db.quote.create({ data: { organizationId: northstarOrganization.id, number: 'NS-Q-0001', customer: orion.name, customerId: orion.id, customerTier: orion.tier, ownerId: northstarRep.id, createdById: northstarRep.id, teamId: northstarTeam.id, stage: 'PENDING_APPROVAL', total: 5400, margin: 2040, riskScore: 6, lines: { create: [{ productId: northstarProduct.id, quantity: 3, unitPrice: 1800, unitCost: 1120, discount: 0, allowedDiscount: 12 }] } } });
   const northstarRevision = await db.quoteRevision.create({ data: { quoteId: northstarQuote.id, revisionNumber: 1, state: 'SUBMITTED', orderDiscount: 0, subtotal: 5400, taxTotal: 972, total: 6372, margin: 2040, riskScore: 6, totalsByCadence: { 'One-time': { subtotal: 5400, tax: 972, total: 6372 } }, linesSnapshot: [{ productId: northstarProduct.id, quantity: 3, unitPrice: 1800 }], policySnapshot: { tier: 'Enterprise' }, termsHash: hash({ quote: northstarQuote.id, revision: 1 }), submittedById: northstarRep.id } });
   await db.quote.update({ where: { id: northstarQuote.id }, data: { currentRevisionId: northstarRevision.id } });
-  await db.approval.create({ data: { quoteId: northstarQuote.id, revisionId: northstarRevision.id, cycle: 1, step: 'Sales Manager', sequence: 1, state: 'PENDING' } });
+  const northstarCase=await db.approvalCase.create({data:{quoteId:northstarQuote.id,revisionId:northstarRevision.id,policyId:policies[3]!.id,cycle:1,state:'PENDING',route:'MANAGER',riskSnapshot:json({components:{worstExcess:6,weightedExcess:6,aggregateDiscount:0,marginPercent:37.78},flags:[],reasons:['Seeded governed review'],policy:{id:policies[3]!.id,tier:'Enterprise',version:1}}),submittedById:northstarRep.id}});
+  await db.approval.create({ data: { quoteId: northstarQuote.id, revisionId: northstarRevision.id, caseId:northstarCase.id, cycle: 1, step: 'Sales Manager', sequence: 1, state: 'PENDING' } });
 
   await db.subscription.createMany({ data: [
     { organizationId, customer: acme.name, customerId: acme.id, productName: 'Care Plan', cadence: 'Monthly', amount: 1200, nextBillAt: new Date('2026-10-01') },

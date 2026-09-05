@@ -1,5 +1,7 @@
+import crypto from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
+import { calculateQuote } from './rules.js';
 
 export const primaryQuotationStages = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'NEGOTIATION', 'CONFIRMED'] as const;
 export const quotationStages = [...primaryQuotationStages, 'REJECTED'] as const;
@@ -21,11 +23,13 @@ export const quotationListQuerySchema = z.object({
 
 export const customerListQuerySchema = z.object({
   search: z.string().trim().min(1).max(100).optional(),
+  assignment: z.enum(['all', 'assigned', 'unassigned']).default('all'),
   limit: z.coerce.number().int().min(1).max(200).default(100),
 }).strict();
 
 export const createQuotationSchema = z.object({
   customerId: z.string().uuid(),
+  ownerId: z.string().uuid().optional(),
   validUntil: z.string().datetime().optional(),
   promisedDeliveryAt: z.string().datetime().optional(),
   terms: z.string().trim().max(5000).optional(),
@@ -35,6 +39,160 @@ export const createQuotationSchema = z.object({
   }
 });
 
+export class QuotationCreationError extends Error {
+  constructor(readonly status: number, readonly code: string, message: string) { super(message); }
+}
+
+type QuotationCreationCustomer = {
+  primarySalesTeamId: string | null;
+  primarySalesTeam: { managerId: string | null; members: Array<{ userId: string }> } | null;
+  assignments: Array<{ userId: string; user: { role: string; status: string } }>;
+};
+
+export function quotationCreationOwnership(
+  actor: Pick<QuotationActor, 'id' | 'role'>,
+  customer: QuotationCreationCustomer,
+  requestedOwnerId?: string,
+) {
+  if (actor.role === 'REP' && requestedOwnerId) throw new QuotationCreationError(422, 'VALIDATION_ERROR', 'Representatives cannot choose a quotation owner.');
+  if (actor.role !== 'REP' && !requestedOwnerId) throw new QuotationCreationError(422, 'OWNER_REQUIRED', 'Select an assigned representative to own this quotation.');
+  if (!customer.primarySalesTeamId || !customer.primarySalesTeam) throw new QuotationCreationError(422, 'ASSIGNMENT_REQUIRED', 'Assign this customer to a sales team before creating a quotation.');
+  if (actor.role === 'MANAGER' && customer.primarySalesTeam.managerId !== actor.id) throw new QuotationCreationError(403, 'FORBIDDEN', 'Managers can create quotations only for customers assigned to their team.');
+  const ownerId = actor.role === 'REP' ? actor.id : requestedOwnerId!;
+  const ownerAssignment = customer.assignments.find((assignment) => assignment.userId === ownerId && assignment.user.role === 'REP' && assignment.user.status === 'ACTIVE');
+  if (!ownerAssignment) throw new QuotationCreationError(403, 'CUSTOMER_ASSIGNMENT_REQUIRED', 'The quotation owner must be an active representative assigned to this customer.');
+  if (!customer.primarySalesTeam.members.some((member) => member.userId === ownerId)) throw new QuotationCreationError(403, 'TEAM_MEMBERSHIP_REQUIRED', 'The quotation owner must belong to the customer sales team.');
+  return { ownerId, teamId: customer.primarySalesTeamId };
+}
+
+export type CreateDraftInput = {
+  organizationId: string;
+  actor: Pick<QuotationActor, 'id' | 'role'>;
+  customerId: string;
+  requestedOwnerId?: string;
+  createdById?: string;
+  lines?: Array<{ productId: string; quantity: number }>;
+  validUntil?: Date | null;
+  promisedDeliveryAt?: Date | null;
+  terms?: string | null;
+  internalNote?: string | null;
+  auditActorId?: string;
+  auditAction?: string;
+  auditReason?: string;
+  requestId?: string;
+};
+
+export async function createDraft(tx: Prisma.TransactionClient, input: CreateDraftInput) {
+  const customer = await tx.customer.findFirst({
+    where: { id: input.customerId, organizationId: input.organizationId, active: true },
+    include: {
+      primarySalesTeam: { include: { members: { select: { userId: true } } } },
+      assignments: { where: { active: true }, include: { user: { select: { id: true, role: true, status: true } } } },
+    },
+  });
+  if (!customer) throw new QuotationCreationError(422, 'CONFIGURATION_REQUIRED', 'Select an active customer.');
+  const { ownerId, teamId } = quotationCreationOwnership(input.actor, customer, input.requestedOwnerId);
+  const requestedLines = input.lines ?? [];
+  if (requestedLines.some((line) => !Number.isInteger(line.quantity) || line.quantity <= 0)) {
+    throw new QuotationCreationError(422, 'VALIDATION_ERROR', 'Quotation draft quantities must be positive whole numbers.');
+  }
+
+  const products = requestedLines.length ? await tx.product.findMany({
+    where: { id: { in: [...new Set(requestedLines.map((line) => line.productId))] }, organizationId: input.organizationId, active: true },
+  }) : [];
+  if (products.length !== new Set(requestedLines.map((line) => line.productId)).size) {
+    throw new QuotationCreationError(422, 'CONFIGURATION_REQUIRED', 'One or more products are unavailable.');
+  }
+  const policy = requestedLines.length ? await tx.discountPolicy.findFirst({ where: { organizationId: input.organizationId, tier: customer.tier } }) : null;
+  if (requestedLines.length && !policy) throw new QuotationCreationError(422, 'CONFIGURATION_REQUIRED', 'Configure this customer tier before pricing the quotation.');
+
+  const pricingInputs = requestedLines.map((line) => {
+    const product = products.find((item) => item.id === line.productId)!;
+    return {
+      productId: product.id,
+      quantity: line.quantity,
+      unitPrice: product.price,
+      unitCost: product.cost,
+      discount: 0,
+      allowedDiscount: allowedDiscountForCategory(product.category, policy!),
+      taxRate: product.taxRate,
+      cadence: product.recurring ? product.cadence : 'One-time',
+    };
+  });
+  const calculation = pricingInputs.length ? calculateQuote(pricingInputs, 0, {
+    financeThreshold: policy!.financeThreshold,
+    aggregateDiscountLimit: policy!.aggregateDiscountLimit,
+    minimumMarginPercent: policy!.minimumMarginPercent,
+  }) : null;
+  const snapshot = pricingInputs.map((line, index) => {
+    const product = products.find((item) => item.id === line.productId)!;
+    const calculated = calculation!.lines[index]!;
+    return {
+      productId: product.id, name: product.name, sku: product.sku, category: product.category, description: product.description,
+      quantity: line.quantity, unitPrice: line.unitPrice.toString(), unitCost: line.unitCost.toString(), taxRate: line.taxRate.toString(),
+      cadence: line.cadence, discount: 0, effectiveDiscount: calculated.effectiveDiscount, allowedDiscount: line.allowedDiscount.toString(),
+      gross: calculated.gross, net: calculated.net, tax: calculated.tax, lineCost: calculated.lineCost, excess: calculated.excess,
+    };
+  });
+  const number = `Q-${Date.now().toString().slice(-8)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+  const quote = await tx.quote.create({ data: {
+    organizationId: input.organizationId,
+    number,
+    customer: customer.name,
+    customerId: customer.id,
+    customerTier: customer.tier,
+    ownerId,
+    createdById: input.createdById ?? ownerId,
+    teamId,
+    total: calculation?.total ?? 0,
+    taxTotal: calculation?.taxTotal ?? 0,
+    totalsByCadence: (calculation?.totalsByCadence ?? {}) as Prisma.InputJsonValue,
+    margin: calculation?.margin ?? 0,
+    riskScore: calculation?.riskScore ?? 0,
+  } });
+  const revision = await tx.quoteRevision.create({ data: {
+    quoteId: quote.id,
+    revisionNumber: 1,
+    state: 'DRAFT',
+    currency: customer.currency,
+    validUntil: input.validUntil ?? null,
+    promisedDeliveryAt: input.promisedDeliveryAt ?? null,
+    terms: input.terms ?? null,
+    internalNote: input.internalNote ?? null,
+    orderDiscount: 0,
+    subtotal: calculation?.subtotal ?? 0,
+    taxTotal: calculation?.taxTotal ?? 0,
+    total: calculation?.total ?? 0,
+    margin: calculation?.margin ?? 0,
+    riskScore: calculation?.riskScore ?? 0,
+    totalsByCadence: (calculation?.totalsByCadence ?? {}) as Prisma.InputJsonValue,
+    linesSnapshot: snapshot as Prisma.InputJsonValue,
+    policySnapshot: policy ? ({ policyId: policy.id, version: policy.version, source: input.auditAction ?? 'QUOTE_CREATED' } as Prisma.InputJsonValue) : {},
+    termsHash: crypto.createHash('sha256').update(JSON.stringify({ quoteId: quote.id, revision: 1, snapshot, nonce: crypto.randomUUID() })).digest('hex'),
+  } });
+  if (pricingInputs.length) await tx.quoteLine.createMany({ data: pricingInputs.map((line) => ({
+    quoteId: quote.id,
+    productId: line.productId,
+    quantity: line.quantity,
+    unitPrice: line.unitPrice,
+    unitCost: line.unitCost,
+    discount: 0,
+    allowedDiscount: line.allowedDiscount,
+  })) });
+  await tx.quote.update({ where: { id: quote.id }, data: { currentRevisionId: revision.id } });
+  await tx.auditEvent.create({ data: {
+    organizationId: input.organizationId,
+    actorId: input.auditActorId ?? input.actor.id,
+    action: input.auditAction ?? 'QUOTE_CREATED',
+    resource: 'Quote',
+    resourceId: quote.id,
+    reason: input.auditReason,
+    revisionId: revision.id,
+    requestId: input.requestId,
+  } });
+  return { quoteId: quote.id, revisionId: revision.id, ownerId, teamId };
+}
+
 export const quotationLineInputSchema = z.object({
   productId: z.string().uuid(),
   quantity: z.number().int().positive(),
@@ -42,9 +200,21 @@ export const quotationLineInputSchema = z.object({
 }).strict();
 
 export const quoteDraftSchema = z.object({
-  version: z.number().int().nonnegative(),
+  revisionId: z.string().uuid(),
+  expectedVersion: z.number().int().nonnegative(),
   orderDiscount: z.number().min(0).max(100),
   lines: z.array(quotationLineInputSchema).min(1).max(200),
+  validUntil: z.string().datetime().nullable().optional(),
+  promisedDeliveryAt: z.string().datetime().nullable().optional(),
+  terms: z.string().trim().max(5000).nullable().optional(),
+}).strict().superRefine((value, context) => {
+  if (value.validUntil && new Date(value.validUntil) <= new Date()) context.addIssue({ code: z.ZodIssueCode.custom, path: ['validUntil'], message: 'Validity date must be in the future.' });
+});
+
+export const quoteSubmitSchema = z.object({
+  revisionId: z.string().uuid(),
+  expectedVersion: z.number().int().nonnegative(),
+  reason: z.string().trim().min(2).max(2000),
 }).strict();
 
 export const quotePreviewSchema = z.object({
@@ -121,13 +291,11 @@ export function quotationStageWhere(stage: QuotationStage): Prisma.QuoteWhereInp
 }
 
 export function quotationRecordScope(actor: QuotationActor): Prisma.QuoteWhereInput {
-  if (actor.role === 'REP') return { ownerId: actor.id };
-  if (actor.role === 'MANAGER') return { OR: [
+  if (actor.role === 'REP') return { OR: [
     { ownerId: actor.id },
-    { teamId: null },
-    { team: { is: { managerId: actor.id } } },
     { team: { is: { members: { some: { userId: actor.id } } } } },
   ] };
+  if (actor.role === 'MANAGER') return { team: { is: { managerId: actor.id } } };
   return {};
 }
 
@@ -163,7 +331,7 @@ type CapabilitySource = StageSource & {
 export function quotationCapabilities(actor: QuotationActor, quote: CapabilitySource) {
   const stage = deriveQuotationStage(quote);
   const readOnly = Boolean(actor.readOnlyView);
-  const seller = actor.role === 'ADMIN' || (actor.role === 'REP' && quote.ownerId === actor.id);
+  const seller = actor.role === 'REP' && quote.ownerId === actor.id;
   const currentApproval = quote.approvals
     ?.filter((approval) => approval.revisionId === quote.currentRevisionId && approval.state === 'PENDING')
     .sort((left, right) => (right.cycle ?? 0) - (left.cycle ?? 0) || (left.sequence ?? 0) - (right.sequence ?? 0))[0];
@@ -188,7 +356,7 @@ export function quotationCapabilities(actor: QuotationActor, quote: CapabilitySo
   const reasons:Partial<Record<QuotationCapability,string>> = {};
   if (readOnly) for (const action of ['editDraft','saveDraft','submit','assign','approve','send','negotiate'] as QuotationCapability[]) reasons[action] = 'View As mode is read-only.';
   if (!readOnly && stage !== 'DRAFT') reasons.editDraft = reasons.saveDraft = reasons.submit = 'Submitted revisions are immutable. Create or return a revision to Draft before editing.';
-  if (!readOnly && !seller) reasons.editDraft = reasons.saveDraft = reasons.submit = reasons.send = reasons.negotiate = 'Only the quotation owner or an administrator can perform this action.';
+  if (!readOnly && !seller) reasons.editDraft = reasons.saveDraft = reasons.submit = reasons.send = reasons.negotiate = 'Only the quotation owner can perform this action.';
   if (!currentApproval) reasons.approve = 'There is no active approval step.';
   else if (selfApproval) reasons.approve = 'Quotation owners and submitters cannot approve their own submission.';
   else if (!approvalRoleMatches) reasons.approve = `This step requires the ${currentApproval.step} role.`;
@@ -253,6 +421,7 @@ type SummarySource = StageSource & {
   lastActivity: Date;
   customerRecord: { currency: string };
   owner: { id: string; name: string };
+  sourcePortalRequest?: { id: string } | null;
 };
 
 export function quotationSummaryDto(quote: SummarySource) {
@@ -272,5 +441,6 @@ export function quotationSummaryDto(quote: SummarySource) {
     currentRevisionId: quote.currentRevisionId,
     version: quote.version,
     lastActivityAt: quote.lastActivity.toISOString(),
+    origin: quote.sourcePortalRequest ? { type: 'PORTAL_REQUEST', portalRequestId: quote.sourcePortalRequest.id } : { type: 'INTERNAL' },
   };
 }

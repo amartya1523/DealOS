@@ -181,7 +181,7 @@ export function CustomerAuthPage({ onSuccess, signedInRole }: { onSuccess: () =>
         <div className="customer-auth-trust"><span><Check/>Verified email matching</span><span><LockKeyhole/>Customer-scoped access</span></div>
       </section>
     </div>
-    <footer className="customer-auth-footer"><span>Access begins when a business shares a document or sends a portal invitation.</span><b>Made with <i>♥</i> by Amartya, Sanket, Hitesh &amp; Aryan.</b></footer>
+    <footer className="customer-auth-footer"><span>Access begins after the business assigns your account and sends a portal invitation.</span><b>Made with <i>♥</i> by Amartya, Sanket, Hitesh &amp; Aryan.</b></footer>
   </main>;
 }
 
