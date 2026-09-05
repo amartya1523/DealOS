@@ -7,7 +7,7 @@ Flutter client for the existing DealOS Express/PostgreSQL platform. The app uses
 - Flutter 3.41.9 or newer compatible stable release
 - Xcode with an installed iOS simulator for iOS builds
 - Android SDK accepted by the installed Flutter release
-- Running DealOS backend from the repository's `backend/` directory
+- Running DealOS backend from `/Users/sanketmistry/DealOS/backend`
 - A backend `FRONTEND_ORIGIN` matching `DEALOS_ALLOWED_ORIGIN`
 
 Start the local backend according to its README. The Android emulator reaches the host through `10.0.2.2`; iOS uses `localhost` by default.

@@ -100,7 +100,7 @@ class _ApprovalDetailScreenState extends ConsumerState<ApprovalDetailScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const StatusPill('PENDING_APPROVAL'),
+                    StatusPill(quote.stage),
                     const SizedBox(height: 8),
                     Text(
                       quote.customer,
@@ -165,8 +165,11 @@ class _ApprovalDetailScreenState extends ConsumerState<ApprovalDetailScreen> {
                       ? Icons.check_circle
                       : Icons.radio_button_unchecked,
                 ),
-                title: Text('${approval.sequence}. ${approval.step}'),
-                subtitle: Text(approval.reason ?? 'Awaiting decision'),
+                title: Text('${approval.sequence}. ${approval.step} review'),
+                subtitle: Text(
+                  '${approval.decisionSummary}${approval.reason == null ? '' : '\n${approval.reason}'}',
+                ),
+                isThreeLine: approval.reason != null,
                 trailing: StatusPill(approval.state),
               ),
             ),

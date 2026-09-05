@@ -1,6 +1,7 @@
 import 'package:dealos_mobile/app/app.dart';
 import 'package:dealos_mobile/app/providers.dart';
 import 'package:dealos_mobile/features/auth/application/session_controller.dart';
+import 'package:dealos_mobile/features/approvals/presentation/approvals_screen.dart';
 import 'package:dealos_mobile/features/quotations/presentation/quotations_screen.dart';
 import 'package:dealos_mobile/features/workspace/domain/models.dart';
 import 'package:dealos_mobile/features/workspace/presentation/app_shell.dart';
@@ -81,6 +82,55 @@ void main() {
     expect(find.text('Approval inbox'), findsOneWidget);
     addTearDown(() => tester.binding.setSurfaceSize(null));
   });
+
+  testWidgets(
+    'approval detail distinguishes the step from the deciding admin',
+    (tester) async {
+      final workspace = fixtureWorkspace(role: 'ADMIN');
+      final quote = Quote.fromJson(const {
+        'id': 'quote-1',
+        'number': 'Q-1001',
+        'customer': 'Vertex Systems',
+        'customerTier': 'Gold',
+        'stage': 'REJECTED',
+        'version': 2,
+        'total': '147500',
+        'riskScore': '4',
+        'lines': [],
+        'approvals': [
+          {
+            'id': 'approval-1',
+            'step': 'Sales Manager',
+            'sequence': 1,
+            'state': 'REJECTED',
+            'reason': 'Pricing exception',
+            'reviewerId': 'admin-1',
+            'reviewer': {
+              'id': 'admin-1',
+              'name': 'Asha Admin',
+              'role': 'ADMIN',
+            },
+          },
+        ],
+        'negotiation': [],
+      });
+      await tester.pumpWidget(
+        appFor(
+          workspace,
+          ApprovalDetailScreen(workspace: workspace, quote: quote),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('1. Sales Manager review'), findsOneWidget);
+      expect(
+        find.textContaining('Rejected by Asha Admin (Admin)'),
+        findsOneWidget,
+      );
+      expect(find.text('Rejected'), findsWidgets);
+      expect(find.text('Pending Approval'), findsNothing);
+    },
+  );
 
   testWidgets('quote back button returns to the page that opened it', (
     tester,

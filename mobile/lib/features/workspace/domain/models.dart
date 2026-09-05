@@ -299,6 +299,9 @@ class Approval {
     this.reason,
     this.createdAt,
     this.decidedAt,
+    this.reviewerId,
+    this.reviewerName,
+    this.reviewerRole,
   });
   final String id;
   final String step;
@@ -307,6 +310,31 @@ class Approval {
   final String? reason;
   final DateTime? createdAt;
   final DateTime? decidedAt;
+  final String? reviewerId;
+  final String? reviewerName;
+  final String? reviewerRole;
+
+  String? get reviewerSummary {
+    final name = reviewerName?.trim();
+    if (name == null || name.isEmpty) return null;
+    final role = reviewerRole?.trim();
+    if (role == null || role.isEmpty) return name;
+    final roleLabel = role
+        .toLowerCase()
+        .split('_')
+        .where((part) => part.isNotEmpty)
+        .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
+        .join(' ');
+    return '$name ($roleLabel)';
+  }
+
+  String get decisionSummary => switch (state) {
+    'APPROVED' => 'Approved by ${reviewerSummary ?? 'an authorized reviewer'}',
+    'REJECTED' => 'Rejected by ${reviewerSummary ?? 'an authorized reviewer'}',
+    'RETURNED' => 'Returned by ${reviewerSummary ?? 'an authorized reviewer'}',
+    'SUPERSEDED' => 'No decision required; this step was superseded',
+    _ => 'Awaiting decision',
+  };
 
   factory Approval.fromJson(JsonMap json) => Approval(
     id: _string(json, 'id'),
@@ -316,6 +344,13 @@ class Approval {
     reason: json['reason']?.toString(),
     createdAt: DateTime.tryParse('${json['createdAt'] ?? ''}'),
     decidedAt: DateTime.tryParse('${json['decidedAt'] ?? ''}'),
+    reviewerId: json['reviewerId']?.toString(),
+    reviewerName: json['reviewer'] is Map
+        ? (json['reviewer'] as Map)['name']?.toString()
+        : null,
+    reviewerRole: json['reviewer'] is Map
+        ? (json['reviewer'] as Map)['role']?.toString()
+        : null,
   );
 }
 

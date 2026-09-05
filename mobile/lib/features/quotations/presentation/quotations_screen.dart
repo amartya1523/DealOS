@@ -520,9 +520,9 @@ class _QuoteDetailScreenState extends ConsumerState<QuoteDetailScreen> {
             (approval) => Card(
               child: ListTile(
                 leading: const Icon(Icons.approval_outlined),
-                title: Text(approval.step),
+                title: Text('${approval.step} review'),
                 subtitle: Text(
-                  '${approval.reason ?? 'No reviewer note'}\n${shortDate(approval.decidedAt ?? approval.createdAt)}',
+                  '${approval.decisionSummary}${approval.reason == null ? '' : '\n${approval.reason}'}\n${shortDate(approval.decidedAt ?? approval.createdAt)}',
                 ),
                 isThreeLine: true,
                 trailing: StatusPill(approval.state),

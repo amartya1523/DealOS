@@ -27,8 +27,6 @@ The production verification builds use `https://api.example.com/api/v1` and `htt
 
 ## Preserved artifacts
 
-These artifacts were preserved in the original local build workspace and are intentionally excluded from this Git branch. Re-run the documented build commands to reproduce them.
-
 | Artifact | SHA-256 |
 |---|---|
 | `release-artifacts/dealos-development-debug.apk` | `12bcd3ecee3622c279cbad8e63284b06b1373df2f3471895731905ecb7a88400` |
