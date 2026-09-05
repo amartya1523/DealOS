@@ -199,7 +199,7 @@ class _SessionGate extends ConsumerWidget {
   }
 
   Widget _denied(BuildContext context) => Scaffold(
-    appBar: AppBar(),
+    appBar: AppBar(leading: const ContextualBackButton(fallbackLocation: '/')),
     body: EmptyState(
       icon: Icons.lock_outline,
       title: 'Record unavailable',

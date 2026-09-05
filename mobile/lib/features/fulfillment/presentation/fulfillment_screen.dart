@@ -46,7 +46,7 @@ class FulfillmentScreen extends ConsumerWidget {
               trailing: StatusPill(
                 '${quote.fulfillment?['state'] ?? 'SPLIT_PENDING'}',
               ),
-              onTap: () => context.go('/fulfillment/${quote.id}'),
+              onTap: () => context.push('/fulfillment/${quote.id}'),
             ),
           ),
         ),
@@ -292,7 +292,12 @@ class _FulfillmentDetailScreenState
         ['FINANCE', 'ADMIN'].contains(widget.workspace.user.role) &&
         !widget.workspace.user.readOnlyView;
     return Scaffold(
-      appBar: AppBar(title: Text('Fulfillment ${widget.quote.number}')),
+      appBar: AppBar(
+        leading: const ContextualBackButton(
+          fallbackLocation: '/workspace/fulfillment',
+        ),
+        title: Text('Fulfillment ${widget.quote.number}'),
+      ),
       body: FutureBuilder<JsonMap>(
         future: future,
         builder: (context, snapshot) {
@@ -439,7 +444,9 @@ class _FulfillmentDetailScreenState
       {'stockFingerprint': data['stockFingerprint']},
       notice: 'Suggested warehouse split accepted.',
     );
-    if (ok && mounted) context.go('/workspace/fulfillment');
+    if (ok && mounted) {
+      returnToSource(context, fallbackLocation: '/workspace/fulfillment');
+    }
   }
 
   Future<void> _manual() async {
@@ -473,7 +480,9 @@ class _FulfillmentDetailScreenState
       {'allocations': allocations, 'reason': reason},
       notice: 'Manual allocation committed.',
     );
-    if (ok && mounted) context.go('/workspace/fulfillment');
+    if (ok && mounted) {
+      returnToSource(context, fallbackLocation: '/workspace/fulfillment');
+    }
   }
 
   Future<void> _consolidate() async {
@@ -488,7 +497,9 @@ class _FulfillmentDetailScreenState
       {'reason': reason},
       notice: 'Backorder consolidation committed.',
     );
-    if (ok && mounted) context.go('/workspace/fulfillment');
+    if (ok && mounted) {
+      returnToSource(context, fallbackLocation: '/workspace/fulfillment');
+    }
   }
 }
 

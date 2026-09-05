@@ -129,6 +129,9 @@ class DealOsShell extends ConsumerWidget {
     final selectedPrimary = primary.indexWhere((item) => item.id == current);
     return Scaffold(
       appBar: AppBar(
+        leading: Navigator.of(context).canPop()
+            ? const ContextualBackButton(fallbackLocation: '/')
+            : null,
         title: large
             ? const DealOsMark()
             : Text(

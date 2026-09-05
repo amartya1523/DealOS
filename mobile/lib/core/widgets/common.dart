@@ -1,7 +1,29 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../theme/app_theme.dart';
 import '../utils/formatters.dart';
+
+void returnToSource(BuildContext context, {required String fallbackLocation}) {
+  final router = GoRouter.of(context);
+  if (router.canPop()) {
+    router.pop();
+  } else {
+    router.go(fallbackLocation);
+  }
+}
+
+class ContextualBackButton extends StatelessWidget {
+  const ContextualBackButton({super.key, required this.fallbackLocation});
+
+  final String fallbackLocation;
+
+  @override
+  Widget build(BuildContext context) => BackButton(
+    onPressed: () =>
+        returnToSource(context, fallbackLocation: fallbackLocation),
+  );
+}
 
 class DealOsMark extends StatelessWidget {
   const DealOsMark({super.key, this.compact = false, this.light = false});

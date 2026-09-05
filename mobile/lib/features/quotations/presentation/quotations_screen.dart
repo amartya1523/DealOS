@@ -100,7 +100,7 @@ class _QuotationsScreenState extends State<QuotationsScreen> {
               child: Card(
                 child: InkWell(
                   borderRadius: BorderRadius.circular(16),
-                  onTap: () => context.go('/quote/${quote.id}'),
+                  onTap: () => context.push('/quote/${quote.id}'),
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: Row(
@@ -272,6 +272,9 @@ class _QuoteDetailScreenState extends ConsumerState<QuoteDetailScreen> {
         !actor.readOnlyView;
     return Scaffold(
       appBar: AppBar(
+        leading: const ContextualBackButton(
+          fallbackLocation: '/workspace/quotations',
+        ),
         title: Text(quote.number),
         actions: [
           IconButton(

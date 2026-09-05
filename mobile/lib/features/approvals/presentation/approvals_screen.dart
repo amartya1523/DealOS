@@ -43,7 +43,7 @@ class ApprovalsScreen extends StatelessWidget {
                 trailing: StatusPill(
                   current?.state ?? quote.approvals.last.state,
                 ),
-                onTap: () => context.go('/approval/${quote.id}'),
+                onTap: () => context.push('/approval/${quote.id}'),
               ),
             ),
           );
@@ -85,7 +85,12 @@ class _ApprovalDetailScreenState extends ConsumerState<ApprovalDetailScreen> {
             (current.step == 'Sales Manager' && role == 'MANAGER') ||
             (current.step == 'Finance' && role == 'FINANCE'));
     return Scaffold(
-      appBar: AppBar(title: Text('Review ${quote.number}')),
+      appBar: AppBar(
+        leading: const ContextualBackButton(
+          fallbackLocation: '/workspace/approvals',
+        ),
+        title: Text('Review ${quote.number}'),
+      ),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -220,6 +225,8 @@ class _ApprovalDetailScreenState extends ConsumerState<ApprovalDetailScreen> {
       {'decision': decision, 'reason': reason.text.trim()},
       notice: 'Approval decision recorded.',
     );
-    if (mounted) context.go('/workspace/approvals');
+    if (mounted) {
+      returnToSource(context, fallbackLocation: '/workspace/approvals');
+    }
   }
 }

@@ -82,7 +82,45 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
   });
 
-  testWidgets('opening a quote route resolves a typed workspace record', (
+  testWidgets('quote back button returns to the page that opened it', (
+    tester,
+  ) async {
+    final workspace = fixtureWorkspace();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sessionControllerProvider.overrideWith(
+            () => StubSessionController(
+              SessionState(
+                status: SessionStatus.authenticated,
+                workspace: workspace,
+              ),
+            ),
+          ),
+        ],
+        child: const DealOsApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Team performance'), findsOneWidget);
+    final shellContext = tester.element(find.byType(DealOsShell));
+    GoRouter.of(shellContext).push('/workspace/quotations');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Q-1001'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Q-1001'), findsWidgets);
+    expect(find.text('Record unavailable'), findsNothing);
+
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Quotations'), findsOneWidget);
+    expect(find.byType(QuoteDetailScreen), findsNothing);
+  });
+
+  testWidgets('direct quote link back button falls back to quotations', (
     tester,
   ) async {
     final workspace = fixtureWorkspace();
@@ -106,8 +144,10 @@ void main() {
     final shellContext = tester.element(find.byType(DealOsShell));
     GoRouter.of(shellContext).go('/quote/quote-1');
     await tester.pumpAndSettle();
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
 
-    expect(find.text('Q-1001'), findsWidgets);
-    expect(find.text('Record unavailable'), findsNothing);
+    expect(find.text('Quotations'), findsOneWidget);
+    expect(find.byType(QuoteDetailScreen), findsNothing);
   });
 }

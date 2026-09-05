@@ -35,7 +35,7 @@ class DashboardScreen extends StatelessWidget {
               workspace.user.hasRole('REP') &&
                   workspace.user.hasModule('quotations')
               ? FilledButton.icon(
-                  onPressed: () => context.go('/workspace/quotations'),
+                  onPressed: () => context.push('/workspace/quotations'),
                   icon: const Icon(Icons.add),
                   label: const Text('New quote'),
                 )
@@ -112,7 +112,7 @@ class DashboardScreen extends StatelessWidget {
                     '${money(quote.total)} · updated ${shortDate(quote.updatedAt)}',
                   ),
                   trailing: StatusPill(quote.stage),
-                  onTap: () => context.go('/quote/${quote.id}'),
+                  onTap: () => context.push('/quote/${quote.id}'),
                 ),
               ),
             ),

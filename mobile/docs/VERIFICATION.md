@@ -7,7 +7,7 @@ Verified on 2026-09-05 with Flutter 3.41.9, Dart 3.11.5, Xcode, and the locally 
 | Check | Result |
 |---|---|
 | `flutter analyze` | Passed with no issues |
-| `flutter test` | Passed, 9 tests |
+| `flutter test` | Passed, 11 tests |
 | Backend `npm test` | Passed, 33 tests |
 | Backend `npm run build` | Passed |
 | `plutil -lint ios/Runner/Info.plist` | Passed |

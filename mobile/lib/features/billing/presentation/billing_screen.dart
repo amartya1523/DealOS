@@ -46,7 +46,7 @@ class InvoicesScreen extends StatelessWidget {
                 'Due ${shortDate(invoice.dueAt)} · outstanding ${money(invoice.outstanding)}',
               ),
               trailing: StatusPill(invoice.state),
-              onTap: () => context.go('/invoice/${invoice.id}'),
+              onTap: () => context.push('/invoice/${invoice.id}'),
             ),
           ),
         ),
@@ -87,7 +87,12 @@ class _InvoiceDetailScreenState extends ConsumerState<InvoiceDetailScreen> {
     final invoice = widget.invoice;
     final customer = widget.workspace.user.isCustomer;
     return Scaffold(
-      appBar: AppBar(title: Text(invoice.number)),
+      appBar: AppBar(
+        leading: const ContextualBackButton(
+          fallbackLocation: '/workspace/invoices',
+        ),
+        title: Text(invoice.number),
+      ),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
