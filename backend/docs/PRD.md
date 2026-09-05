@@ -88,6 +88,7 @@ Confidence means confidence in the interpretation, not implementation status. C 
 | R-048 | `LEAD_FIRST` is the initial `RfqHandlingMode` default and five requests per customer/user/hour is the initial limit | P | Safer human-review default and bounded anti-automation control; both require explicit business confirmation | Medium |
 | R-049 | Portal request processing is synchronous in the submission transaction; valid catalog lines alone may become priced lines, unmatched input remains internal context, and the assigned Rep receives a recipient-scoped in-app alert | I | Preserves one-draft/one-lead atomicity without an unrequired queue or email provider | High |
 | R-050 | When an Admin creates a customer, the Admin must generate an initial temporary password; the customer email becomes an active customer-scoped portal login and the plaintext credential is shown only in the creating browser for manual sharing | C | Explicit user direction, 2026-09-06 | High |
+| R-051 | An organization Admin may publish an allowlisted public business profile; a visitor may submit an association request, but only Manager/Admin approval creates the normal Customer, active primary assignment and customer-scoped portal credential. This is discovery/onboarding, not platform-wide multi-business customer identity | C | User-directed public directory and join-request feature, 2026-09-06 | High |
 
 ## Actors, outcomes and access
 
@@ -102,7 +103,7 @@ Multi-role internal users are supported; permissions compose, but self-approval 
 
 ## Principal workflows
 
-W-01 Identity and role activation → W-02 commercial/inventory setup → W-03 quote preparation or W-03A portal request intake → W-04 approval → W-05 customer negotiation and acceptance → W-06 order/allocation → W-07 subscription billing → W-08 invoice/payment. W-09 deal health and W-10 reporting operate across those workflows. Full triggers, transactions and recovery appear in [Domain.md](Domain.md).
+W-01 Identity and role activation or W-01A public discovery/association approval → W-02 commercial/inventory setup → W-03 quote preparation or W-03A portal request intake → W-04 approval → W-05 customer negotiation and acceptance → W-06 order/allocation → W-07 subscription billing → W-08 invoice/payment. W-09 deal health and W-10 reporting operate across those workflows. Full triggers, transactions and recovery appear in [Domain.md](Domain.md).
 
 ## Workflow interpretation decisions
 
@@ -121,6 +122,14 @@ Future scope: email delivery integration, real payment gateway, recurring-period
 The original solid-line flow is organization setup → Manager/Admin customer profile → primary team/Rep assignment → manual-share portal invitation → assigned Rep quotation draft for that configured customer. Customer profiles already include billing/shipping addresses and payment terms, so no duplicate address model or optional origination note was added. Invitation issuance remains blocked until the current primary assignment exists. Portal users link to `customerId` only, never a sales representative. The invitation token is single-use, hashed at rest, expires after seven days, can be revoked, and is returned only in the creation response as a copyable frontend link. No email service or delivery success is claimed.
 
 The user subsequently confirmed an Admin-provisioned credential path on 2026-09-06. Admin customer creation now requires an email and generated temporary password and atomically creates the active customer-scoped portal identity; only the hash is persisted, and the creating browser shows the plaintext once for manual sharing. Managers can still create a profile without credentials and use the assignment-gated invitation flow later. Early portal login does not bypass customer ownership: portal RFQ submission and internal quotation creation still require the active primary team/Rep assignment.
+
+## Public business discovery and association approval — 2026-09-06
+
+An organization Admin controls a separate public `OrganizationProfile` with display name, short description, category and discoverability. The public directory returns only those allowlisted fields plus the opaque organization identifier needed to submit a request; it never exposes the organization’s internal name, users, customers, catalog pricing/cost/tax, stock, policies or metrics. Catalog preview remains an explicitly omitted optional extension.
+
+A visitor may submit email, company name and a message to one discoverable active organization. One pending request per organization/email is enforced by PostgreSQL and public submission is bounded per email/IP. Submission creates no User, Customer, Lead, RFQ or quotation. A Manager/Admin reviews the tenant-scoped request. Approval selects an eligible primary team/Rep, uses the same customer-profile and relationship services as CAT-02/CAT-03A, provisions a server-generated initial password, and marks the request approved in one transaction. The raw password is returned only in that approval response for manual sharing; only its bcrypt hash is persisted. Decline requires a retained reason and creates no related account records.
+
+The existing singular `User.customerId`/organization membership remains authoritative: approved access belongs to exactly the organization/customer created by the approval. Multi-business identity, organization self-signup from the directory, marketplace ratings/reviews, geographic search, KYB and catalog/pricing disclosure remain out of scope.
 
 ## Implemented customer-originated RFQ intake — 2026-09-06
 

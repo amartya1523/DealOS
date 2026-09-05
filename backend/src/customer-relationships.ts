@@ -65,28 +65,37 @@ export async function updateCustomerRelationships(
   customerId: string,
   input: RelationshipInput,
 ) {
+  return prisma.$transaction((tx) => updateCustomerRelationshipsInTransaction(tx, actor, customerId, input));
+}
+
+export async function updateCustomerRelationshipsInTransaction(
+  tx: Prisma.TransactionClient,
+  actor: CustomerRelationshipActor,
+  customerId: string,
+  input: RelationshipInput,
+) {
   if (!['MANAGER', 'ADMIN'].includes(actor.role)) throw new CustomerRelationshipError(403, 'FORBIDDEN', 'Manager or Administrator permission is required.');
 
-  const customer = await prisma.customer.findFirst({
+  const customer = await tx.customer.findFirst({
     where: { id: customerId, organizationId: actor.organizationId },
     include: customerRelationshipInclude,
   });
   if (!customer) throw new CustomerRelationshipError(404, 'NOT_FOUND', 'Customer not found.');
   if (customer.assignmentVersion !== input.expectedVersion) throw new CustomerRelationshipError(409, 'STALE_VERSION', 'The customer assignment changed. Refresh before saving.');
 
-  const team = await prisma.salesTeam.findFirst({
+  const team = await tx.salesTeam.findFirst({
     where: { id: input.primarySalesTeamId, organizationId: actor.organizationId },
     include: { members: { select: { userId: true } } },
   });
   if (!team) throw new CustomerRelationshipError(422, 'TEAM_NOT_AVAILABLE', 'Select a sales team from this organization.');
   if (actor.role === 'MANAGER' && team.managerId !== actor.id) throw new CustomerRelationshipError(403, 'FORBIDDEN', 'Managers can assign accounts only to teams they manage.');
   if (actor.role === 'MANAGER' && customer.primarySalesTeamId) {
-    const managesCurrent = await prisma.salesTeam.count({ where: { id: customer.primarySalesTeamId, organizationId: actor.organizationId, managerId: actor.id } });
+    const managesCurrent = await tx.salesTeam.count({ where: { id: customer.primarySalesTeamId, organizationId: actor.organizationId, managerId: actor.id } });
     if (!managesCurrent) throw new CustomerRelationshipError(403, 'FORBIDDEN', 'Managers can reassign only accounts belonging to their own team.');
   }
 
   const candidateIds = [input.primaryRepId, ...input.collaboratorIds];
-  const candidates = await prisma.user.findMany({
+  const candidates = await tx.user.findMany({
     where: { id: { in: candidateIds }, organizationId: actor.organizationId },
     select: { id: true, name: true, role: true, status: true },
   });
@@ -107,37 +116,35 @@ export async function updateCustomerRelationships(
     assignments: customer.assignments.map((assignment) => ({ userId: assignment.user.id, role: assignment.role, assignedAt: assignment.assignedAt.toISOString() })),
   };
 
-  return prisma.$transaction(async (tx) => {
-    const won = await tx.customer.updateMany({
-      where: { id: customer.id, organizationId: actor.organizationId, assignmentVersion: input.expectedVersion },
-      data: { primarySalesTeamId: team.id, assignmentVersion: { increment: 1 } },
-    });
-    if (won.count !== 1) throw new CustomerRelationshipError(409, 'STALE_VERSION', 'The customer assignment changed. Refresh before saving.');
-
-    for (const assignment of customer.assignments) {
-      if (desired.get(assignment.user.id) !== assignment.role) {
-        await tx.customerRepresentative.update({ where: { id: assignment.id }, data: { active: false, endedAt: now } });
-      }
-    }
-    for (const [userId, role] of desired) {
-      const unchanged = customer.assignments.some((assignment) => assignment.user.id === userId && assignment.role === role);
-      if (!unchanged) await tx.customerRepresentative.create({ data: { customerId: customer.id, userId, role, assignedById: actor.id, assignedAt: now } });
-    }
-
-    const updated = await tx.customer.findUniqueOrThrow({ where: { id: customer.id }, include: customerRelationshipInclude });
-    const relationship = customerRelationshipDto(updated);
-    await tx.privilegedAudit.create({ data: {
-      actorId: actor.id,
-      organizationId: actor.organizationId,
-      action: 'CUSTOMER_RELATIONSHIPS_UPDATED',
-      affectedModel: 'Customer',
-      recordId: customer.id,
-      beforeValues: beforeValues as Prisma.InputJsonValue,
-      afterValues: relationship as unknown as Prisma.InputJsonValue,
-      reason: input.reason,
-      requestId: actor.requestId,
-      result: 'SUCCESS',
-    } });
-    return { customer: updated, relationship };
+  const won = await tx.customer.updateMany({
+    where: { id: customer.id, organizationId: actor.organizationId, assignmentVersion: input.expectedVersion },
+    data: { primarySalesTeamId: team.id, assignmentVersion: { increment: 1 } },
   });
+  if (won.count !== 1) throw new CustomerRelationshipError(409, 'STALE_VERSION', 'The customer assignment changed. Refresh before saving.');
+
+  for (const assignment of customer.assignments) {
+    if (desired.get(assignment.user.id) !== assignment.role) {
+      await tx.customerRepresentative.update({ where: { id: assignment.id }, data: { active: false, endedAt: now } });
+    }
+  }
+  for (const [userId, role] of desired) {
+    const unchanged = customer.assignments.some((assignment) => assignment.user.id === userId && assignment.role === role);
+    if (!unchanged) await tx.customerRepresentative.create({ data: { customerId: customer.id, userId, role, assignedById: actor.id, assignedAt: now } });
+  }
+
+  const updated = await tx.customer.findUniqueOrThrow({ where: { id: customer.id }, include: customerRelationshipInclude });
+  const relationship = customerRelationshipDto(updated);
+  await tx.privilegedAudit.create({ data: {
+    actorId: actor.id,
+    organizationId: actor.organizationId,
+    action: 'CUSTOMER_RELATIONSHIPS_UPDATED',
+    affectedModel: 'Customer',
+    recordId: customer.id,
+    beforeValues: beforeValues as Prisma.InputJsonValue,
+    afterValues: relationship as unknown as Prisma.InputJsonValue,
+    reason: input.reason,
+    requestId: actor.requestId,
+    result: 'SUCCESS',
+  } });
+  return { customer: updated, relationship };
 }

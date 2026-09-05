@@ -131,6 +131,8 @@ function priceRevision(specs: LineSpec[], orderDiscount: number, policy: Discoun
 }
 
 async function resetApplicationData() {
+  await db.directoryJoinRequest.deleteMany();
+  await db.organizationProfile.deleteMany();
   await db.idempotencyRecord.deleteMany();
   await db.invoiceNote.deleteMany();
   await db.payment.deleteMany({ where: { reversalOfId: { not: null } } });
@@ -546,15 +548,31 @@ async function createSubscription(input: {
 async function createSeedOrganizations() {
   const primary = await db.organization.create({ data: { id: primaryOrganizationId, name: 'DealOS Demo', slug: 'dealos-demo', rfqHandlingMode: 'LEAD_FIRST' } });
   const northstar = await db.organization.create({ data: { id: northstarOrganizationId, name: 'Northstar Distribution', slug: 'northstar-distribution', rfqHandlingMode: 'DIRECT_DRAFT' } });
+  await db.organizationProfile.createMany({ data: [
+    { organizationId: primary.id, displayName: 'DealOS Demo Commerce', shortDescription: 'Business technology, services, and recurring support for growing teams.', category: 'Technology services', isDiscoverable: true },
+    { organizationId: northstar.id, displayName: 'Northstar Distribution', shortDescription: 'Secure distribution infrastructure and regional rollout support.', category: 'Distribution technology', isDiscoverable: true },
+  ] });
+  await db.directoryJoinRequest.create({ data: {
+    organizationId: primary.id,
+    email: 'partnership@atlas.demo',
+    companyName: 'Atlas Field Operations',
+    message: 'We would like to join your customer network and discuss a managed device rollout.',
+    createdAt: atDay(-1),
+  } });
   return { primary, northstar };
 }
 
 async function validateSeed() {
-  const [organizations, quotes, orders, invoices, subscriptions, fulfillments, portalRequests, leads] = await Promise.all([
-    db.organization.count(), db.quote.count(), db.order.count(), db.invoice.count(), db.subscription.count(), db.fulfillment.count(), db.portalRequest.count(), db.lead.count(),
+  const [organizations, directoryProfiles, directoryPending, directoryApproved, directoryDeclined, quotes, orders, invoices, subscriptions, fulfillments, portalRequests, leads] = await Promise.all([
+    db.organization.count(),
+    db.organizationProfile.count({ where: { isDiscoverable: true } }),
+    db.directoryJoinRequest.count({ where: { status: 'PENDING' } }),
+    db.directoryJoinRequest.count({ where: { status: 'APPROVED' } }),
+    db.directoryJoinRequest.count({ where: { status: 'DECLINED' } }),
+    db.quote.count(), db.order.count(), db.invoice.count(), db.subscription.count(), db.fulfillment.count(), db.portalRequest.count(), db.lead.count(),
   ]);
-  const expected = { organizations: 2, quotes: 20, orders: 6, invoices: 6, subscriptions: 3, fulfillments: 2, portalRequests: 4, leads: 3 };
-  const actual = { organizations, quotes, orders, invoices, subscriptions, fulfillments, portalRequests, leads };
+  const expected = { organizations: 2, directoryProfiles: 2, directoryPending: 1, directoryApproved: 1, directoryDeclined: 1, quotes: 20, orders: 6, invoices: 6, subscriptions: 3, fulfillments: 2, portalRequests: 4, leads: 3 };
+  const actual = { organizations, directoryProfiles, directoryPending, directoryApproved, directoryDeclined, quotes, orders, invoices, subscriptions, fulfillments, portalRequests, leads };
   for (const [key, value] of Object.entries(expected)) {
     if (actual[key as keyof typeof actual] !== value) throw new Error(`Seed validation failed: expected ${value} ${key}, found ${actual[key as keyof typeof actual]}.`);
   }
@@ -602,6 +620,15 @@ async function validateSeed() {
   }
   const pendingInvitation = await db.organizationInvitation.findUnique({ where: { tokenHash: digest(demoPortalInvitationToken) } });
   if (!pendingInvitation || pendingInvitation.status !== 'PENDING') throw new Error('Seed validation failed: the reusable Gamma Health invitation is missing.');
+  const pendingDirectoryRequest = await db.directoryJoinRequest.findFirst({ where: { status: 'PENDING', companyName: 'Atlas Field Operations' } });
+  if (!pendingDirectoryRequest || pendingDirectoryRequest.decidedAt || pendingDirectoryRequest.resultingCustomerId) throw new Error('Seed validation failed: the actionable Atlas directory request is missing or already decided.');
+  const approvedDirectoryRequest = await db.directoryJoinRequest.findFirst({ where: { status: 'APPROVED', companyName: 'Lumen Offices' }, include: { resultingCustomer: { include: { users: { include: { memberships: true } }, assignments: true } } } });
+  const approvedCustomer = approvedDirectoryRequest?.resultingCustomer;
+  if (!approvedCustomer || approvedCustomer.assignments.filter((assignment) => assignment.active && assignment.role === 'PRIMARY').length !== 1 || !approvedCustomer.users.some((user) => user.role === 'CUSTOMER' && user.status === 'ACTIVE' && user.memberships.some((membership) => membership.organizationId === approvedCustomer.organizationId && membership.accessRole === 'PORTAL_USER' && membership.status === 'ACTIVE'))) {
+    throw new Error('Seed validation failed: approved Lumen directory request does not have a complete customer, primary assignment, and portal identity.');
+  }
+  const declinedDirectoryRequest = await db.directoryJoinRequest.findFirst({ where: { status: 'DECLINED', companyName: 'Stonebridge Procurement' } });
+  if (!declinedDirectoryRequest?.decisionReason || declinedDirectoryRequest.resultingCustomerId) throw new Error('Seed validation failed: declined Stonebridge directory request is missing its terminal reason or references a customer.');
   return actual;
 }
 
@@ -609,15 +636,16 @@ async function main() {
   await resetApplicationData();
   const organizations = await createSeedOrganizations();
 
-  const [acme, beta, northstarLabs, gamma, orion] = await Promise.all([
+  const [acme, beta, northstarLabs, gamma, lumen, orion] = await Promise.all([
     db.customer.create({ data: { organizationId: primaryOrganizationId, name: 'Acme Corp', tier: 'Gold', currency: 'INR', contactPerson: 'Priya Nair', email: 'customer@dealos.demo', phone: '9876500101', gstin: '29ABCDE1234F1Z5', billingAddress: '12 Residency Road, Bengaluru, Karnataka 560025', shippingAddress: 'Acme Technology Park, Whitefield, Bengaluru 560066', paymentTerms: 30 } }),
     db.customer.create({ data: { organizationId: primaryOrganizationId, name: 'Beta Industries', tier: 'Silver', currency: 'INR', contactPerson: 'Kabir Singh', email: 'buyer@beta.demo', phone: '9876500102', gstin: '27ABCDE5678G1Z2', billingAddress: '18 MIDC Road, Pune, Maharashtra 411019', shippingAddress: 'Beta Plant 2, Chakan, Maharashtra 410501', paymentTerms: 14 } }),
     db.customer.create({ data: { organizationId: primaryOrganizationId, name: 'Northstar Labs', tier: 'Bronze', currency: 'INR', contactPerson: 'Rhea Iyer', email: 'procurement@northstarlabs.demo', phone: '9876500103', billingAddress: '5 Knowledge Park, Hyderabad, Telangana 500081', shippingAddress: 'Same as billing', paymentTerms: 7 } }),
     db.customer.create({ data: { organizationId: primaryOrganizationId, name: 'Gamma Health', tier: 'Gold', currency: 'INR', contactPerson: 'Dr. Veer Rao', email: 'procurement@gamma.demo', phone: '9876500104', billingAddress: '44 Hospital Avenue, Chennai, Tamil Nadu 600006', shippingAddress: 'Gamma Central Stores, Chennai 600010', paymentTerms: 45 } }),
+    db.customer.create({ data: { organizationId: primaryOrganizationId, name: 'Lumen Offices', tier: 'Silver', currency: 'INR', contactPerson: 'Sana Kapoor', email: 'customer@lumen.demo', phone: '9876500105', billingAddress: '17 Business Bay, Gurugram, Haryana 122002', shippingAddress: 'Lumen Operations Centre, Gurugram, Haryana 122016', paymentTerms: 14 } }),
     db.customer.create({ data: { organizationId: northstarOrganizationId, name: 'Orion Retail', tier: 'Enterprise', currency: 'INR', contactPerson: 'Tara Menon', email: 'buyer@orion.demo', phone: '9876500201', billingAddress: '9 Market Square, Kochi, Kerala 682016', shippingAddress: 'Orion DC, Kalamassery, Kerala 683104', paymentTerms: 30 } }),
   ]);
 
-  const [rep, collaborator, manager, finance, admin, acmeCustomer, betaCustomer, pendingUser, northstarRep, northstarManager, northstarAdmin, orionCustomer] = await Promise.all([
+  const [rep, collaborator, manager, finance, admin, acmeCustomer, betaCustomer, lumenCustomer, pendingUser, northstarRep, northstarManager, northstarAdmin, orionCustomer] = await Promise.all([
     createUser({ organizationId: primaryOrganizationId, name: 'Aarav Mehta', email: 'rep@dealos.demo', role: Role.REP }),
     createUser({ organizationId: primaryOrganizationId, name: 'Leena Verma', email: 'collaborator@dealos.demo', role: Role.REP }),
     createUser({ organizationId: primaryOrganizationId, name: 'Maya Shah', email: 'manager@dealos.demo', role: Role.MANAGER }),
@@ -625,6 +653,7 @@ async function main() {
     createUser({ organizationId: primaryOrganizationId, name: 'Anika Bose', email: 'admin@dealos.demo', role: Role.ADMIN }),
     createUser({ organizationId: primaryOrganizationId, name: 'Priya Nair', email: 'customer@dealos.demo', role: Role.CUSTOMER, customerId: acme.id }),
     createUser({ organizationId: primaryOrganizationId, name: 'Kabir Singh', email: 'buyer@beta.demo', role: Role.CUSTOMER, customerId: beta.id }),
+    createUser({ organizationId: primaryOrganizationId, name: 'Sana Kapoor', email: 'customer@lumen.demo', role: Role.CUSTOMER, customerId: lumen.id }),
     createUser({ organizationId: primaryOrganizationId, name: 'Pending Teammate', email: 'pending@dealos.demo', role: Role.REP, status: 'PENDING' }),
     createUser({ organizationId: northstarOrganizationId, name: 'Ira Sen', email: 'rep@northstar.demo', role: Role.REP }),
     createUser({ organizationId: northstarOrganizationId, name: 'Dev Malhotra', email: 'manager@northstar.demo', role: Role.MANAGER }),
@@ -640,17 +669,54 @@ async function main() {
     { teamId: enterpriseTeam.id, userId: rep.id }, { teamId: enterpriseTeam.id, userId: collaborator.id }, { teamId: enterpriseTeam.id, userId: manager.id },
     { teamId: northstarTeam.id, userId: northstarRep.id }, { teamId: northstarTeam.id, userId: northstarManager.id },
   ] });
-  await db.customer.updateMany({ where: { id: { in: [acme.id, beta.id, northstarLabs.id, gamma.id] } }, data: { primarySalesTeamId: enterpriseTeam.id, assignmentVersion: 2 } });
+  await db.customer.updateMany({ where: { id: { in: [acme.id, beta.id, northstarLabs.id, gamma.id, lumen.id] } }, data: { primarySalesTeamId: enterpriseTeam.id, assignmentVersion: 2 } });
   await db.customer.update({ where: { id: orion.id }, data: { primarySalesTeamId: northstarTeam.id, assignmentVersion: 2 } });
   await db.customerRepresentative.createMany({ data: [
-    ...[acme, beta, northstarLabs, gamma].map((customer) => ({ customerId: customer.id, userId: rep.id, role: 'PRIMARY' as const, assignedById: admin.id, assignedAt: atDay(-60) })),
+    ...[acme, beta, northstarLabs, gamma, lumen].map((customer) => ({ customerId: customer.id, userId: rep.id, role: 'PRIMARY' as const, assignedById: admin.id, assignedAt: atDay(-60) })),
     { customerId: acme.id, userId: collaborator.id, role: 'COLLABORATOR', assignedById: admin.id, assignedAt: atDay(-45) },
     { customerId: gamma.id, userId: collaborator.id, role: 'COLLABORATOR', assignedById: admin.id, assignedAt: atDay(-30) },
     { customerId: orion.id, userId: northstarRep.id, role: 'PRIMARY', assignedById: northstarAdmin.id, assignedAt: atDay(-60) },
   ] });
 
-  const allUsers = [rep, collaborator, manager, finance, admin, acmeCustomer, betaCustomer, pendingUser, northstarRep, northstarManager, northstarAdmin, orionCustomer];
+  const allUsers = [rep, collaborator, manager, finance, admin, acmeCustomer, betaCustomer, lumenCustomer, pendingUser, northstarRep, northstarManager, northstarAdmin, orionCustomer];
   await Promise.all(allUsers.map((user) => db.organizationMembership.create({ data: { organizationId: user.organizationId!, userId: user.id, accessRole: user.role === Role.ADMIN ? 'ORGANIZATION_ADMIN' : user.role === Role.CUSTOMER ? 'PORTAL_USER' : 'ORGANIZATION_MEMBER', businessRole: user.role } })));
+  const [approvedDirectoryRequest, declinedDirectoryRequest] = await Promise.all([
+    db.directoryJoinRequest.create({ data: {
+      organizationId: primaryOrganizationId,
+      email: lumenCustomer.email,
+      companyName: lumen.name,
+      message: 'We need a managed workplace technology supplier for our expanding offices.',
+      status: 'APPROVED',
+      decidedById: admin.id,
+      decidedAt: atDay(-40),
+      resultingCustomerId: lumen.id,
+      createdAt: atDay(-42),
+    } }),
+    db.directoryJoinRequest.create({ data: {
+      organizationId: primaryOrganizationId,
+      email: 'join@stonebridge.demo',
+      companyName: 'Stonebridge Procurement',
+      message: 'We would like access to purchase from your organization.',
+      status: 'DECLINED',
+      decidedById: admin.id,
+      decidedAt: atDay(-3),
+      decisionReason: 'The submitted business details could not be verified.',
+      createdAt: atDay(-5),
+    } }),
+  ]);
+  await db.privilegedAudit.create({ data: {
+    actorId: admin.id,
+    organizationId: primaryOrganizationId,
+    action: 'CUSTOMER_RELATIONSHIPS_UPDATED',
+    affectedModel: 'Customer',
+    recordId: lumen.id,
+    beforeValues: json({ primarySalesTeamId: null, assignmentVersion: 1, assignments: [] }),
+    afterValues: json({ primaryTeam: { id: enterpriseTeam.id, name: enterpriseTeam.name }, primaryRepresentative: { id: rep.id, name: rep.name }, collaborators: [], assignmentVersion: 2 }),
+    reason: `Approved directory join request ${approvedDirectoryRequest.id}`,
+    requestId: 'seed-directory-lumen-approve',
+    result: 'SUCCESS',
+    createdAt: atDay(-40),
+  } });
   await db.organizationInvitation.createMany({ data: [
     { organizationId: primaryOrganizationId, customerId: acme.id, email: acmeCustomer.email, accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACCEPTED', tokenHash: digest('accepted-acme-invite'), invitedById: admin.id, expiresAt: atDay(20), acceptedAt: atDay(-40), createdAt: atDay(-45) },
     { organizationId: primaryOrganizationId, customerId: beta.id, email: betaCustomer.email, accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACCEPTED', tokenHash: digest('accepted-beta-invite'), invitedById: manager.id, expiresAt: atDay(20), acceptedAt: atDay(-25), createdAt: atDay(-30) },
@@ -787,6 +853,10 @@ async function main() {
 
   const invoice0202 = await db.invoice.findUniqueOrThrow({ where: { number: 'INV-0202' } });
   await db.auditEvent.createMany({ data: [
+    { organizationId: primaryOrganizationId, actorId: admin.id, action: 'DIRECTORY_JOIN_CUSTOMER_CREATED', resource: 'Customer', resourceId: lumen.id, reason: `Approved directory request ${approvedDirectoryRequest.id}`, requestId: 'seed-directory-lumen-approve', createdAt: atDay(-40) },
+    { organizationId: primaryOrganizationId, actorId: admin.id, action: 'CUSTOMER_PORTAL_PASSWORD_CREATED', resource: 'Customer', resourceId: lumen.id, reason: lumenCustomer.email, requestId: 'seed-directory-lumen-approve', createdAt: atDay(-40) },
+    { organizationId: primaryOrganizationId, actorId: admin.id, action: 'DIRECTORY_JOIN_REQUEST_APPROVED', resource: 'DirectoryJoinRequest', resourceId: approvedDirectoryRequest.id, reason: lumen.id, requestId: 'seed-directory-lumen-approve', createdAt: atDay(-40) },
+    { organizationId: primaryOrganizationId, actorId: admin.id, action: 'DIRECTORY_JOIN_REQUEST_DECLINED', resource: 'DirectoryJoinRequest', resourceId: declinedDirectoryRequest.id, reason: declinedDirectoryRequest.decisionReason!, requestId: 'seed-directory-stonebridge-decline', createdAt: atDay(-3) },
     { organizationId: primaryOrganizationId, actorId: admin.id, action: 'CUSTOMER_RELATIONSHIP_UPDATED', resource: 'Customer', resourceId: acme.id, reason: 'Assigned Enterprise Sales and primary representative.', requestId: 'seed-customer-assignment', createdAt: atDay(-60) },
     { organizationId: primaryOrganizationId, actorId: rep.id, action: 'QUOTE_SUBMITTED', resource: 'Quote', resourceId: q0102.quote.id, revisionId: q0102.revision.id, reason: 'Customer scope and pricing are ready for governance review.', requestId: 'seed-q0102-submit', createdAt: atDay(-1) },
     { organizationId: primaryOrganizationId, actorId: manager.id, action: 'APPROVAL_APPROVED', resource: 'Quote', resourceId: q0104.quote.id, revisionId: q0104.revision.id, reason: 'Manager approved; Finance review remains.', requestId: 'seed-q0104-manager', createdAt: atDay(-1) },
@@ -803,6 +873,7 @@ async function main() {
 
   const totals = await validateSeed();
   console.log(`DealOS full-cycle seed complete: ${totals.quotes} quotations, ${totals.orders} orders, ${totals.invoices} invoices, and ${totals.portalRequests} portal requests.`);
+  console.log('Directory seed: 2 discoverable profiles; Atlas pending, Lumen approved, and Stonebridge declined.');
   console.log(`Demo users share password: ${demoPassword}`);
   console.log(`Reusable Gamma Health invitation: http://localhost:5173/customer/invitations/${demoPortalInvitationToken}`);
   console.log(`Organizations: ${organizations.primary.name} (Lead-first) and ${organizations.northstar.name} (Direct Draft).`);

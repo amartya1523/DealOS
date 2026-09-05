@@ -1,6 +1,6 @@
 # DealOS — PostgreSQL persistence design
 
-Status: living persistence contract. Twenty-three migrations implement the current functional subset; the broader entity catalog remains target architecture. PostgreSQL is authoritative.
+Status: living persistence contract. Twenty-five migrations implement the current functional subset; the broader entity catalog remains target architecture. PostgreSQL is authoritative.
 
 ## Shared field conventions
 
@@ -51,6 +51,18 @@ Lifecycle enums below are application enums plus DB CHECK constraints (or review
 - **Owner:** identity/portal. The existing generic organization invitation record is reused for customer portal onboarding; no parallel `PortalInvitation` table exists.
 - **Fields:** organization_id FK; customer_id uuid? FK customers; normalized email; access_role; business_role; token_hash U; status enum(PENDING,ACCEPTED,EXPIRED,REVOKED); invited_by_id FK users; expires_at; accepted_at?; revoked_at?; created_at is the invitation issue time.
 - **Constraints and indexes:** token hash unique; partial unique `(customer_id,lower(email)) WHERE customer_id IS NOT NULL AND status='PENDING'`; index(organization_id,customer_id,created_at). Portal rows require PORTAL_USER/CUSTOMER roles. Raw tokens are never persisted. Customer deletion remains restricted because invitation history is auditable.
+
+### `organization_profiles`
+
+- **Owner:** directory.
+- **Fields:** organization_id PK/FK organizations ON DELETE CASCADE; display_name text; short_description text?; category text?; is_discoverable bool default false; updated_at.
+- **Constraints and indexes:** one profile per organization. Public reads require both `is_discoverable=true` and active Organization status and explicitly project only organization ID, display name, short description and category. Internal Organization name/configuration is not a public fallback.
+
+### `directory_join_requests`
+
+- **Owner:** directory orchestration; catalog/identity services own the Customer/User/relationship records created by approval.
+- **Fields:** organization_id FK; normalized email; company_name; message; status enum(PENDING,APPROVED,DECLINED); decided_by_id? FK users; decided_at?; decision_reason?; resulting_customer_id? U FK customers; created_at/updated_at.
+- **Constraints and indexes:** unique(organization_id,email,status) prevents duplicate PENDING requests; unique resulting customer; index(organization_id,status,created_at) and (email,created_at). A lifecycle CHECK requires PENDING to have no decision/result, APPROVED to have actor/time/customer, and DECLINED to have actor/time/nonblank reason with no customer. Request history restricts deletion of decision/customer records.
 
 ### `customer_tiers`
 
@@ -381,6 +393,7 @@ The implemented compatibility `Alert` table also supports portal-request notific
 ## Relationships and integrity
 
 - Users N↔N roles through user_roles; users N↔N teams through team_memberships. Customer identity links to one customer; customer has many portal users.
+- Organization 0→1 OrganizationProfile and 1→N DirectoryJoinRequest; an approved request 0→1 resulting Customer. The resulting User remains linked through singular `customer_id` and one organization membership, so the directory adds no multi-business identity model.
 - Customer N→1 primary SalesTeam and Customer 1→N CustomerRepresentative history. The partial active-primary index protects current cardinality; removal ends rows rather than deleting them. Portal User.customer_id remains customer-scoped and never references a representative.
 - Customer/User 1→N PortalRequest; request 1→N subordinate lines and 0→1 Lead / 0→1 resulting Quote. Lead references exactly one source request and at most one converted Quote. Organization holds `rfq_handling_mode` with Proposed default LEAD_FIRST.
 - Product 1→N variants; variant N↔N attribute values. Rules distinguish product category versus exact variant. Plan links supply explicit cadence price/cost.
@@ -402,6 +415,8 @@ Canonical: submitted quote snapshots, accepted order lines, physical movements, 
 | Operation | Lock / isolation | Atomic writes | Failure invariant |
 |---|---|---|---|
 | Draft save | quote/revision optimistic lock_version | revision/lines + version + audit | Stale update cannot overwrite newer draft |
+| Approve directory join request | lock tenant-scoped PENDING request; optimistic new Customer assignment version | Customer + customer portal User/membership + primary CustomerRepresentative + approved request + audit | Invalid/replayed/cross-tenant/team/Rep/email decision creates no partial customer/account; plaintext password is never persisted |
+| Decline directory join request | lock tenant-scoped PENDING request | terminal reason/actor/time + audit | No Customer/User/representative row is created |
 | Submit portal request | lock Customer, count customer/user rolling window | raw request/lines + Lead or Draft + recipient Alert + audit + idempotency | Stale assignment or any branch failure leaves no orphan request/result; retry creates one result |
 | Convert Lead | lock Lead; recheck Rep/tenant and catalog | Draft/revision/valid lines + Lead/request status + resolved Alert + audit | A second conversion returns the same Quote; free text never becomes price |
 | Dismiss Lead | lock Lead; Rep-own or managed-team scope | Lead/request terminal status + internal reason + resolved Alert + audit | Lead is retained; internal reason never enters customer DTO |
@@ -437,7 +452,7 @@ List queries constrain team/customer/state/date and use stable `(created_at,id)`
 
 ## Current database state
 
-The merged history contains twenty-three ordered migrations through `20260906070000_portal_rfq_intake`. Later additive migrations implement quotation list/detail metadata, invoice/payment corrections, customer relationships, portal invitation lifecycle, versioned quotation governance, durable portal proposal responses, confirmation billing/change history, the order-based reservation/backorder boundary, and customer-originated RFQ intake. The earlier platform-control migration runs after customer tenant-isolation repairs and adds organization status/slug, `OrganizationMembership`, `OrganizationInvitation`, `PlatformOwnerSession`, `PrivilegedAudit`, CSRF/View As session fields and organization-scoped uniqueness; it never persists the Platform Owner password.
+The merged history contains twenty-five ordered migrations through `20260906080000_business_directory`. Later additive migrations implement quotation list/detail metadata, invoice/payment corrections, customer relationships, portal invitation lifecycle, versioned quotation governance, durable portal proposal responses, confirmation billing/change history, the order-based reservation/backorder boundary, customer-originated RFQ intake, and public directory association approval. The earlier platform-control migration runs after customer tenant-isolation repairs and adds organization status/slug, `OrganizationMembership`, `OrganizationInvitation`, `PlatformOwnerSession`, `PrivilegedAudit`, CSRF/View As session fields and organization-scoped uniqueness; it never persists the Platform Owner password.
 
 The former feature-only `20260905130000`–`20260905150000` migration sequence was consolidated because it independently created tables later introduced on `main`. Retaining both sequences would make fresh and existing-main deployments fail. The consolidated migration was verified from an empty PostgreSQL database followed by the merged deterministic seed.
 
@@ -489,4 +504,8 @@ Reservation and consolidation lock the Order, discover relevant active balances,
 
 ## Implemented portal RFQ intake delta — 2026-09-06
 
-Migration `20260906070000_portal_rfq_intake` adds the `RfqHandlingMode`, `PortalRequestStatus`, `LeadStatus` and `PORTAL_REQUEST` alert enums; Organization mode with Proposed `LEAD_FIRST` default; first-class PortalRequest/PortalRequestLine/Lead records; source links from request to Lead/Quote; optional QuoteRevision internal intake note; and recipient/resource classification on Alert. Unique result links and lifecycle CHECK constraints protect one-request/one-result and terminal-state consistency. The migration was deployed to local `public` with all 23 migrations current; a disposable PostgreSQL schema exercised assignment, tenant, rate, idempotency, safe-projection and audit invariants before being dropped.
+Migration `20260906070000_portal_rfq_intake` adds the `RfqHandlingMode`, `PortalRequestStatus`, `LeadStatus` and `PORTAL_REQUEST` alert enums; Organization mode with Proposed `LEAD_FIRST` default; first-class PortalRequest/PortalRequestLine/Lead records; source links from request to Lead/Quote; optional QuoteRevision internal intake note; and recipient/resource classification on Alert. Unique result links and lifecycle CHECK constraints protect one-request/one-result and terminal-state consistency. The migration was deployed to local `public` with all 24 then-current migrations current; a disposable PostgreSQL schema exercised assignment, tenant, rate, idempotency, safe-projection and audit invariants before being dropped.
+
+## Implemented public business directory delta — 2026-09-06
+
+Migration `20260906080000_business_directory` adds `DirectoryJoinRequestStatus`, one-to-one OrganizationProfile, DirectoryJoinRequest, the per-organization/email/status uniqueness guard, resulting-customer uniqueness, review indexes, foreign keys and the terminal-state CHECK. No password/plain credential column exists. It was deployed to local `public`, where migration status reports all 25 migrations current. A disposable PostgreSQL schema passed the real approval/decline transaction, assignment, membership, password-hash and tenant-isolation checks before automatic cleanup. The repeatable deterministic seed publishes two allowlisted profiles and one request in each lifecycle state: actionable Atlas Field Operations, approved Lumen Offices with complete customer/portal/primary-assignment links, and declined Stonebridge Procurement without a customer. The known earlier empty-schema migration-order blocker at `20260905162000_customer_profile_fields` remains separate and was not hidden or rewritten by this additive migration.

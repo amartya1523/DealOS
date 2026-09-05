@@ -94,7 +94,7 @@ npm run db:seed
 
 The seed script replaces existing DealOS demo data in the configured database. Do not run it against a database containing information you need to preserve.
 
-The full-cycle seed creates 20 named quotation checkpoints plus reconciled orders, invoices, payments, subscriptions, fulfillment/backorders, portal invitations, RFQs, Leads, alerts, and audit events. Follow the [full-cycle usability guide](backend/docs/FULL-CYCLE-USABILITY-GUIDE.md) to move `Q-0102` from approval through customer acceptance, fulfillment, payment, and subscription management.
+The full-cycle seed creates 20 named quotation checkpoints plus reconciled orders, invoices, payments, subscriptions, fulfillment/backorders, portal invitations, RFQs, Leads, alerts, audit events, two public business profiles, and Pending/Approved/Declined directory requests. Follow the [full-cycle usability guide](backend/docs/FULL-CYCLE-USABILITY-GUIDE.md) to exercise both the directory onboarding flow and `Q-0102` from approval through customer acceptance, fulfillment, payment, and subscription management.
 
 ### 6. Start the application
 

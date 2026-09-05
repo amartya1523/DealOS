@@ -21,6 +21,7 @@ npm run db:seed
 
 ```text
 DealOS full-cycle seed complete: 20 quotations, 6 orders, 6 invoices, and 4 portal requests.
+Directory seed: 2 discoverable profiles; Atlas pending, Lumen approved, and Stonebridge declined.
 Demo users share password: DealOS2026!
 ```
 
@@ -58,6 +59,7 @@ Every active demo identity uses `DealOS2026!`.
 | Organization admin | `admin@dealos.demo` | DealOS Demo | Setup, access, subscriptions, all workspace modules |
 | Acme customer | `customer@dealos.demo` | DealOS Demo | RFQ, negotiation, acceptance, invoices |
 | Beta customer | `buyer@beta.demo` | DealOS Demo | Second-customer isolation check |
+| Lumen customer | `customer@lumen.demo` | DealOS Demo | Completed directory-approval login and assignment check |
 | Northstar rep | `rep@northstar.demo` | Northstar Distribution | Direct-draft RFQ check |
 | Northstar manager | `manager@northstar.demo` | Northstar Distribution | Second-tenant approval check |
 | Northstar admin | `orgadmin@northstar.demo` | Northstar Distribution | Second-tenant administration |
@@ -75,6 +77,7 @@ Sign in at `/sign-in` as `admin@dealos.demo` and confirm:
 4. **Customers → Acme Corp** shows the Enterprise Sales team, Aarav as primary rep, Leena as collaborator, portal history, and commercial history.
 5. **Fulfillment** shows Main Warehouse, East Depot, and South Hub with on-hand, reserved, and available quantities.
 6. **User access** shows every active role plus the intentionally pending teammate.
+7. The public **Business directory** shows DealOS Demo Commerce and Northstar Distribution without exposing catalog prices, costs, stock, customers, users, or policies.
 
 Usability questions: Can you tell where you are, what the next useful action is, and why some actions are unavailable without reading source code?
 
@@ -191,7 +194,29 @@ Reseed before a branch if an earlier test changed its checkpoint.
 | `NS-Q-0001` | Northstar pending | Tenant-isolated Manager approval |
 | `NS-Q-0002` | Northstar direct Draft | Direct-draft RFQ behavior without creating a Lead |
 
-## 6. Test RFQ intake in both organization modes
+## 6. Test the public business directory and join-request lifecycle
+
+Reseed before this section to restore the three named directory checkpoints.
+
+| Request | Seeded state | Expected relationship |
+| --- | --- | --- |
+| Atlas Field Operations | Pending | No Customer, User, assignment, or login exists yet |
+| Lumen Offices | Approved | Linked Lumen Customer, active portal identity, PORTAL_USER membership, Enterprise Sales team, and Aarav as primary Rep |
+| Stonebridge Procurement | Declined | Retained decision reason and no resulting Customer |
+
+1. While signed out, open `/directory`. Confirm that exactly **DealOS Demo Commerce** and **Northstar Distribution** are listed and that each card contains only public name, description, and category.
+2. Submit a new request to Northstar with a unique email. Confirm that the page says no account or login exists until approval.
+3. Sign in as `admin@dealos.demo`, open **Join requests → Pending**, and inspect **Atlas Field Operations**. Approve it with **Enterprise Sales**, **Aarav Mehta**, a tier, and INR. Copy the one-time credentials before dismissing the result.
+4. Confirm Atlas moves out of Pending, one Customer exists, and the generated customer login works at `/customer/sign-in`. Reseed afterward if you need the untouched checkpoint again.
+5. Open **Approved** and inspect **Lumen Offices**. Confirm the linked customer is present, then sign in as `customer@lumen.demo` with `DealOS2026!` to verify the seeded portal identity.
+6. Open **Declined** and inspect **Stonebridge Procurement**. Confirm the reason is visible and no Stonebridge customer exists.
+7. Sign in as `orgadmin@northstar.demo`. Confirm the DealOS Demo requests are absent. In **Rules**, verify that only an Admin can edit its own public directory profile.
+
+Pass condition: public output remains allowlisted, submission creates only a pending request, approval produces one fully assigned customer/login, decline produces none, later list reads never reveal the temporary password, and each organization sees only its own inbox.
+
+Automated equivalent: from `backend`, run `npm run test:directory:pg`. It creates a disposable PostgreSQL schema, runs the directory transaction cases, executes the full seed twice, validates all three seeded states and tenant isolation, then drops the schema.
+
+## 7. Test RFQ intake in both organization modes
 
 ### Lead-first mode
 
@@ -209,7 +234,7 @@ Reseed before a branch if an earlier test changed its checkpoint.
 
 Pass condition: the selected organization setting changes the workflow without crossing tenant or customer boundaries.
 
-## 7. Test a customer invitation
+## 8. Test a customer invitation
 
 1. Rerun the seed and copy the printed Gamma Health invitation URL.
 2. Open it in a private window while signed out.
@@ -219,7 +244,7 @@ Pass condition: the selected organization setting changes the workflow without c
 
 Pass condition: the first acceptance activates exactly one Gamma customer identity; the second attempt reports that the one-time invitation is no longer usable.
 
-## 8. Usability scorecard
+## 9. Usability scorecard
 
 For each major task, score 1 (poor) to 5 (excellent) and add one sentence of evidence.
 
@@ -238,7 +263,7 @@ For each major task, score 1 (poor) to 5 (excellent) and add one sentence of evi
 
 Capture each issue as: persona, record, screen, action, expected result, actual result, severity, screenshot, and reproducibility. Treat data leakage, duplicate orders/invoices, incorrect balances, over-reservation, or unauthorized writes as release blockers.
 
-## 9. Reset between runs
+## 10. Reset between runs
 
 From `backend`:
 

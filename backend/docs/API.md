@@ -4,7 +4,7 @@ Status: living API contract. The inventory describes the target API; implemented
 
 ## Shared HTTP contract
 
-All paths below are relative to `/api/v1`. HTTPS in production. JSON UTF-8 except binary exports. Request IDs are accepted only in bounded safe form or generated; returned as `X-Request-ID`. Success `{success:true,data:<described DTO>,meta:{requestId,...pagination?}}`. Error `{success:false,error:{code,message,details?},meta:{requestId}}`. Dates are ISO-8601; money/quantity/rate values are decimal strings, not binary floating JSON numbers. Versions and counts are integers. IDs are UUIDs except catalog codes. `Page<T>` is `{items:T[],nextCursor:string|null}` with default 25/max 100. No passwords, raw session tokens or internal stack traces in any response.
+All paths below are relative to `/api/v1`. HTTPS in production. JSON UTF-8 except binary exports. Request IDs are accepted only in bounded safe form or generated; returned as `X-Request-ID`. Success `{success:true,data:<described DTO>,meta:{requestId,...pagination?}}`. Error `{success:false,error:{code,message,details?},meta:{requestId}}`. Dates are ISO-8601; money/quantity/rate values are decimal strings, not binary floating JSON numbers. Versions and counts are integers. IDs are UUIDs except catalog codes. `Page<T>` is `{items:T[],nextCursor:string|null}` with default 25/max 100. No stored password/hash, raw session token or internal stack trace appears in a response. Explicit credential-provisioning endpoints may return a newly generated plaintext password once and are identified below; it is never available from a later read.
 
 Every authenticated mutation requires CSRF token header and allowed Origin. Sessions use HttpOnly cookies and server-stored token hashes. Public auth endpoints use Origin/rate checks; login rotates cookie. All `:id` and nested IDs are validated, existence scoped server-side. Actors are intersected with resource/team/customer permissions. Internal identities means active REP/MANAGER/FINANCE_OPS/ADMIN; CUSTOMER is never included. Admin is not implicitly a reviewer. Customer payloads use separate DTO projections.
 
@@ -36,6 +36,8 @@ Each endpoint inherits applicable errors above. Endpoint-specific validation bel
 | ApprovalCase | id, version, revisionId, policyId, requiredLevel, riskComponents, state, ordered steps, auditable decisions |
 | PortalQuotation | id/number, customer-facing status, revisionId/version/termsHash, expiry, line descriptions/quantities/prices/discounts/taxes/cadence, commercial totals, customer-visible comments and proposals; **no costs, margins, risk, internal comments or reviewer notes** |
 | PortalRequest | id, requirementsText, preferredDeliveryDate?, safe status `RECEIVED|IN_PROGRESS|DECLINED`, createdAt and safe lines `{id,product?:{id,name,sku},description?,quantity?,catalogMatch}`; **no owner/team/result IDs, prices, internal/degradation/dismiss notes** |
+| PublicBusiness | opaque organization id, displayName, shortDescription?, category? only; no internal Organization name, users, customers, products/pricing/cost/tax/stock, policies or metrics |
+| DirectoryJoinRequest | internal id, email, companyName, message, status, decision actor/time/reason and resulting Customer summary when applicable; public submission receives only id/status/time |
 | Lead | id/status/summary, customer/team/assigned Rep, internal source request with degradation flags, converted quotation summary?, timestamps and internal dismiss reason; internal Rep/Manager projection only |
 | Order | id/number/version, source revision, customer, accepted lines, fulfillment summary, separate billing status |
 | Warehouse / Fulfillment | warehouse costs/priorities, balances, reservations, shipment history, remaining demand, estimate and version; no silent write during GET |
@@ -48,6 +50,65 @@ Each endpoint inherits applicable errors above. Endpoint-specific validation bel
 DTO additions must be documented before exposing them. Nested domain DTOs use Database.md fields converted to camelCase through explicit mapping, **not** automatic ORM serialization. `version` always maps to lock_version (optimistic counter), while configuration version is named policyVersion/planVersion where ambiguity exists.
 
 ## Endpoint inventory
+
+### DIR-01 — List discoverable businesses
+
+- **Method/path:** `GET /api/v1/directory/businesses`
+- **Actor / authorization:** Public, no session.
+- **Response:** 200 `{items:PublicBusinessDTO[]}` ordered by display name, max 200. Only profiles with `isDiscoverable=true` and active Organization status qualify.
+- **Security:** Explicit projection only; catalog preview is not implemented.
+- **Business rules:** R-051, BR-008, BR-021, BR-028.
+
+### DIR-02 — Submit customer association request
+
+- **Method/path:** `POST /api/v1/directory/businesses/:organizationId/join-requests`
+- **Actor / authorization:** Public; allowed Origin required.
+- **Request:** `{email,companyName,message}` with normalized valid email, company 2–160 and message 5–2000; unknown fields rejected.
+- **Response:** 201 `{id,status:"PENDING",createdAt}`. No account/customer/Lead/RFQ/quotation is created.
+- **Errors:** 404 hidden/inactive/unknown business; 409 `PENDING_REQUEST_EXISTS`; 429 `RATE_LIMITED` with Retry-After. Initial bounds are Proposed five per organization/email and twenty per organization/IP per rolling hour.
+- **Business rules:** R-051, BR-028.
+
+### DIR-03 — List scoped association requests
+
+- **Method/path:** `GET /api/v1/directory/join-requests`
+- **Actor / authorization:** Manager/Admin with customers module; tenant-scoped.
+- **Request:** `query: status?:PENDING|APPROVED|DECLINED`; unknown query fields rejected.
+- **Response:** 200 `{items:DirectoryJoinRequestDTO[]}`, newest first, max 200. No plaintext credential field exists.
+- **Business rules:** BR-017, BR-021, BR-028.
+
+### DIR-04 — Approve association and provision customer
+
+- **Method/path:** `POST /api/v1/directory/join-requests/:id/approve`
+- **Actor / authorization:** Manager/Admin with customers module; active session and CSRF. Manager may select only a team they manage.
+- **Request:** `{primarySalesTeamId,primaryRepId,collaboratorIds?:[],customerTier,currency}`; relationship IDs use the exact CAT-03A eligibility rules.
+- **Processing:** Lock organization-scoped PENDING request. In one transaction use the CAT-02 customer service, CAT-03A relationship service and existing customer-password provisioner; finalize request/audit only after all succeed.
+- **Response:** 200 `{request:DirectoryJoinRequestDTO,credentials:{email,password,signInPath:"/customer/sign-in"}}`. The server-generated raw password is returned only in this response; later GETs omit it and PostgreSQL stores only bcrypt hash.
+- **Errors:** 404 scoped miss; 409 already decided/name/email collision; 422/403 exact team/Rep/Manager validation. Any failure rolls back all Customer/User/Membership/Representative/request changes.
+- **Business rules:** BR-017, BR-021, BR-024, BR-027, BR-028.
+
+### DIR-05 — Decline association request
+
+- **Method/path:** `POST /api/v1/directory/join-requests/:id/decline`
+- **Actor / authorization:** Manager/Admin with customers module; active session and CSRF.
+- **Request:** `{reason:string(5..1000)}`.
+- **Response:** 200 DirectoryJoinRequestDTO with DECLINED status. No related customer/account record is created.
+- **Errors:** 404 scoped miss; 409 already decided; 422 invalid reason.
+- **Business rules:** BR-017, BR-021, BR-028.
+
+### DIR-06 — Read organization directory settings
+
+- **Method/path:** `GET /api/v1/settings/directory-profile`
+- **Actor / authorization:** Organization Admin only.
+- **Response:** 200 `{organizationId,displayName,shortDescription,category,isDiscoverable,updatedAt}`; before first save, defaults to internal organization name with `isDiscoverable:false` but nothing is publicly listed.
+- **Business rules:** R-051, BR-028.
+
+### DIR-07 — Publish or hide organization directory profile
+
+- **Method/path:** `PUT /api/v1/settings/directory-profile`
+- **Actor / authorization:** Organization Admin only; active session and CSRF.
+- **Request:** `{displayName:string(2..120),shortDescription?:string(0..500)|null,category?:string(0..80)|null,isDiscoverable:boolean}`.
+- **Response:** 200 saved profile. A change is audited; hiding immediately removes it from DIR-01/DIR-02 eligibility.
+- **Business rules:** BR-017, BR-021, BR-028.
 
 ### AUTH-01 — Create a pending internal account
 
@@ -1281,3 +1342,5 @@ POR-00A–POR-00D implement the assignment-gated invitation lifecycle on the exi
 CAT-02 additionally implements the confirmed Admin-created credential path. An Admin request requires customer email plus `temporaryPassword`; profile, customer-scoped active User, PORTAL_USER membership and audit rows commit atomically. The response remains CustomerDTO and never echoes the password. The React form generates and holds the plaintext locally, then shows it once after success for manual sharing. Managers cannot submit this field and continue to use assignment-gated invitation onboarding.
 
 POR-00E–POR-00G, LEA-01–LEA-04 and SET-08/09 now implement the formerly deferred customer RFQ branch. Submission always retains the raw request, revalidates assignment and creates a recipient-scoped in-app Alert. `LEAD_FIRST` creates a qualification record; `DIRECT_DRAFT` and Lead conversion both call the same quotation draft service. Quotation list/detail DTOs identify portal origin for internal users. Customer request DTOs remain separate and never serialize Draft price/link, owner/team, degradation reason, internal note or Lead dismiss reason.
+
+DIR-01–DIR-07 implement public business discovery, request submission, tenant review and Admin directory settings. Public responses are allowlisted and request submission creates no access. Approval reuses CAT-02/CAT-03A/password services under one transaction and returns the generated raw credential once; request history never returns it. The current singular User.customerId/organization membership remains unchanged, so this does not implement a multi-business customer identity.

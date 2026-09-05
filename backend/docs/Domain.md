@@ -7,6 +7,8 @@ Status: living domain contract. C/I/P classifications refer to [PRD.md](PRD.md).
 | Term | Meaning and context | Relationship |
 |---|---|---|
 | Customer | Buying business, assigned to a sales team and pricing tier | Has contacts, quotations and orders |
+| Organization profile | Explicit allowlisted public directory identity controlled by an organization Admin | Belongs one-to-one to an Organization and may be hidden |
+| Directory join request | A visitor's pending request to become a customer of one discoverable organization | Approval may create exactly one Customer; decline retains a reason and creates none |
 | Customer tier | Pricing/discount classification, e.g. Bronze/Silver/Gold | Referenced by price lists and policy versions |
 | Product | Sellable hardware, service or subscription offering; this is domain language in the brief | Has category, variants and price rules |
 | Product variant | Purchasable combination of attribute values with SKU and price adjustments | Stock balances and quote lines reference it |
@@ -38,6 +40,7 @@ Status: living domain contract. C/I/P classifications refer to [PRD.md](PRD.md).
 
 | Actor | Goal / decisions | Visible information | Allowed actions | Restrictions / outputs |
 |---|---|---|---|---|
+| Public visitor | Discover an organization and request a buying relationship | Discoverable organization display name, short description and category only | Submit email, company name and a message to one listed organization | Receives pending confirmation only; no account, Customer, Lead, RFQ or quotation is created before approval |
 | Sales Rep | Build viable deals and respond to negotiation | Own/assigned-team quotes, assigned Leads and customer context; internal margin | Qualify/convert/dismiss own Leads; draft, revise, submit, send, propose, inspect allocation | Cannot convert another Rep's Lead, approve own deal, change stock or record payments; receives stage/risk explanations |
 | Sales Manager | Protect team pricing and progress | Team Leads/quotes, risk, review history, health, team reports | Inspect/dismiss managed-team Leads; approve/reject/return eligible step; configure approval policy | Cannot convert Leads or review a case they submitted; cannot skip Finance; receives reasons and audit |
 | Finance/Operations | Control high-risk discounts, stock and receivables | Approved commercial details, stock and invoices | Second review, allocate, ship, receive stock and record payment | No subscription-module access; sequential approval and immutable ledger restrictions apply |
@@ -48,13 +51,15 @@ Status: living domain contract. C/I/P classifications refer to [PRD.md](PRD.md).
 
 ## Entities and relationships
 
-Customer N→1 primary SalesTeam and Customer 1→N historical CustomerRepresentative assignments, with at most one active PRIMARY and optional active COLLABORATOR rows. Customer 1→N PortalRequest; PortalRequest 1→N PortalRequestLine and produces at most one Lead or one source-linked Quotation. Lead belongs to one customer/request/assigned Rep and converts to at most one Quotation. Customer 1→N Quotation; each quotation snapshots one owner, team and creator independently of later account reassignment. Quotation 1→N Revision; Revision 1→N Line; Revision 1→N ApprovalCase (at most one active); Case 1→N ordered Step. Revision 0→1 Acceptance and 0→1 SalesOrder. CustomerProposal references an exact revision and its lines. Product 1→N Variant; Variant N↔N Warehouse through StockBalance. Order 1→N OrderLine; OrderLine 1→N Reservation/ShipmentLine and 0→1 Subscription for recurring lines. Subscription 1→N BillingPeriod; Invoice 1→N InvoiceLine; Payment N↔N Invoice through allocations. Detailed fields and constraints belong to [Database.md](Database.md).
+Organization 0→1 public OrganizationProfile and 1→N DirectoryJoinRequest. An approved DirectoryJoinRequest produces exactly one normal Customer; it does not create a reusable cross-organization identity. Customer N→1 primary SalesTeam and Customer 1→N historical CustomerRepresentative assignments, with at most one active PRIMARY and optional active COLLABORATOR rows. Customer 1→N PortalRequest; PortalRequest 1→N PortalRequestLine and produces at most one Lead or one source-linked Quotation. Lead belongs to one customer/request/assigned Rep and converts to at most one Quotation. Customer 1→N Quotation; each quotation snapshots one owner, team and creator independently of later account reassignment. Quotation 1→N Revision; Revision 1→N Line; Revision 1→N ApprovalCase (at most one active); Case 1→N ordered Step. Revision 0→1 Acceptance and 0→1 SalesOrder. CustomerProposal references an exact revision and its lines. Product 1→N Variant; Variant N↔N Warehouse through StockBalance. Order 1→N OrderLine; OrderLine 1→N Reservation/ShipmentLine and 0→1 Subscription for recurring lines. Subscription 1→N BillingPeriod; Invoice 1→N InvoiceLine; Payment N↔N Invoice through allocations. Detailed fields and constraints belong to [Database.md](Database.md).
 
 ## Lifecycles and invariants
 
 Quotation revision: `DRAFT → SUBMITTED → SENT → SUPERSEDED` describes document publication; rejection/return creates a new editable draft revision. Approval case: `PENDING → APPROVED | REJECTED | RETURNED | SUPERSEDED`; steps execute in sequence. Customer review: `NOT_SENT → SENT → UNDER_NEGOTIATION → ACCEPTED | SUPERSEDED`. A consolidated pipeline stage is derived, not a freely writable authorization field.
 
 Portal request: `NEW → PROCESSED | DISMISSED`. Lead-first keeps the request NEW while its Lead is NEW; conversion marks both Lead CONVERTED and request PROCESSED, while reasoned dismissal marks Lead/request DISMISSED. Direct-draft marks the request PROCESSED in the creation transaction. Customer status is a separate safe projection: NEW=`Received`, PROCESSED=`In progress`, DISMISSED=`Declined`.
+
+Directory join request: `PENDING → APPROVED | DECLINED`. PENDING has no decision/result metadata. APPROVED requires the deciding Manager/Admin, decision time and resulting Customer. DECLINED requires the deciding actor, time and nonblank retained reason and must not reference a Customer. No state returns to PENDING.
 
 Order: `CONFIRMED → PARTIALLY_FULFILLED → FULFILLED`; cancellation of unshipped balance is a distinct audited operation. Billing status runs independently. Subscription: `ACTIVE ↔ PAUSED → CANCELLED`; every amount or lifecycle modification is a dated, reasoned change event with an optimistic version. Amount changes affect future periods only and never rewrite an issued invoice.
 
@@ -70,6 +75,15 @@ Invoice: `DRAFT → ISSUED → PARTIALLY_PAID → PAID`, with credit-adjusted ba
 - Database: user, role assignment, password hash, session token hash, audit.
 - Output: session cookie and minimal identity/permission projection.
 - Failure/recovery: generic invalid-credential response; expired session forces login; Admin activates pending signup. No fallback demo identity.
+
+### W-01A Public directory and customer association
+
+- Trigger/actor: a public visitor opens the directory and requests a relationship; a Manager/Admin reviews a pending request; an Admin changes public profile visibility.
+- Input: allowlisted organization display profile; visitor email/company/message; approval team, primary Rep, customer tier and currency; or a required decline reason.
+- Processing/logic: list only active organizations with `isDiscoverable=true`; normalize email; enforce one pending organization/email request and proposed rolling limits of five per email and twenty per IP/hour. Submission creates only DirectoryJoinRequest. Approval locks/scopes the pending row, calls the shared customer creation and CustomerRepresentative assignment services, generates and hashes one initial customer password, and finalizes the request atomically. Decline writes reason/audit only.
+- Database: OrganizationProfile; DirectoryJoinRequest; on approval the existing Customer, User, OrganizationMembership, CustomerRepresentative and audit records.
+- Output: public pending confirmation; internal scoped request history; approval returns raw credential exactly once to the approving browser for manual sharing.
+- Failure/recovery: hidden/inactive/cross-tenant targets return 404; duplicate pending returns 409; invalid team/Rep uses the exact CAT-03A validation error and rolls back every approval write; declined requests create no customer/account. No email delivery is claimed.
 
 ### W-02 Sales backend configuration
 
@@ -252,6 +266,10 @@ Condition: portal request submission, Lead conversion/dismissal, or organization
 ### BR-027 — Admin-provisioned initial customer access [C]
 
 Condition: an organization Admin creates a customer profile. Behavior: customer email and a 12–128 character generated temporary password are required; Customer, active `CUSTOMER` User, active `PORTAL_USER` membership and both creation/access audits commit in one transaction. Only the bcrypt hash is persisted; neither plaintext nor hash is returned by the API. The creating browser retains and displays the plaintext once for secure manual sharing. Managers cannot submit a temporary password and retain the profile → assignment → invitation path. The resulting customer may authenticate immediately, but BR-024 and BR-026 still require a current primary team/Rep before quotation creation or RFQ submission. Owner: catalog/identity/portal; W-01/W-03A. Edge cases: email collision rolls back the whole customer creation; no external email is claimed; later reset revokes active sessions.
+
+### BR-028 — Approval-gated public association [C/P]
+
+Condition: public directory listing, visitor association request or internal decision. Behavior: only an Admin publishes the four-field organization profile; only discoverable active organizations accept requests; submission writes no customer/account/commercial record. Manager/Admin approval locks the organization-scoped PENDING request and atomically reuses customer creation, primary relationship validation and customer portal provisioning. The server generates the initial password, persists only its bcrypt hash and returns plaintext only in the successful approval response. Decline requires a reason and creates no related rows. One `(organization,email,PENDING)` request is allowed; initial five/email and twenty/IP/hour bounds are Proposed anti-abuse defaults. Owner: directory orchestration with catalog/identity service calls; W-01A. Edge cases: cross-organization decisions return 404; existing customer name/email or global user email rolls back; Manager team scope is unchanged; multi-organization customer identity and catalog preview remain outside this rule.
 
 ## Implemented audit-repair decisions — 2026-09-05
 
