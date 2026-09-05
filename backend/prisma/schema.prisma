@@ -169,12 +169,23 @@ model Customer {
   name           String
   tier           String
   currency       String         @default("INR")
+  customerType   String         @default("Business / Company")
+  region         String         @default("India")
+  contactPerson  String?
+  email          String?
+  phone          String?
+  countryCode    String         @default("+91")
+  gstin          String?
+  billingAddress String?
+  shippingAddress String?
+  paymentTerms   Int            @default(7)
   active         Boolean        @default(true)
   users          User[]
   quotes         Quote[]
   orders         Order[]
   subscriptions  Subscription[]
   invoices       Invoice[]
+  invitations    OrganizationInvitation[]
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
@@ -230,6 +241,8 @@ model OrganizationInvitation {
   organizationId  String
   organization    Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   email           String
+  customerId      String?
+  customer        Customer?              @relation(fields: [customerId], references: [id], onDelete: Restrict)
   accessRole      OrganizationAccessRole
   businessRole    Role
   status          InvitationStatus       @default(PENDING)
@@ -242,6 +255,7 @@ model OrganizationInvitation {
 
   @@index([organizationId, status, createdAt])
   @@index([email, status])
+  @@index([customerId, status])
 }
 
 model Product {
@@ -259,6 +273,8 @@ model Product {
   recurring      Boolean        @default(false)
   cadence        String?
   active         Boolean        @default(true)
+  storeVisible   Boolean        @default(true)
+  featured       Boolean        @default(false)
   quoteLines     QuoteLine[]
   orderLines     OrderLine[]
   subscriptions  Subscription[]
@@ -403,6 +419,8 @@ model StockBalance {
   product     Product   @relation(fields: [productId], references: [id])
   onHand      Int
   reserved    Int       @default(0)
+  minAlertLevel Int      @default(0)
+  maxCapacity   Int?
 
   @@unique([warehouseId, productId])
 }

@@ -86,3 +86,32 @@ export async function findOrLinkGoogleLoginUser(profile: GoogleSignupProfile): P
     return concurrentlyLinkedUser?.organizationId && concurrentlyLinkedUser.status === 'ACTIVE' ? concurrentlyLinkedUser : null;
   }
 }
+
+export async function acceptCustomerGoogleInvitation(profile: GoogleSignupProfile): Promise<User | null> {
+  const linkedUser = await db.user.findUnique({ where: { googleSubject: profile.subject } });
+  if (linkedUser) return linkedUser.role === 'CUSTOMER' && linkedUser.organizationId && linkedUser.customerId && linkedUser.status === 'ACTIVE' ? linkedUser : null;
+
+  const invitation = await db.organizationInvitation.findFirst({
+    where: { email: profile.email, status: 'PENDING', customerId: { not: null }, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: 'desc' },
+  });
+  const emailUser = await db.user.findUnique({ where: { email: profile.email } });
+  if (!invitation) return emailUser?.role === 'CUSTOMER' && emailUser.status === 'ACTIVE'
+    ? findOrLinkGoogleLoginUser(profile)
+    : null;
+  if (emailUser && (emailUser.role !== 'CUSTOMER' || emailUser.organizationId !== invitation.organizationId || emailUser.customerId !== invitation.customerId || Boolean(emailUser.googleSubject))) return null;
+
+  const passwordHash = emailUser ? undefined : await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
+  return db.$transaction(async (tx) => {
+    const user = emailUser
+      ? await tx.user.update({ where: { id: emailUser.id }, data: { googleSubject: profile.subject, status: 'ACTIVE', name: profile.displayName } })
+      : await tx.user.create({ data: { organizationId: invitation.organizationId, customerId: invitation.customerId, email: profile.email, name: profile.displayName, passwordHash: passwordHash!, googleSubject: profile.subject, status: 'ACTIVE', role: 'CUSTOMER', moduleAccess: [] } });
+    await tx.organizationMembership.upsert({
+      where: { organizationId_userId: { organizationId: invitation.organizationId, userId: user.id } },
+      update: { accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' },
+      create: { organizationId: invitation.organizationId, userId: user.id, accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' },
+    });
+    await tx.organizationInvitation.updateMany({ where: { email: profile.email, organizationId: invitation.organizationId, customerId: invitation.customerId, status: 'PENDING' }, data: { status: 'ACCEPTED' } });
+    return user;
+  });
+}
