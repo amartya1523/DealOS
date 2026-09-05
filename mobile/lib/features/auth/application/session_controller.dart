@@ -114,6 +114,45 @@ class SessionController extends Notifier<SessionState> {
     }
   }
 
+  Future<void> loginCustomer(String email) async {
+    state = const SessionState(
+      status: SessionStatus.unauthenticated,
+      busy: true,
+    );
+    try {
+      await ref.read(workspaceRepositoryProvider).clearCache();
+      final auth = ref.read(authRepositoryProvider);
+      final config = await auth.googleAuthConfig();
+      final clientId = config.clientId?.trim() ?? '';
+      if (!config.enabled || clientId.isEmpty) {
+        throw const AppException(
+          code: 'GOOGLE_NOT_CONFIGURED',
+          message: 'Customer Google sign-in is not enabled on the server.',
+        );
+      }
+      final identity = await ref
+          .read(customerIdentityProvider)
+          .authenticate(serverClientId: clientId, expectedEmail: email);
+      await auth.loginCustomerWithGoogle(
+        email: email,
+        credential: identity.idToken,
+      );
+      await _loadAuthorized();
+      if (state.workspace?.user.isCustomer != true) {
+        await _clearProtectedState();
+        throw const AppException(
+          code: 'CUSTOMER_SESSION_REQUIRED',
+          message: 'This account is not authorized for the customer portal.',
+        );
+      }
+    } on AppException catch (error) {
+      state = SessionState(
+        status: SessionStatus.unauthenticated,
+        error: error.message,
+      );
+    }
+  }
+
   Future<void> signUp({
     required String organization,
     required String name,

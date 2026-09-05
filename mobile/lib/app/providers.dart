@@ -5,6 +5,7 @@ import '../core/config/app_config.dart';
 import '../core/security/session_store.dart';
 import '../features/auth/application/session_controller.dart';
 import '../features/auth/data/auth_repository.dart';
+import '../features/auth/data/customer_identity_provider.dart';
 import '../features/workspace/data/workspace_cache.dart';
 import '../features/workspace/data/workspace_repository.dart';
 
@@ -25,6 +26,9 @@ final apiClientProvider = Provider<ApiClient>(
 );
 final authRepositoryProvider = Provider<AuthRepository>(
   (ref) => AuthRepository(ref.watch(apiClientProvider)),
+);
+final customerIdentityProvider = Provider<CustomerIdentityProvider>(
+  (ref) => GoogleCustomerIdentityProvider(),
 );
 final workspaceRepositoryProvider = Provider<WorkspaceRepository>(
   (ref) => WorkspaceRepository(

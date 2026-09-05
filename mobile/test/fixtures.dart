@@ -5,7 +5,7 @@ Workspace fixtureWorkspace({String role = 'MANAGER', List<String>? modules}) =>
       'user': {
         'id': 'user-1',
         'name': role == 'CUSTOMER' ? 'Portal User' : 'Maya Manager',
-        'email': 'maya@example.com',
+        'email': role == 'CUSTOMER' ? 'buyer@vertex.test' : 'maya@example.com',
         'role': role,
         'customerId': role == 'CUSTOMER' ? 'customer-1' : null,
         'organizationId': 'org-1',
@@ -99,7 +99,15 @@ Workspace fixtureWorkspace({String role = 'MANAGER', List<String>? modules}) =>
               'state': 'PENDING',
             },
           ],
-          'negotiation': [],
+          'negotiation': [
+            {
+              'id': 'message-1',
+              'author': 'Ravi Rep',
+              'message': 'The revised commercial terms are ready to review.',
+              'createdAt': '2026-09-05T09:00:00Z',
+              'counterDiscount': '3',
+            },
+          ],
           'invoices': [],
         },
       ],

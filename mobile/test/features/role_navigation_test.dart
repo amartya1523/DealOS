@@ -1,7 +1,10 @@
 import 'package:dealos_mobile/app/app.dart';
 import 'package:dealos_mobile/app/providers.dart';
 import 'package:dealos_mobile/features/auth/application/session_controller.dart';
+import 'package:dealos_mobile/features/auth/presentation/login_screen.dart';
 import 'package:dealos_mobile/features/approvals/presentation/approvals_screen.dart';
+import 'package:dealos_mobile/features/billing/presentation/billing_screen.dart';
+import 'package:dealos_mobile/features/customer_portal/presentation/customer_portal_screens.dart';
 import 'package:dealos_mobile/features/quotations/presentation/quotations_screen.dart';
 import 'package:dealos_mobile/features/workspace/domain/models.dart';
 import 'package:dealos_mobile/features/workspace/presentation/app_shell.dart';
@@ -43,11 +46,91 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Quotes'), findsWidgets);
+    expect(find.text('My quotations'), findsWidgets);
     expect(find.text('Invoices'), findsWidgets);
-    expect(find.text('Plans'), findsWidgets);
+    expect(find.text('Messages'), findsWidgets);
+    expect(find.text('Profile'), findsWidgets);
+    expect(find.text('Plans'), findsNothing);
     expect(find.text('Approvals'), findsNothing);
     expect(find.text('Products'), findsNothing);
+  });
+
+  testWidgets('login exposes the website customer invitation doorway', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sessionControllerProvider.overrideWith(
+            () => StubSessionController(
+              const SessionState(status: SessionStatus.unauthenticated),
+            ),
+          ),
+        ],
+        child: const MaterialApp(home: LoginScreen()),
+      ),
+    );
+
+    await tester.tap(find.text('Customer portal'));
+    await tester.pump();
+
+    expect(find.text('SECURE DEAL ROOM'), findsOneWidget);
+    expect(find.text('Invited email address'), findsOneWidget);
+    expect(find.text('Password'), findsNothing);
+    expect(find.text('Continue with Google'), findsOneWidget);
+    expect(find.text('Email ID must match the invitation'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextFormField), 'buyer@vertex.test');
+    await tester.pump();
+    final button = tester.widget<FilledButton>(
+      find.ancestor(
+        of: find.text('Continue with Google'),
+        matching: find.byType(FilledButton),
+      ),
+    );
+    expect(button.onPressed, isNotNull);
+  });
+
+  testWidgets('customer messages and profile mirror website portal modules', (
+    tester,
+  ) async {
+    final workspace = fixtureWorkspace(role: 'CUSTOMER', modules: const []);
+    await tester.pumpWidget(
+      appFor(workspace, CustomerMessagesScreen(workspace: workspace)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Ravi Rep'), findsOneWidget);
+    expect(
+      find.text('The revised commercial terms are ready to review.'),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(
+      appFor(workspace, CustomerProfileScreen(workspace: workspace)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Verified customer'), findsOneWidget);
+    expect(find.text('Google verified'), findsOneWidget);
+    expect(find.text('buyer@vertex.test'), findsOneWidget);
+  });
+
+  testWidgets('customer invoice follows website actions', (tester) async {
+    final workspace = fixtureWorkspace(role: 'CUSTOMER', modules: const []);
+    await tester.pumpWidget(
+      appFor(
+        workspace,
+        InvoiceDetailScreen(
+          workspace: workspace,
+          invoice: workspace.invoices.single,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Download PDF'), findsOneWidget);
+    expect(find.text('Request due-date change'), findsOneWidget);
+    expect(find.text('Pay now'), findsNothing);
   });
 
   testWidgets('customer quote detail hides margin, costs and approval policy', (

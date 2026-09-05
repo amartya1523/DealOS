@@ -1,24 +1,24 @@
 # Verification record
 
-Verified on 2026-09-05 with Flutter 3.41.9, Dart 3.11.5, Xcode, and the locally configured Android SDK.
+Verified on 2026-09-06 with Flutter 3.41.9, Dart 3.11.5, Xcode, and the locally configured Android SDK.
 
 ## Automated checks
 
 | Check | Result |
 |---|---|
 | `flutter analyze` | Passed with no issues |
-| `flutter test` | Passed, 11 tests |
+| `flutter test` | Passed, 17 tests |
 | Backend `npm test` | Passed, 33 tests |
 | Backend `npm run build` | Passed |
 | `plutil -lint ios/Runner/Info.plist` | Passed |
 
-The Flutter suite covers session cookie/CSRF handling, backend error mapping, decimal/date parsing, role authorization, customer-safe navigation and detail redaction, and an adaptive manager navigation surface. The opt-in integration harness compiles separately and requires a running seeded backend plus a simulator/device; it is not represented as an executed end-to-end test in this record.
+The Flutter suite covers session cookie/CSRF handling, the customer Google endpoint contract, backend error mapping, decimal/date parsing, role authorization, website-parity customer navigation and profile/messages, customer-safe detail redaction, contextual back navigation, and an adaptive manager navigation surface. The opt-in integration harness compiles separately and requires a running seeded backend plus a simulator/device; it is not represented as an executed end-to-end test in this record.
 
 ## Build matrix
 
 | Target | Configuration | Result |
 |---|---|---|
-| Android APK | `developmentDebug` | Passed |
+| Android APK | `developmentDebug`, arm64 | Compiled; APK archive integrity passed. The Flutter wrapper's final duplicate-copy step exhausted the nearly full host disk. |
 | Android App Bundle | `productionRelease` | Passed |
 | iOS simulator app | `Debug-Development` | Passed |
 | iOS device app | `Release-Production`, signing disabled | Passed |

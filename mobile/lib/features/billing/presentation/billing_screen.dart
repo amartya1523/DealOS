@@ -173,20 +173,9 @@ class _InvoiceDetailScreenState extends ConsumerState<InvoiceDetailScreen> {
           if (customer && invoice.state != 'PAID') ...[
             const SizedBox(height: 8),
             FilledButton.icon(
-              onPressed: () => ref
-                  .read(sessionControllerProvider.notifier)
-                  .mutate(
-                    '/portal/invoices/${invoice.id}/pay',
-                    const {},
-                    notice: 'Payment recorded by the backend.',
-                  ),
-              icon: const Icon(Icons.payment),
-              label: const Text('Pay now'),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton(
               onPressed: _requestDate,
-              child: const Text('Request due-date change'),
+              icon: const Icon(Icons.calendar_month_outlined),
+              label: const Text('Request due-date change'),
             ),
           ],
           if (!customer &&

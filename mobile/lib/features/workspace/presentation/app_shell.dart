@@ -7,6 +7,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/common.dart';
 import '../../approvals/presentation/approvals_screen.dart';
 import '../../billing/presentation/billing_screen.dart';
+import '../../customer_portal/presentation/customer_portal_screens.dart';
 import '../../fulfillment/presentation/fulfillment_screen.dart';
 import '../../quotations/presentation/quotations_screen.dart';
 import '../domain/models.dart';
@@ -33,9 +34,10 @@ class DealOsShell extends ConsumerWidget {
     final actor = workspace.user;
     if (actor.isCustomer) {
       return const [
-        AppSection('quotations', 'Quotes', Icons.description_outlined),
+        AppSection('quotations', 'My quotations', Icons.description_outlined),
         AppSection('invoices', 'Invoices', Icons.receipt_long_outlined),
-        AppSection('subscriptions', 'Plans', Icons.autorenew),
+        AppSection('messages', 'Messages', Icons.forum_outlined),
+        AppSection('profile', 'Profile', Icons.person_outline),
       ];
     }
     final items = <AppSection>[];
@@ -378,6 +380,8 @@ class DealOsShell extends ConsumerWidget {
     'fulfillment' => FulfillmentScreen(workspace: workspace),
     'subscriptions' => SubscriptionsScreen(workspace: workspace),
     'invoices' => InvoicesScreen(workspace: workspace),
+    'messages' => CustomerMessagesScreen(workspace: workspace),
+    'profile' => CustomerProfileScreen(workspace: workspace),
     'health' => HealthScreen(workspace: workspace),
     'reports' => ReportsScreen(workspace: workspace),
     'policies' => PoliciesScreen(workspace: workspace),

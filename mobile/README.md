@@ -31,8 +31,17 @@ No secrets or production URLs are committed. Supply configuration with compile-t
 | `DEALOS_ENV` | `development`, `staging`, or `production` |
 | `DEALOS_API_BASE_URL` | Full API prefix ending in `/api/v1` |
 | `DEALOS_ALLOWED_ORIGIN` | Exact backend `FRONTEND_ORIGIN`, required by CSRF protection |
+| `DEALOS_GOOGLE_IOS_CLIENT_ID` | iOS OAuth client ID for customer Google sign-in; the backend's web client ID remains the token audience |
 
 Android has `development`, `staging`, and `production` product flavors (`com.dealos.mobile.dev`, `.staging`, and `com.dealos.mobile`). iOS has shared `Development`, `Staging`, and `Production` schemes; pass the matching Dart defines in the scheme or CI command. The release bundle identifier is `com.dealos.mobile`.
+
+## Customer portal sign-in
+
+Customer access mirrors the website's invitation-only flow. On the login screen, open **Customer portal**, enter the exact invited email, and continue with the matching Google account. The backend validates the Google ID token, requires the token email to equal the entered email, accepts an active invitation, and returns a customer-scoped session. Password login is intentionally unavailable in this mode.
+
+The backend must set `GOOGLE_CLIENT_ID` to its web OAuth client ID. Android also needs OAuth registrations for the applicable package names and signing certificate fingerprints. iOS requires an OAuth client for each bundle identifier in use and its reversed client ID callback scheme in `ios/Runner/Info.plist`; pass that iOS client ID as `DEALOS_GOOGLE_IOS_CLIENT_ID`. Native OAuth identifiers are deployment configuration and are not invented or committed by this repository.
+
+After authentication, customer navigation matches the current website portal: **My quotations**, **Invoices**, **Messages**, and **Profile**. The server remains responsible for customer and organization isolation.
 
 ## Quality commands
 
