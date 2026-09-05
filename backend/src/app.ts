@@ -15,6 +15,7 @@ import { authenticate as authenticatePlatform, csrfCookieName, hashToken as hash
 import { platformRouter } from './platform.js';
 import { clearPlatformLoginFailures, platformLoginAllowed, platformOwnerCredentialsMatch, readPlatformOwnerCredentials, recordPlatformLoginFailure } from './platform-owner.js';
 import { discountPolicyUpdateSchema } from './policy.js';
+import { assistantMessagesSchema, runAssistant, type AssistantContext } from './assistant.js';
 
 type Actor = { id: string; name: string; email: string; loginId: string | null; role: string; customerId: string | null; organizationId: string; moduleAccess: string[]; csrfToken: string; actorType: 'USER' | 'PLATFORM_OWNER'; platformSuperAdmin: boolean; readOnlyView: boolean; organization: { id: string; name: string; status: string } | null; viewContext: { readOnly: true; organizationId: string; organizationName: string; simulatedUserId: string | null; realActor: { id: string; name: string } } | null };
 type AuthRequest = Request & { user?: Actor; requestId?: string };
@@ -168,6 +169,17 @@ app.use(helmet());
 app.use(cors({ origin: allowedOrigin, credentials: true }));
 app.use(express.json({ limit: '256kb' }));
 
+app.post('/api/v1/assistant/public', async (req: AuthRequest, res) => {
+  const parsed = assistantMessagesSchema.safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Send a valid conversation.');
+  try {
+    return ok(req, res, await runAssistant({ mode: 'public' }, parsed.data.messages));
+  } catch (error) {
+    if (error instanceof Error && error.message === 'GROQ_NOT_CONFIGURED') return fail(req, res, 503, 'AI_NOT_CONFIGURED', 'DealOS Assistant is not configured yet. Add GROQ_API_KEY to backend/.env.');
+    return fail(req, res, 502, 'AI_UNAVAILABLE', error instanceof Error ? error.message : 'The assistant is temporarily unavailable.');
+  }
+});
+
 async function authenticate(req: AuthRequest, res: Response, next: NextFunction) {
   const cookies = parseCookies(req.headers.cookie);
   const platformToken = cookies[platformSessionCookieName];
@@ -225,6 +237,42 @@ const quotationListInclude = {
   negotiation: { select: { revisionId: true, kind: true, state: true } },
   order: { select: { id: true } },
 } satisfies Prisma.QuoteInclude;
+
+app.post('/api/v1/assistant', authenticate, async (req: AuthRequest, res) => {
+  const parsed = assistantMessagesSchema.safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Send a valid conversation.');
+  if (req.user!.actorType === 'PLATFORM_OWNER' && !req.user!.organizationId) return fail(req, res, 403, 'WORKSPACE_REQUIRED', 'Open an organization workspace to use the internal assistant.');
+  const portal = req.user!.role === 'CUSTOMER';
+  const canCreateInvoices = Boolean(!portal && hasModule(req.user, 'invoices') && ['FINANCE', 'ADMIN'].includes(req.user!.role) && !req.user!.readOnlyView);
+  const canCommentOnQuotes = Boolean(portal && req.user!.customerId && !req.user!.readOnlyView);
+  const canReadCustomers = Boolean(!portal && (hasModule(req.user, 'customers') || canCreateInvoices));
+  const canReadProducts = Boolean(!portal && (hasModule(req.user, 'products') || hasModule(req.user, 'fulfillment') || canCreateInvoices));
+  const canReadInvoices = Boolean(portal || hasModule(req.user, 'invoices'));
+  const canReadQuotes = Boolean(portal || ['quotations', 'approvals', 'fulfillment', 'health', 'reports'].some((module) => hasModule(req.user, module as typeof modules[number])));
+  const readableModules = portal
+    ? ['customer-portal', 'quotations', 'invoices']
+    : modules.filter((module) => hasModule(req.user, module));
+  const [organization, customers, products, invoices, quotes] = await Promise.all([
+    db.organization.findUnique({ where: { id: req.user!.organizationId }, select: { name: true } }),
+    canReadCustomers ? db.customer.findMany({ where: { organizationId: req.user!.organizationId, active: true }, select: { id: true, name: true, paymentTerms: true, email: true }, orderBy: { name: 'asc' }, take: 100 }) : Promise.resolve([]),
+    canReadProducts ? db.product.findMany({ where: { organizationId: req.user!.organizationId, active: true }, select: { id: true, name: true, sku: true, price: true, taxRate: true, recurring: true, stocks: { select: { onHand: true, reserved: true } } }, orderBy: { name: 'asc' }, take: 100 }) : Promise.resolve([]),
+    canReadInvoices ? db.invoice.findMany({ where: { organizationId: req.user!.organizationId, ...(portal ? { customerId: req.user!.customerId! } : req.user!.role === 'REP' ? { quote: { ownerId: req.user!.id } } : {}) }, select: { number: true, customer: true, amount: true, state: true, dueAt: true }, orderBy: { createdAt: 'desc' }, take: 20 }) : Promise.resolve([]),
+    canReadQuotes ? db.quote.findMany({ where: portal ? { organizationId: req.user!.organizationId, customerId: req.user!.customerId!, sentAt: { not: null } } : internalQuoteWhere(req.user!), select: { id: true, number: true, customer: true, total: true, stage: true }, orderBy: { updatedAt: 'desc' }, take: 20 }) : Promise.resolve([]),
+  ]);
+  const context: AssistantContext = {
+    mode: 'workspace', organization: organization?.name, screen: parsed.data.screen, today: new Date().toISOString().slice(0, 10),
+    user: { name: req.user!.name, role: req.user!.role, canCreateInvoices, canCommentOnQuotes, readOnly: req.user!.readOnlyView, readableModules },
+    customers, products: products.map((product) => ({ id: product.id, name: product.name, sku: product.sku, price: decimal(product.price), taxRate: decimal(product.taxRate), recurring: product.recurring, available: product.recurring ? null : product.stocks.reduce((sum, stock) => sum + stock.onHand - stock.reserved, 0) })),
+    invoices: invoices.map((invoice) => ({ ...invoice, amount: decimal(invoice.amount), dueAt: invoice.dueAt.toISOString() })),
+    quoteSummary: quotes.map((quote) => ({ ...quote, total: decimal(quote.total) })),
+  };
+  try {
+    return ok(req, res, await runAssistant(context, parsed.data.messages));
+  } catch (error) {
+    if (error instanceof Error && error.message === 'GROQ_NOT_CONFIGURED') return fail(req, res, 503, 'AI_NOT_CONFIGURED', 'DealOS Assistant is not configured yet. Add GROQ_API_KEY to backend/.env.');
+    return fail(req, res, 502, 'AI_UNAVAILABLE', error instanceof Error ? error.message : 'The assistant is temporarily unavailable.');
+  }
+});
 
 async function ensureCustomerPortalInvite(tx: Tx, req: AuthRequest, customer: { id: string; email: string | null; name: string }, force = false) {
   if (!customer.email) return null;
@@ -1261,6 +1309,8 @@ app.post('/api/v1/invoices', authenticate, requireModule('invoices'), requireRol
     dueAt: z.string().datetime().or(z.string().date()),
     lines: z.array(z.object({ productId: z.string().min(1), quantity: z.number().int().positive(), discount: z.number().min(0).max(100).default(0) }).strict()).min(1).max(100),
     sendReceipt: z.boolean().default(false),
+    gstMode: z.enum(['CATALOG', 'EXCLUSIVE', 'INCLUSIVE']).default('CATALOG'),
+    gstRate: z.number().min(0).max(100).optional(),
   }).strict().safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Select a customer or quotation, due date, and invoice lines.', parsed.error.flatten());
   const customer = parsed.data.customerId ? await db.customer.findFirst({ where: { id: parsed.data.customerId, organizationId: req.user!.organizationId, active: true } }) : null;
@@ -1272,12 +1322,16 @@ app.post('/api/v1/invoices', authenticate, requireModule('invoices'), requireRol
   if (products.length !== productIds.length) return fail(req, res, 422, 'CONFIGURATION_REQUIRED', 'One or more products are unavailable.');
   const inputLines = parsed.data.lines.map((line) => {
     const product = products.find((item) => item.id === line.productId)!;
-    return { ...line, unitPrice: product.price, unitCost: product.cost, allowedDiscount: line.discount, taxRate: product.taxRate, cadence: product.recurring ? product.cadence : 'One-time' };
+    const taxRate = parsed.data.gstMode === 'CATALOG' ? product.taxRate : new Prisma.Decimal(parsed.data.gstRate ?? 18);
+    const unitPrice = parsed.data.gstMode === 'INCLUSIVE'
+      ? product.price.div(new Prisma.Decimal(1).add(taxRate.div(100)))
+      : product.price;
+    return { ...line, unitPrice, unitCost: product.cost, allowedDiscount: line.discount, taxRate, cadence: product.recurring ? product.cadence : 'One-time' };
   });
   const calculation = calculateQuote(inputLines, 0);
   const invoiceLines = calculation.lines.map((line, index) => {
     const product = products.find((item) => item.id === parsed.data.lines[index]!.productId)!;
-    return { description: `${product.name} x ${line.quantity}`, productId: product.id, cadence: line.cadence, quantity: line.quantity, unitPrice: decimal(product.price), discount: line.discount, net: line.net, tax: line.tax, amount: line.net + line.tax };
+    return { description: `${product.name} x ${line.quantity}`, productId: product.id, cadence: line.cadence, quantity: line.quantity, unitPrice: decimal(product.price), taxableUnitPrice: decimal(inputLines[index]!.unitPrice), discount: line.discount, gstMode: parsed.data.gstMode, gstRate: decimal(inputLines[index]!.taxRate), net: line.net, tax: line.tax, amount: line.net + line.tax };
   });
   const receiptCustomer = quote?.customerId ? await db.customer.findFirst({ where: { id: quote.customerId, organizationId: req.user!.organizationId } }) : customer;
   if (parsed.data.sendReceipt && !receiptCustomer?.email) return fail(req, res, 422, 'CUSTOMER_EMAIL_REQUIRED', 'Add a valid customer email before sending an invoice receipt.');
@@ -1375,11 +1429,16 @@ app.post('/api/v1/alerts/:id/resolve', authenticate, requireModule('health'), re
 });
 
 app.post('/api/v1/products', authenticate, requireModule('products'), requireRole('ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
-  const parsed = z.object({ name: z.string().min(2), sku: z.string().min(2), category: z.string().min(2), description: z.string(), unit: z.string().min(1), price: z.number().nonnegative(), cost: z.number().nonnegative(), taxRate: z.number().min(0).max(100), recurring: z.boolean().default(false), cadence: z.string().nullable().optional(), active: z.boolean().default(true), storeVisible: z.boolean().default(true), featured: z.boolean().default(false), openingStock: z.number().int().nonnegative().default(0), minAlertLevel: z.number().int().nonnegative().default(0), maxCapacity: z.number().int().positive().nullable().optional() }).strict().safeParse(req.body);
+  const parsed = z.object({ name: z.string().trim().min(2), sku: z.string().trim().min(2).max(80).optional(), category: z.string().trim().min(2), description: z.string(), unit: z.string().trim().min(1), brand: z.string().trim().max(120).nullable().optional(), price: z.number().positive(), cost: z.number().nonnegative().default(0), taxRate: z.number().min(0).max(100), recurring: z.boolean().default(false), cadence: z.string().nullable().optional(), active: z.boolean().default(true), storeVisible: z.boolean().default(true), featured: z.boolean().default(false), openingStock: z.number().int().nonnegative().default(0), minAlertLevel: z.number().int().nonnegative().default(0), maxCapacity: z.number().int().positive().nullable().optional() }).strict()
+    .refine((value) => value.price > value.cost, { path: ['cost'], message: 'Purchase cost must be lower than the taxable selling price.' })
+    .refine((value) => value.maxCapacity == null || value.maxCapacity >= value.openingStock, { path: ['maxCapacity'], message: 'Maximum capacity cannot be below opening stock.' })
+    .safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter valid product values.', parsed.error.flatten());
   const product = await db.$transaction(async (tx) => {
-    const { openingStock, minAlertLevel, maxCapacity, ...productData } = parsed.data;
-    const created = await tx.product.create({ data: { ...productData, organizationId: req.user!.organizationId } });
+    const { openingStock, minAlertLevel, maxCapacity, sku: requestedSku, ...productData } = parsed.data;
+    const skuStem = productData.name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 18).toUpperCase() || 'ITEM';
+    const sku = requestedSku?.toUpperCase() ?? `${skuStem}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+    const created = await tx.product.create({ data: { ...productData, sku, organizationId: req.user!.organizationId } });
     const needsStockBalance = !productData.recurring && (openingStock > 0 || minAlertLevel > 0 || maxCapacity);
     if (needsStockBalance) {
       const warehouse = await tx.warehouse.findFirst({ where: { organizationId: req.user!.organizationId }, orderBy: { priority: 'asc' } })
@@ -1400,10 +1459,13 @@ app.post('/api/v1/products', authenticate, requireModule('products'), requireRol
   return ok(req, res, product, 201);
 });
 app.patch('/api/v1/products/:id', authenticate, requireModule('products'), requireRole('ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
-  const parsed = z.object({ name: z.string().min(2).optional(), category: z.string().min(2).optional(), description: z.string().optional(), unit: z.string().min(1).optional(), price: z.number().nonnegative().optional(), cost: z.number().nonnegative().optional(), taxRate: z.number().min(0).max(100).optional(), active: z.boolean().optional(), storeVisible: z.boolean().optional(), featured: z.boolean().optional(), cadence: z.string().nullable().optional() }).strict().safeParse(req.body);
+  const parsed = z.object({ name: z.string().min(2).optional(), sku: z.string().trim().min(2).max(80).optional(), category: z.string().min(2).optional(), description: z.string().optional(), unit: z.string().min(1).optional(), brand: z.string().trim().max(120).nullable().optional(), price: z.number().positive().optional(), cost: z.number().nonnegative().optional(), taxRate: z.number().min(0).max(100).optional(), recurring: z.boolean().optional(), active: z.boolean().optional(), storeVisible: z.boolean().optional(), featured: z.boolean().optional(), cadence: z.string().nullable().optional() }).strict().safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter valid product values.');
   const existing = await db.product.findFirst({ where: { id: routeParam(req, 'id'), organizationId: req.user!.organizationId } });
   if (!existing) return fail(req, res, 404, 'NOT_FOUND', 'Product not found.');
+  const nextPrice = parsed.data.price ?? Number(existing.price);
+  const nextCost = parsed.data.cost ?? Number(existing.cost);
+  if (nextCost >= nextPrice) return fail(req, res, 422, 'VALIDATION_ERROR', 'Purchase cost must be lower than the taxable selling price.');
   const product = await db.$transaction(async (tx) => { const updated = await tx.product.update({ where: { id: existing.id }, data: parsed.data }); await audit(tx, req, 'PRODUCT_UPDATED', 'Product', updated.id); return updated; });
   return ok(req, res, product);
 });

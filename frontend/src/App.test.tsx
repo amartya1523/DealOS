@@ -120,7 +120,7 @@ describe("DealOS public routes", () => {
           url.endsWith("/signup")
             ? { success: true, data: { status: "ACTIVE", role: "ADMIN" } }
             : url.endsWith("/workspace")
-              ? { success:true, data:{user:{id:'a',name:'Test Person',email:'test@example.com',role:'ADMIN',moduleAccess:[]},organization:{id:'o',name:'Acme'},users:[],quotes:[],products:[],policies:[],warehouses:[],subscriptions:[],invoices:[],alerts:[],audits:[]} }
+              ? { success:true, data:{user:{id:'a',name:'Test Person',email:'test@example.com',role:'ADMIN',moduleAccess:[]},organization:{id:'o',name:'Acme'},users:[],customers:[],quotes:[],products:[],policies:[],warehouses:[],subscriptions:[],invoices:[],alerts:[],audits:[]} }
               : { success: false },
       }),
     );
@@ -144,7 +144,13 @@ describe("DealOS public routes", () => {
     expect(await screen.findByRole("heading", {name:"Sales dashboard"})).toBeInTheDocument();
     expect(window.location.pathname).toBe("/app");
     expect(screen.getByRole("button", { name: "New quotation" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Invoice" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "View reports" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add Invoice" }));
+    expect(screen.getByRole("heading", { name: "Create Invoice" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("heading", { name: "Create Invoice" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Overview" }));
     fireEvent.click(screen.getByRole("button", { name: "View reports" }));
     expect(screen.getByRole("heading", { name: "Sales reporting" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Overview" }));
@@ -155,11 +161,9 @@ describe("DealOS public routes", () => {
     expect(window.localStorage.getItem("dealos.sidebar.collapsed")).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: "Quotations" }));
     expect(screen.getByRole("heading", { name: "Quotation pipeline" })).toBeInTheDocument();
-    const requestsBeforeBrandClick = fetchMock.mock.calls.length;
-    fireEvent.click(screen.getByRole("link", { name: "DealOS home" }));
-    expect(screen.getByRole("heading", { name: "Sales dashboard" })).toBeInTheDocument();
-    expect(window.location.pathname).toBe("/app");
-    expect(fetchMock).toHaveBeenCalledTimes(requestsBeforeBrandClick);
+    fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
+    expect(document.querySelector(".app-shell")).not.toHaveClass("sidebar-collapsed");
+    expect(screen.getByRole("button", { name: "Collapse sidebar" })).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(screen.getByRole("button", { name: "New quotation" }));
     expect(screen.getByRole("heading", { name: "New quotation" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
@@ -181,6 +185,29 @@ describe("DealOS public routes", () => {
     expect(
       await screen.findByRole("heading", { name: "Welcome back." }),
     ).toBeInTheDocument();
+  });
+  it("searches across modules and surfaces workspace notifications in English", async () => {
+    window.history.replaceState({}, "", "/app");
+    const workspace = {
+      user:{id:'admin',name:'Admin User',email:'admin@example.com',role:'ADMIN',moduleAccess:[],actorType:'USER',platformSuperAdmin:false,viewContext:null},
+      organization:{id:'org',name:'Acme'},users:[],customers:[],products:[],policies:[],warehouses:[],subscriptions:[],audits:[],
+      quotes:[],
+      invoices:[{id:'invoice-1',number:'INV-2026-1042',customer:'Northstar Labs',amount:42000,paidAmount:0,state:'UNPAID',dueAt:'2026-09-20T00:00:00.000Z',lines:[],payments:[]}],
+      alerts:[{id:'alert-1',kind:'PAYMENT',title:'Invoice payment overdue',detail:'Northstar Labs has an outstanding balance.',severity:'HIGH',resourceId:'invoice-1',resolved:false,nudged:false,createdAt:'2026-09-06T08:00:00.000Z'}],
+    };
+    fetchMock.mockResolvedValue({ok:true,json:async()=>({success:true,data:workspace})});
+    render(<App/>);
+    const search=await screen.findByRole('textbox',{name:'Search across workspace'});
+    fireEvent.change(search,{target:{value:'1042'}});
+    const results=screen.getByRole('listbox',{name:'Global search results'});
+    expect(within(results).getByText('Invoice')).toBeInTheDocument();
+    expect(within(results).getByText('INV-2026-1042')).toBeInTheDocument();
+    fireEvent.click(within(results).getByText('INV-2026-1042'));
+    expect(screen.getByRole('heading',{name:'Invoice detail'})).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:/Notifications \(1 unread\)/}));
+    expect(screen.getByText('Updates from every module')).toBeInTheDocument();
+    expect(screen.getByText('Invoice payment overdue')).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'Mark all as read'})).toBeInTheDocument();
   });
   it("filters the approval queue by pending, returned, and approved state", async () => {
     window.history.replaceState({}, "", "/app");
@@ -284,6 +311,146 @@ describe("DealOS public routes", () => {
     fireEvent.click(screen.getByRole("row", { name: /Acme Corp Care Plan/ }));
     expect(screen.getByRole("heading", { name: "Billing detail" })).toBeInTheDocument();
   });
+  it("creates a service without inventory fields and normalizes GST-inclusive pricing", async () => {
+    window.history.replaceState({}, "", "/app?screen=products");
+    const workspace = { user: { id: "a", name: "Admin", email: "admin@acme.test", role: "ADMIN", moduleAccess: [], actorType: "USER", platformSuperAdmin: false, viewContext: null }, organization: { id: "o", name: "Acme" }, users: [], customers: [], quotes: [], products: [], policies: [], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ success: true, data: workspace }) });
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Products" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create Product" }));
+    expect(screen.queryByRole("checkbox", { name: /Service item/i })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Services" } });
+
+    expect(screen.queryByLabelText("Opening stock *")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Vendor / brand")).not.toHaveAttribute("list");
+    expect(screen.getByLabelText("Vendor / brand")).toHaveAttribute("placeholder", "Enter brand manually");
+    expect(screen.getByText("Recurring billing · no inventory")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Item name *"), { target: { value: "Implementation consulting" } });
+    fireEvent.change(screen.getByLabelText("Price treatment"), { target: { value: "included" } });
+    fireEvent.change(screen.getByLabelText("Selling price"), { target: { value: "1180" } });
+    fireEvent.change(screen.getByLabelText("Purchase cost"), { target: { value: "600" } });
+    expect(screen.getByLabelText("Base price (before GST)")).toHaveValue("1000.00");
+    fireEvent.click(screen.getByRole("button", { name: "Create Service" }));
+
+    await waitFor(() => {
+      const request = fetchMock.mock.calls.find(([url, options]) => url === "/api/v1/products" && options?.method === "POST");
+      expect(request).toBeTruthy();
+      const payload = JSON.parse(String(request?.[1]?.body));
+      expect(payload).toMatchObject({ name: "Implementation consulting", category: "Services", unit: "Hour", price: 1000, cost: 600, taxRate: 18, recurring: true, cadence: "Monthly", active: true });
+      expect(payload.sku).toMatch(/^SER-IMPLEMENTATION-[A-Z0-9]{4}$/);
+      expect(payload).not.toHaveProperty("openingStock");
+      expect(payload).not.toHaveProperty("minAlertLevel");
+      expect(payload).not.toHaveProperty("maxCapacity");
+      expect(payload).not.toHaveProperty("storeVisible");
+      expect(payload).not.toHaveProperty("featured");
+    });
+  });
+
+  it("opens the same manual-brand and automatic base-price form from invoice Add Item", async () => {
+    window.history.replaceState({}, "", "/app?screen=invoices");
+    const workspace = { user: { id: "a", name: "Admin", email: "admin@acme.test", role: "ADMIN", moduleAccess: [], actorType: "USER", platformSuperAdmin: false, viewContext: null }, organization: { id: "o", name: "Acme" }, users: [], customers: [], quotes: [], products: [], policies: [], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ success: true, data: workspace }) });
+    render(<App />);
+
+    expect((await screen.findAllByRole("heading", { name: "Invoices" }))[0]).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "All invoices" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Unpaid" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Paid" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create invoice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Item" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create New Product" }));
+
+    expect(screen.getByRole("dialog", { name: "Create Product" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Vendor / brand")).not.toHaveAttribute("list");
+    fireEvent.change(screen.getByLabelText("Price treatment"), { target: { value: "included" } });
+    fireEvent.change(screen.getByLabelText("Selling price"), { target: { value: "118" } });
+    expect(screen.getByLabelText("Base price (before GST)")).toHaveValue("100.00");
+  });
+
+  it("uses separate professional pickers and INR totals throughout invoice creation", async () => {
+    window.history.replaceState({}, "", "/app?screen=invoices");
+    const customer = { id: "c1", name: "Northstar Retail", contactPerson: "Asha Rao", email: "asha@northstar.test", phone: "9876543210", countryCode: "+91", gstin: "29ABCDE1234F1Z5", customerType: "Business", tier: "Gold", active: true, paymentTerms: 15, billingAddress: "Bengaluru", shippingAddress: "Bengaluru", createdAt: "2026-09-06T00:00:00.000Z" };
+    const product = { id: "p1", name: "Office Router", sku: "RTR-100", category: "Hardware", description: "Managed office router", unit: "Piece", price: 1000, cost: 700, taxRate: 18, recurring: false, cadence: null, active: true, storeVisible: true, featured: false, stocks: [{ onHand: 10, reserved: 2, minAlertLevel: 2, maxCapacity: 20, warehouse: { name: "Main" } }] };
+    const workspace = { user: { id: "a", name: "Admin", email: "admin@acme.test", role: "ADMIN", moduleAccess: [], actorType: "USER", platformSuperAdmin: false, viewContext: null }, organization: { id: "o", name: "Acme" }, users: [], customers: [customer], quotes: [], products: [product], policies: [], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ success: true, data: workspace }) });
+    render(<App />);
+
+    expect((await screen.findAllByRole("heading", { name: "Invoices" }))[0]).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create invoice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Select Customer" }));
+    const customerDialog = screen.getByRole("dialog", { name: "Select customer" });
+    expect(customerDialog).toBeInTheDocument();
+    expect(within(customerDialog).getByRole("textbox", { name: "Search customers" })).toBeInTheDocument();
+    fireEvent.click(within(customerDialog).getByRole("button", { name: /Northstar Retail/ }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Item" }));
+    const itemDialog = screen.getByRole("dialog", { name: "Add invoice items" });
+    expect(within(itemDialog).getByText("₹1,000.00")).toBeInTheDocument();
+    expect(itemDialog).not.toHaveTextContent("$");
+    fireEvent.click(within(itemDialog).getByRole("button", { name: "Add" }));
+    expect(within(itemDialog).getAllByText("₹1,000.00").length).toBeGreaterThan(1);
+    fireEvent.click(within(itemDialog).getByRole("button", { name: "Add to invoice" }));
+
+    const totals = screen.getByLabelText("Invoice totals");
+    expect(totals).toHaveTextContent("₹180.00");
+    expect(totals).toHaveTextContent("₹1,180.00");
+    expect(totals).not.toHaveTextContent("$");
+  });
+
+  it("starts inventory numbers blank and supports an inline custom category", async () => {
+    window.history.replaceState({}, "", "/app?screen=products");
+    const workspace = { user: { id: "a", name: "Admin", email: "admin@acme.test", role: "ADMIN", moduleAccess: [], actorType: "USER", platformSuperAdmin: false, viewContext: null }, organization: { id: "o", name: "Acme" }, users: [], customers: [], quotes: [], products: [], policies: [], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ success: true, data: workspace }) });
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Products" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create Product" }));
+    const openingStock=screen.getByLabelText("Opening stock *");
+    expect(openingStock).toHaveValue(null);
+    fireEvent.change(openingStock, { target: { value: "100" } });
+    expect(openingStock).toHaveValue(100);
+
+    fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Other" } });
+    expect(screen.getByLabelText("Custom category")).toBeInTheDocument();
+    expect(screen.getByLabelText("Unit")).toHaveValue("Unit");
+    fireEvent.change(screen.getByLabelText("Custom category"), { target: { value: "Security appliances" } });
+    fireEvent.change(screen.getByLabelText("Item name *"), { target: { value: "Edge gateway" } });
+    expect((screen.getByLabelText("SKU / HSN code") as HTMLInputElement).value).toMatch(/^SEC-EDGE-GATEWAY-[A-Z0-9]{4}$/);
+  });
+
+  it("shows inventory status and edits a catalog item in the shared product modal", async () => {
+    window.history.replaceState({}, "", "/app?screen=products");
+    const warehouse={name:"Main Warehouse"};
+    const inStock={id:"p1",name:"Desk",sku:"DESK-1",category:"Hardware",description:"Standing desk",unit:"Piece",brand:"Acme",price:1000,cost:600,taxRate:18,recurring:false,cadence:null,active:true,storeVisible:true,featured:false,stocks:[{onHand:8,reserved:3,minAlertLevel:2,maxCapacity:20,warehouse}]};
+    const outOfStock={...inStock,id:"p2",name:"Chair",sku:"CHAIR-1",stocks:[{onHand:3,reserved:3,minAlertLevel:2,maxCapacity:20,warehouse}]};
+    const service={...inStock,id:"p3",name:"Installation",sku:"INSTALL-1",category:"Services",unit:"Hour",recurring:true,cadence:"Monthly",stocks:[]};
+    const workspace={user:{id:"a",name:"Admin",email:"admin@acme.test",role:"ADMIN",moduleAccess:[],actorType:"USER",platformSuperAdmin:false,viewContext:null},organization:{id:"o",name:"Acme"},users:[],customers:[],quotes:[],products:[inStock,outOfStock,service],policies:[],warehouses:[],subscriptions:[],invoices:[],alerts:[],audits:[]};
+    fetchMock.mockResolvedValue({ok:true,json:async()=>({success:true,data:workspace})});
+    render(<App/>);
+
+    expect(await screen.findByText("In Stock")).toBeInTheDocument();
+    expect(screen.getByText("5 available")).toBeInTheDocument();
+    expect(screen.getByText("Out Of Stock")).toBeInTheDocument();
+    expect(screen.getByText("Not Tracked")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button",{name:"Edit Desk"}));
+    expect(screen.getByRole("dialog",{name:"Edit Desk"})).toBeInTheDocument();
+    expect(screen.getByLabelText("Item name *")).toHaveValue("Desk");
+    expect(screen.getByLabelText("SKU / HSN code")).toHaveValue("DESK-1");
+    expect(screen.getByLabelText("Vendor / brand")).toHaveValue("Acme");
+    expect(screen.getByText("Stock quantities are controlled through warehouse receipts and fulfillment, so editing catalog details cannot overwrite live inventory.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Selling price"),{target:{value:"1200"}});
+    fireEvent.click(screen.getByRole("button",{name:"Save changes"}));
+
+    await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith("/api/v1/products/p1",expect.objectContaining({
+      method:"PATCH",
+      body:expect.stringContaining('"price":1200'),
+    })));
+    expect(window.location.search).toBe("?screen=products");
+  });
+
   it("renders live fulfillment stock and previews a warehouse split before reservation", async () => {
     window.history.replaceState({}, "", "/app");
     const product = { id: "p1", name: "Laptop Pro 14", sku: "LP14", category: "Hardware", description: "Laptop", unit: "unit", price: 1200, cost: 800, taxRate: 18, recurring: false, active: true, stocks: [] };
@@ -329,12 +496,25 @@ describe("DealOS public routes", () => {
   it("opens customer-scoped invoices in the new deal room", async () => {
     window.history.replaceState({}, "", "/customer");
     const portalWorkspace = { user:{id:'customer',name:'Priya Nair',email:'customer@dealos.demo',role:'CUSTOMER',moduleAccess:[],actorType:'USER',platformSuperAdmin:false,viewContext:null},organization:{id:'org',name:'DealOS Demo'},users:[],customers:[],quotes:[],products:[],policies:[],warehouses:[],subscriptions:[],invoices:[{id:'invoice',number:'INV-1042',customer:'Acme Corp',amount:'2520',paidAmount:'0',state:'UNPAID',dueAt:'2026-09-20T00:00:00.000Z',lines:[],payments:[]}],alerts:[],audits:[] };
-    fetchMock.mockResolvedValue({ok:true,json:async()=>({success:true,data:portalWorkspace})});
+    let paid=false;
+    fetchMock.mockImplementation((url:string,options?:RequestInit)=>{
+      if(url.endsWith('/portal/invoices/invoice/pay')&&options?.method==='POST')paid=true;
+      const current=paid?{...portalWorkspace,invoices:[{...portalWorkspace.invoices[0],paidAmount:'2520',state:'PAID',payments:[{id:'payment',amount:'2520',reference:'PORTAL-DEMO',paidAt:'2026-09-06T00:00:00.000Z'}]}]}:portalWorkspace;
+      return Promise.resolve({ok:true,json:async()=>({success:true,data:current})});
+    });
     render(<App />);
     expect(await screen.findByRole("heading", { name: "Review your quotations" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Invoices/ }));
     expect(screen.getByRole("heading", { name: "INV-1042" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Download PDF" })).toHaveAttribute("href", "/api/v1/invoices/invoice/pdf");
+    fireEvent.click(screen.getByRole("button", { name: "Pay now · ₹2,520" }));
+    expect(await screen.findByRole("heading", { name: "Successfully paid" })).toBeInTheDocument();
+    expect(screen.getByText("INV-1042 is now marked Paid in both the customer portal and the invoice workspace.")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/portal/invoices/invoice/pay',expect.objectContaining({method:'POST'}));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.getByRole("button", { name: "Paid" })).toBeDisabled();
+    expect(screen.getByText("This invoice is fully paid and synchronized with the business account.")).toBeInTheDocument();
+    expect(window.localStorage.getItem('dealos.invoice.updated')).toBeTruthy();
   });
   it("uses the dedicated Platform Owner login and opens global control", async () => {
     window.history.replaceState({}, "", "/login/super-admin");
