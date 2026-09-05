@@ -5,6 +5,7 @@ import '../../../app/providers.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/common.dart';
+import '../../customer_portal/presentation/customer_portal_screens.dart';
 import '../../workspace/domain/models.dart';
 
 class PlatformAdminScreen extends ConsumerStatefulWidget {
@@ -21,7 +22,7 @@ class PlatformAdminScreen extends ConsumerStatefulWidget {
 }
 
 class _PlatformAdminScreenState extends ConsumerState<PlatformAdminScreen> {
-  bool members = false;
+  int selectedIndex = 0;
   late Future<List<JsonMap>> memberFuture;
   @override
   void initState() {
@@ -42,12 +43,6 @@ class _PlatformAdminScreenState extends ConsumerState<PlatformAdminScreen> {
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh',
           ),
-          IconButton(
-            onPressed: () =>
-                ref.read(sessionControllerProvider.notifier).logout(),
-            icon: const Icon(Icons.logout),
-            tooltip: 'Sign out',
-          ),
         ],
       ),
       body: Column(
@@ -61,27 +56,34 @@ class _PlatformAdminScreenState extends ConsumerState<PlatformAdminScreen> {
                   .dismissMessages(),
             ),
           if (session.busy) const LinearProgressIndicator(),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-            child: SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(
-                  value: false,
-                  label: Text('Organizations'),
-                  icon: Icon(Icons.domain),
-                ),
-                ButtonSegment(
-                  value: true,
-                  label: Text('Global users'),
-                  icon: Icon(Icons.group),
-                ),
-              ],
-              selected: {members},
-              onSelectionChanged: (value) =>
-                  setState(() => members = value.first),
-            ),
+          Expanded(
+            child: switch (selectedIndex) {
+              1 => _members(),
+              2 => ProfileScreen(workspace: widget.workspace),
+              _ => _organizations(),
+            },
           ),
-          Expanded(child: members ? _members() : _organizations()),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: selectedIndex,
+        onDestinationSelected: (index) => setState(() => selectedIndex = index),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.domain_outlined),
+            selectedIcon: Icon(Icons.domain),
+            label: 'Organizations',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.group_outlined),
+            selectedIcon: Icon(Icons.group),
+            label: 'Global users',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            selectedIcon: Icon(Icons.person),
+            label: 'Profile',
+          ),
         ],
       ),
     );

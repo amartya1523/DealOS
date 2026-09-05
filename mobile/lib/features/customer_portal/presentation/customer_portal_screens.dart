@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/providers.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/common.dart';
 import '../../workspace/domain/models.dart';
@@ -92,21 +94,24 @@ class CustomerMessagesScreen extends StatelessWidget {
   }
 }
 
-class CustomerProfileScreen extends StatelessWidget {
-  const CustomerProfileScreen({super.key, required this.workspace});
+class ProfileScreen extends ConsumerWidget {
+  const ProfileScreen({super.key, required this.workspace});
 
   final Workspace workspace;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final actor = workspace.user;
+    final isCustomer = actor.isCustomer;
+    final session = ref.watch(sessionControllerProvider);
     return ListView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
       children: [
-        const SectionHeader(
-          title: 'Your portal profile',
-          subtitle:
-              'This verified identity controls which documents you can access.',
+        SectionHeader(
+          title: isCustomer ? 'Your portal profile' : 'Your profile',
+          subtitle: isCustomer
+              ? 'This verified identity controls which documents you can access.'
+              : 'Your account, role and current workspace access.',
         ),
         Card(
           child: Padding(
@@ -128,7 +133,9 @@ class CustomerProfileScreen extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const StatusPill('Verified customer'),
+                          StatusPill(
+                            isCustomer ? 'Verified customer' : 'Active account',
+                          ),
                           const SizedBox(height: 8),
                           Text(
                             actor.name,
@@ -147,44 +154,60 @@ class CustomerProfileScreen extends StatelessWidget {
                   value: workspace.organization?.name ?? 'DealOS',
                 ),
                 const Divider(height: 28),
-                const _ProfileFact(
-                  label: 'Portal access',
-                  value: 'Google verified',
-                ),
-                const Divider(height: 28),
-                _ProfileFact(
-                  label: 'Quotations shared',
-                  value: '${workspace.quotes.length}',
-                ),
-                const Divider(height: 28),
-                _ProfileFact(
-                  label: 'Invoices shared',
-                  value: '${workspace.invoices.length}',
-                ),
+                _ProfileFact(label: 'Role', value: label(actor.role)),
+                if (isCustomer) ...[
+                  const Divider(height: 28),
+                  const _ProfileFact(
+                    label: 'Portal access',
+                    value: 'Google verified',
+                  ),
+                  const Divider(height: 28),
+                  _ProfileFact(
+                    label: 'Quotations shared',
+                    value: '${workspace.quotes.length}',
+                  ),
+                  const Divider(height: 28),
+                  _ProfileFact(
+                    label: 'Invoices shared',
+                    value: '${workspace.invoices.length}',
+                  ),
+                ] else ...[
+                  const Divider(height: 28),
+                  _ProfileFact(
+                    label: 'Enabled modules',
+                    value: actor.role == 'ADMIN'
+                        ? 'All modules'
+                        : '${actor.moduleAccess.length}',
+                  ),
+                ],
               ],
             ),
           ),
         ),
         const SizedBox(height: 14),
         Card(
-          child: const Padding(
-            padding: EdgeInsets.all(18),
+          child: Padding(
+            padding: const EdgeInsets.all(18),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.shield_outlined),
-                SizedBox(width: 12),
+                const Icon(Icons.shield_outlined),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Your data is isolated',
-                        style: TextStyle(fontWeight: FontWeight.w800),
+                        isCustomer
+                            ? 'Your data is isolated'
+                            : 'Your access is role-based',
+                        style: const TextStyle(fontWeight: FontWeight.w800),
                       ),
-                      SizedBox(height: 4),
+                      const SizedBox(height: 4),
                       Text(
-                        'Only records assigned to this customer identity and organization are returned by the server.',
+                        isCustomer
+                            ? 'Only records assigned to this customer identity and organization are returned by the server.'
+                            : 'DealOS limits modules and actions using your organization role and server-side permissions.',
                       ),
                     ],
                   ),
@@ -193,8 +216,46 @@ class CustomerProfileScreen extends StatelessWidget {
             ),
           ),
         ),
+        const SizedBox(height: 28),
+        OutlinedButton.icon(
+          onPressed: session.busy ? null : () => _confirmSignOut(context, ref),
+          icon: const Icon(Icons.logout_rounded),
+          label: const Text('Sign out'),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(54),
+            foregroundColor: Theme.of(context).colorScheme.error,
+            side: BorderSide(
+              color: Theme.of(context).colorScheme.error.withValues(alpha: .5),
+            ),
+          ),
+        ),
       ],
     );
+  }
+
+  Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Sign out?'),
+        content: const Text(
+          'You will need to sign in again to access your DealOS workspace.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Sign out'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await ref.read(sessionControllerProvider.notifier).logout();
+    }
   }
 }
 

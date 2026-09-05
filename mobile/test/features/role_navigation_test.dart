@@ -71,6 +71,7 @@ void main() {
       ),
     );
 
+    expect(find.text('Platform Owner sign in'), findsNothing);
     await tester.tap(find.text('Customer portal'));
     await tester.pump();
 
@@ -94,6 +95,8 @@ void main() {
   testWidgets('customer messages and profile mirror website portal modules', (
     tester,
   ) async {
+    await tester.binding.setSurfaceSize(const Size(430, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     final workspace = fixtureWorkspace(role: 'CUSTOMER', modules: const []);
     await tester.pumpWidget(
       appFor(workspace, CustomerMessagesScreen(workspace: workspace)),
@@ -107,12 +110,21 @@ void main() {
     );
 
     await tester.pumpWidget(
-      appFor(workspace, CustomerProfileScreen(workspace: workspace)),
+      appFor(workspace, ProfileScreen(workspace: workspace)),
     );
     await tester.pumpAndSettle();
     expect(find.text('Verified customer'), findsOneWidget);
     expect(find.text('Google verified'), findsOneWidget);
     expect(find.text('buyer@vertex.test'), findsOneWidget);
+    expect(find.text('Sign out'), findsOneWidget);
+
+    await tester.tap(find.text('Sign out'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sign out?'), findsOneWidget);
+    expect(find.text('Cancel'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sign out?'), findsNothing);
   });
 
   testWidgets('customer invoice follows website actions', (tester) async {
@@ -163,7 +175,31 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Approvals'), findsWidgets);
     expect(find.text('Approval inbox'), findsOneWidget);
+    expect(find.byType(PopupMenuButton<String>), findsNothing);
     addTearDown(() => tester.binding.setSurfaceSize(null));
+  });
+
+  testWidgets('organization roles get profile and sign out as the final tab', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(430, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final workspace = fixtureWorkspace();
+    await tester.pumpWidget(
+      appFor(workspace, DealOsShell(workspace: workspace, section: 'profile')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Your profile'), findsOneWidget);
+    expect(find.text('Manager'), findsOneWidget);
+    expect(find.text('Sign out'), findsOneWidget);
+    final navigationBar = tester.widget<NavigationBar>(
+      find.byType(NavigationBar),
+    );
+    expect(
+      (navigationBar.destinations.last as NavigationDestination).label,
+      'Profile',
+    );
   });
 
   testWidgets(

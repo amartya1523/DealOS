@@ -116,6 +116,7 @@ class DealOsShell extends ConsumerWidget {
     if (actor.hasModule('reports') || actor.hasModule('health')) {
       items.add(const AppSection('audit', 'Audit', Icons.history));
     }
+    items.add(const AppSection('profile', 'Profile', Icons.person_outline));
     return items;
   }
 
@@ -127,7 +128,14 @@ class DealOsShell extends ConsumerWidget {
         ? section
         : allSections.firstOrNull?.id ?? 'dashboard';
     final large = MediaQuery.sizeOf(context).width >= 860;
-    final primary = allSections.take(5).toList();
+    final profile = allSections
+        .where((item) => item.id == 'profile')
+        .firstOrNull;
+    final primary = allSections
+        .where((item) => item.id != 'profile')
+        .take(4)
+        .toList();
+    if (profile != null) primary.add(profile);
     final selectedPrimary = primary.indexWhere((item) => item.id == current);
     return Scaffold(
       appBar: AppBar(
@@ -176,56 +184,6 @@ class DealOsShell extends ConsumerWidget {
                 : () => ref.read(sessionControllerProvider.notifier).refresh(),
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Refresh',
-          ),
-          PopupMenuButton<String>(
-            tooltip: 'Account',
-            icon: CircleAvatar(
-              radius: 17,
-              backgroundColor: Theme.of(
-                context,
-              ).colorScheme.primary.withValues(alpha: .11),
-              foregroundColor: Theme.of(context).colorScheme.primary,
-              child: Text(
-                workspace.user.name.isEmpty
-                    ? '?'
-                    : workspace.user.name[0].toUpperCase(),
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-            ),
-            onSelected: (value) {
-              if (value == 'logout') {
-                ref.read(sessionControllerProvider.notifier).logout();
-              }
-              if (value == 'exit-view') {
-                ref.read(sessionControllerProvider.notifier).exitViewAs();
-              }
-            },
-            itemBuilder: (_) => [
-              PopupMenuItem(
-                enabled: false,
-                child: ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.account_circle_outlined),
-                  title: Text(workspace.user.name),
-                  subtitle: Text(label(workspace.user.role)),
-                ),
-              ),
-              if (workspace.user.readOnlyView)
-                const PopupMenuItem(
-                  value: 'exit-view',
-                  child: ListTile(
-                    leading: Icon(Icons.exit_to_app),
-                    title: Text('Exit View As'),
-                  ),
-                ),
-              const PopupMenuItem(
-                value: 'logout',
-                child: ListTile(
-                  leading: Icon(Icons.logout),
-                  title: Text('Sign out'),
-                ),
-              ),
-            ],
           ),
         ],
       ),
@@ -381,7 +339,7 @@ class DealOsShell extends ConsumerWidget {
     'subscriptions' => SubscriptionsScreen(workspace: workspace),
     'invoices' => InvoicesScreen(workspace: workspace),
     'messages' => CustomerMessagesScreen(workspace: workspace),
-    'profile' => CustomerProfileScreen(workspace: workspace),
+    'profile' => ProfileScreen(workspace: workspace),
     'health' => HealthScreen(workspace: workspace),
     'reports' => ReportsScreen(workspace: workspace),
     'policies' => PoliciesScreen(workspace: workspace),
