@@ -20,6 +20,7 @@ import {
 } from '@prisma/client';
 import { evaluateRisk } from '../src/governance.js';
 import { calculateQuote } from '../src/rules.js';
+import { roleModulePresets, workspaceModules } from '../src/access-policy.js';
 
 const db = new PrismaClient();
 const demoPassword = 'DealOS2026!';
@@ -29,10 +30,10 @@ const northstarOrganizationId = '00000000-0000-0000-0000-000000000002';
 const seedStartedAt = new Date();
 
 const roleModules: Record<Role, string[]> = {
-  REP: ['dashboard', 'quotations', 'fulfillment', 'health', 'reports'],
-  MANAGER: ['dashboard', 'quotations', 'approvals', 'fulfillment', 'health', 'reports', 'customers', 'policies'],
-  FINANCE: ['dashboard', 'quotations', 'approvals', 'fulfillment', 'invoices', 'reports'],
-  ADMIN: ['dashboard', 'quotations', 'approvals', 'fulfillment', 'subscriptions', 'invoices', 'health', 'reports', 'products', 'customers', 'policies'],
+  REP: roleModulePresets.REP,
+  MANAGER: roleModulePresets.MANAGER,
+  FINANCE: roleModulePresets.FINANCE,
+  ADMIN: [...workspaceModules],
   CUSTOMER: [],
 };
 

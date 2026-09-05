@@ -303,6 +303,36 @@ describe("DealOS public routes", () => {
     expect(screen.queryByRole("button", { name: "Subscriptions" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "User access" })).not.toBeInTheDocument();
   });
+  it("shows the exact business role and blocks navigation to unassigned modules", async () => {
+    window.history.replaceState({}, "", "/app?screen=invoices&record=invoice-1");
+    const workspace = { user: { id: "rep", name: "Aarav Mehta", email: "aarav@acme.test", role: "REP", moduleAccess: ["dashboard", "quotations"], actorType: "USER", platformSuperAdmin: false, viewContext: null }, organization: { id: "o", name: "Acme" }, users: [], customers: [], quotes: [], products: [], policies: [], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] };
+    fetchMock.mockImplementation((url:string)=>Promise.resolve({ ok: true, json: async () => ({ success: true, data: url.includes('/leads')?{items:[]}:workspace }) }));
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Sales dashboard" })).toBeInTheDocument();
+    expect(screen.getByText("Sales representative")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Portal leads" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Quotations" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Invoices" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Products" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "User access" })).not.toBeInTheDocument();
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("screen")).toBe("dashboard"));
+    const portalLeads=screen.getByRole("button", { name: "Portal leads" });
+    const quotations=screen.getByRole("button", { name: "Quotations" });
+    fireEvent.click(portalLeads);
+    expect(await screen.findByRole("heading", { name: "Portal Leads", level: 1 })).toBeInTheDocument();
+    expect(portalLeads).toHaveClass("active");
+    expect(quotations).not.toHaveClass("active");
+  });
+  it("renders a safe empty workspace when an administrator assigned no modules", async () => {
+    window.history.replaceState({}, "", "/app?screen=reports");
+    const workspace = { user: { id: "rep", name: "Aarav Mehta", email: "aarav@acme.test", role: "REP", moduleAccess: [], actorType: "USER", platformSuperAdmin: false, viewContext: null }, organization: { id: "o", name: "Acme" }, users: [], customers: [], quotes: [], products: [], policies: [], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ success: true, data: workspace }) });
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "No modules assigned" })).toBeInTheDocument();
+    expect(screen.getByText("Sales representative")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reports" })).not.toBeInTheDocument();
+  });
   it("lets an organization admin open read-only details for an organization member", async () => {
     window.history.replaceState({}, "", "/app");
     const member = { id: "m1", name: "Jordan Davis", email: "jordan@acme.test", loginId: "DL-1234ABCD", role: "REP", status: "ACTIVE", membershipStatus: "ACTIVE", accessRole: "ORGANIZATION_MEMBER", moduleAccess: ["dashboard", "quotations"], createdAt: "2026-09-01T08:00:00.000Z", joinedAt: "2026-09-02T08:00:00.000Z" };
