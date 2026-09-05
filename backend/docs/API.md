@@ -59,6 +59,28 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 - **Errors:** common error contract above; validation, permission, lifecycle and concurrency conditions are enforced before commit.
 - **Business rules:** R-003, R-030.
 
+### AUTH-01A — Read Google signup configuration
+
+- **Method/path:** `GET /api/v1/auth/google/config`
+- **Purpose:** Tell the public sign-up page whether Google signup is configured and provide the public OAuth Web client ID needed by Google Identity Services.
+- **Actor / authorization:** Public.
+- **Authentication:** No session required.
+- **Request:** `none`.
+- **Response:** 200 `{enabled:boolean, clientId:string|null}`.
+- **Business rules:** R-034.
+
+### AUTH-01B — Create a pending account from Google
+
+- **Method/path:** `POST /api/v1/auth/google/signup`
+- **Purpose:** Create the same pending nonprivileged account request as AUTH-01 from a Google-verified identity.
+- **Actor / authorization:** Public; displayed only on `/sign-up`.
+- **Authentication:** Google Identity Services ID credential; no DealOS session required.
+- **Request:** `{credential}` with no additional fields.
+- **Validation:** bounded credential; server verifies Google signature, configured audience, expiry, subject, and `email_verified`; email is normalized. Existing emails receive the same duplicate-safe response and are not relinked or modified.
+- **Response:** 202 SignupResult `{status:PENDING, message}`.
+- **Errors:** 401 `INVALID_GOOGLE_CREDENTIAL`; 503 `AUTH_PROVIDER_UNAVAILABLE`; common error contract.
+- **Business rules:** R-003, R-030, R-034.
+
 ### AUTH-02 — Authenticate an active account
 
 - **Method/path:** `POST /api/v1/auth/login`
@@ -1059,4 +1081,4 @@ This inventory is approved as architecture scope, not as deployed functionality.
 
 ## Implementation update — 2026-09-05
 
-AUTH-01 is implemented: `POST /api/v1/auth/signup` accepts only `{displayName,email,password}`, trims and normalizes email/name, validates name 1–120 and password 12–128, hashes with bcrypt, persists PENDING, and returns HTTP 202 `{success:true,data:{status:"PENDING",message}}`. Existing emails receive the same public result without account changes. Extra fields (including role) are rejected with 422. AUTH-02 and session authentication now require ACTIVE; valid credentials for a pending/disabled account return 403 ACCOUNT_INACTIVE and no cookie. Administrator activation UI/endpoints, rate limiting and CSRF remain future hardening work. Existing active demo accounts remain available.
+AUTH-01 is implemented: `POST /api/v1/auth/signup` accepts only `{displayName,email,password}`, trims and normalizes email/name, validates name 1–120 and password 12–128, hashes with bcrypt, persists PENDING, and returns HTTP 202 `{success:true,data:{status:"PENDING",message}}`. Existing emails receive the same public result without account changes. Extra fields (including role) are rejected with 422. AUTH-01A and AUTH-01B are implemented for Google signup: the UI reads runtime availability, Google Identity Services returns an ID credential, and the backend verifies it against `GOOGLE_CLIENT_ID` before duplicate-safe PENDING creation. The Google option exists only on sign-up and never modifies an existing identity. AUTH-02 and session authentication now require ACTIVE and remain email/password only; valid credentials for a pending/disabled account return 403 ACCOUNT_INACTIVE and no cookie. Administrator activation UI/endpoints, rate limiting and CSRF remain future hardening work. Existing active demo accounts remain available.

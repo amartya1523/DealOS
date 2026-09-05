@@ -5,13 +5,14 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import helmet from 'helmet';
 import { z } from 'zod';
 import { db } from './db.js';
-import { signupSchema, createPendingAccount } from './identity.js';
+import { createOrganizationAdmin, createPendingGoogleAccount, googleSignupSchema, signupSchema, verifyGoogleSignupCredential } from './identity.js';
 import { allocateStock, calculateQuote } from './rules.js';
 
 type AuthRequest = Request & { user?: { id: string; name: string; email: string; role: string; customerId: string | null } };
 
 const cookieName = process.env.SESSION_COOKIE_NAME ?? 'dealos_session';
 const origin = process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173';
+const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim() ?? '';
 const ok = (res: Response, data: unknown, status = 200) => res.status(status).json({ success: true, data });
 const fail = (res: Response, status: number, code: string, message: string, details?: unknown) => res.status(status).json({ success: false, error: { code, message, details } });
 const decimal = (value: unknown) => Number(value);
@@ -41,8 +42,26 @@ app.get('/api/v1/health/ready', async (_req, res) => { await db.$queryRaw`SELECT
 
 app.post('/api/v1/auth/signup', async (req, res) => {
   const parsed = signupSchema.safeParse(req.body);
-  if (!parsed.success) return fail(res, 422, 'VALIDATION_ERROR', 'Enter your name, a valid email, and a password of 12–128 characters.');
-  await createPendingAccount(parsed.data);
+  if (!parsed.success) return fail(res, 422, 'VALIDATION_ERROR', 'Enter your organization, access list, and valid administrator credentials.');
+  await createOrganizationAdmin(parsed.data);
+  return ok(res, { status: 'ACTIVE', role: 'ADMIN', message: 'Organization setup is complete. Sign in with your administrator credentials.' }, 201);
+});
+
+app.get('/api/v1/auth/google/config', (_req, res) => {
+  return ok(res, { enabled: Boolean(googleClientId), clientId: googleClientId || null });
+});
+
+app.post('/api/v1/auth/google/signup', async (req, res) => {
+  if (!googleClientId) return fail(res, 503, 'AUTH_PROVIDER_UNAVAILABLE', 'Google signup is not configured.');
+  const parsed = googleSignupSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, 422, 'VALIDATION_ERROR', 'A valid Google credential is required.');
+  let profile;
+  try {
+    profile = await verifyGoogleSignupCredential(parsed.data.credential, googleClientId);
+  } catch {
+    return fail(res, 401, 'INVALID_GOOGLE_CREDENTIAL', 'Google could not verify this signup. Please try again.');
+  }
+  await createPendingGoogleAccount(profile);
   return ok(res, { status: 'PENDING', message: 'If this email is new, your account request is pending administrator activation.' }, 202);
 });
 

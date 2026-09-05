@@ -31,6 +31,8 @@ npm --prefix frontend run dev
 
 Open `http://localhost:5173` for the new landing page. Sign in at `/sign-in`, request an account at `/sign-up`, and open the protected workspace at `/app`. New accounts remain pending until administrator activation (activation UI is not implemented yet). Every demo account uses password `DealOS2026!`:
 
+To enable Google on the sign-up page, create a Google OAuth 2.0 Web client, add the frontend URL (for local development, `http://localhost:5173`) as an authorized JavaScript origin, and set its public client ID as `GOOGLE_CLIENT_ID` in `backend/.env`. Restart the backend afterward. DealOS verifies Google ID tokens server-side against that exact client ID. Google is intentionally offered only on `/sign-up`; `/sign-in` remains email/password only.
+
 | Role | Email |
 |---|---|
 | Sales Rep | `rep@dealos.demo` |

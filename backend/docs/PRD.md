@@ -71,6 +71,7 @@ Confidence means confidence in the interpretation, not implementation status. C 
 | R-031 | Customer portal email/password initially; magic links deferred | P | A1 allows either method; avoids unconfigured email delivery | High |
 | R-032 | In-app nudges with durable PostgreSQL job records; no external messages by default | P | Meets alert-action flow without pretending email/SMS is configured | High |
 | R-033 | Single service deploy, no Redis/Kafka/microservices | P | Low operational complexity; no requirement justifies them | High |
+| R-034 | Offer verified Google account creation only on the public sign-up page; keep sign-in email/password only | C | User request, 2026-09-05 | High |
 
 ## Actors, outcomes and access
 

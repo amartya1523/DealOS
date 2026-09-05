@@ -69,12 +69,34 @@ model User {
   passwordHash String
   status       AccountStatus @default(PENDING)
   role         Role
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id])
   customerId   String?
   sessions     Session[]
   quotes       Quote[]   @relation("QuoteOwner")
   approvals    Approval[] @relation("ApprovalReviewer")
   auditEvents  AuditEvent[]
   createdAt    DateTime  @default(now())
+}
+
+model Organization {
+  id        String               @id @default(uuid())
+  name      String
+  users     User[]
+  invites   OrganizationInvite[]
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+}
+
+model OrganizationInvite {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String
+  role           Role
+  createdAt      DateTime     @default(now())
+
+  @@unique([organizationId, email])
 }
 
 model Session {

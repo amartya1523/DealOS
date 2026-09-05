@@ -15,7 +15,7 @@ const nav:[View,string,ReactNode][] = [
 export function App(){
   const [route,setRoute]=useState(()=>window.location.pathname);
   const [checking,setChecking]=useState(true);
-  const navigate=(path:string)=>{window.history.pushState({},'',path);setRoute(path);window.scrollTo(0,0)};
+  const navigate=(path:string)=>{window.history.pushState({},'',path);setRoute(window.location.pathname);window.scrollTo(0,0)};
   useEffect(()=>{const sync=()=>setRoute(window.location.pathname);window.addEventListener('popstate',sync);return()=>window.removeEventListener('popstate',sync)},[]);
   useEffect(()=>{document.title=route==='/'?'DealOS — Less friction. More forward.':route.includes('sign-up')||route==='/signup'?'Create your account — DealOS':route.includes('sign-in')||route==='/signin'?'Sign in — DealOS':'Workspace — DealOS'},[route]);
   const [workspace,setWorkspace]=useState<Workspace|null>(null); const [view,setView]=useState<View>('dashboard');
@@ -25,7 +25,7 @@ export function App(){
   useEffect(()=>{ const context=(document as Document & {modelContext?:{registerTool:(tool:unknown,options?:{signal?:AbortSignal})=>void}}).modelContext; if(!context?.registerTool)return; const controller=new AbortController(); context.registerTool({name:'read_dealos_workspace',title:'Read DealOS workspace',description:'Return the current DealOS screen and visible aggregate counts without changing data.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true},execute:()=>({screen:view,counts:workspace?{quotes:workspace.quotes.length,pendingApprovals:workspace.quotes.flatMap(q=>q.approvals).filter(a=>a.state==='PENDING').length,alerts:workspace.alerts.filter(a=>!a.resolved).length}:null})},{signal:controller.signal}); return()=>controller.abort();},[view,workspace]);
   const mutate=async(path:string,body:unknown,method='POST',message='Updated')=>{try{setBusy(true);setError('');await request(path,{method,body:JSON.stringify(body)});await load();setToast(message);setTimeout(()=>setToast(''),2400);}catch(e){setError(e instanceof Error?e.message:'Action failed')}finally{setBusy(false)}};
   if(route==='/')return <Landing/>;
-  if(['/sign-up','/signup'].includes(route))return <AuthPage signup onSuccess={load}/>;
+  if(['/sign-up','/signup'].includes(route))return <AuthPage signup onSuccess={()=>navigate('/sign-in?setup=complete')}/>;
   if(['/sign-in','/signin','/login'].includes(route))return <AuthPage onSuccess={async()=>{await load();navigate('/app')}} error={error}/>;
   if(route!=='/app')return <div className="not-found"><h1>This page took a wrong turn.</h1><a className="cta" href="/">Back to DealOS <ArrowRight/></a></div>;
   if(checking)return <div className="not-found" role="status">Opening your workspace…</div>;

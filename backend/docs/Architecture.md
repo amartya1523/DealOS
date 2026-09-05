@@ -71,7 +71,7 @@ Initial performance targets are proposed, not sourced: paginated lists default 2
 
 ### Architectural style and system context
 
-A modular monolith fits tightly transactional quote/order/stock/billing operations and the small development scope. Microservices would introduce distributed consistency without a demonstrated need. Browser users communicate with Express; PostgreSQL is authoritative. The first release needs no external identity provider, carrier, payment gateway, model API or email service.
+A modular monolith fits tightly transactional quote/order/stock/billing operations and the small development scope. Microservices would introduce distributed consistency without a demonstrated need. Browser users communicate with Express; PostgreSQL is authoritative. Google Identity Services is the only configured external identity provider and is limited to public signup; the first release needs no carrier, payment gateway, model API or email service.
 
 ```mermaid
 flowchart LR
@@ -177,7 +177,7 @@ Keep exception reason, financial cadence and next action visible. Customer shell
 
 Identity is explicitly required. Proposed opaque random session cookie (`HttpOnly`, `Secure` in production, `SameSite=Lax`, path `/`), storing only hash in PostgreSQL. Rotate on login/privilege change; revoke on logout/deactivation. Proposed limits: 12-hour absolute, 30-minute idle expiry. Passwords use Argon2id with current vetted parameters when implemented; no plaintext seed credentials in production.
 
-Mutations require session and CSRF token bound to session plus Origin validation; CORS allows exactly configured frontend origin in development, same-origin production. Public signup cannot choose privileged roles. Admin provisions Customer account ownership and activates internal users. Customers see only explicitly projected DTOs; cross-customer guesses get 404. Internal access requires team/ownership scope, not just role flags.
+Mutations require session and CSRF token bound to session plus Origin validation; CORS allows exactly configured frontend origin in development, same-origin production. Public signup cannot choose privileged roles. Google signup accepts only a Google ID credential and verifies its signature, audience, expiry, and verified email on the server; the client ID is runtime configuration. The sign-up page keeps the Google option visible when configuration is absent and reports the missing setup instead of initiating authentication. Admin provisions Customer account ownership and activates internal users. Customers see only explicitly projected DTOs; cross-customer guesses get 404. Internal access requires team/ownership scope, not just role flags.
 
 Helmet, bounded JSON bodies (proposed 256 KiB, no arbitrary uploads), rate limits on auth and expensive endpoints, validation, parametrized queries and redacted logs. React escapes text; no raw HTML comments. Spreadsheet exports neutralize formula injection. Browser cookies never enter localStorage. Password reset/email delivery is an explicit future integration, not a fake success form.
 

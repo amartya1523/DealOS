@@ -1,746 +1,85 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import {
-  ArrowUpRight,
-  ArrowDown,
-  Layers,
-  Menu,
-  X,
-  Check,
-  FileText,
-  ShieldCheck,
-  Boxes,
-  CircleDollarSign,
-  Plus,
-  Pause,
-  Play,
-} from "lucide-react";
+import { ArrowDown, ArrowUpRight, Boxes, Check, FileText, Menu, Pause, Play, ReceiptText, ShieldCheck, Sparkles, X } from "lucide-react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { Brand } from "./Brand";
 import "./motion.css";
 
 gsap.registerPlugin(ScrollTrigger);
-const chapters = [
-  {
-    name: "Quote",
-    title: "Set the\npossibility.",
-    caption: "01 — A STRONGER START",
-    copy: "Hardware, services, subscriptions. Build one clear proposal with the detail behind every decision.",
-    icon: FileText,
-    color: "paper",
-  },
-  {
-    name: "Approve",
-    title: "Find your\ngreen light.",
-    caption: "02 — CONFIDENCE, BUILT IN",
-    copy: "Give every exception a clear path. The right context, the right reviewer, and a record of every decision.",
-    icon: ShieldCheck,
-    color: "lime",
-  },
-  {
-    name: "Fulfill",
-    title: "Keep the\npromise.",
-    caption: "03 — MAKE IT HAPPEN",
-    copy: "Connect confirmed orders to available stock. Coordinate your warehouses and see what’s ready to move.",
-    icon: Boxes,
-    color: "olive",
-  },
-  {
-    name: "Bill",
-    title: "Bring it\nfull circle.",
-    caption: "04 — FINISH STRONG",
-    copy: "One-time and recurring billing, clearly separated. Keep invoices, verified payments, and balances in view.",
-    icon: CircleDollarSign,
-    color: "black",
-  },
+
+const states = [
+  { label: "Build", title: "The commercial truth,\nin one place.", copy: "Products, quantities, one-time charges, recurring plans, discount policy, and live margin—resolved before the quote leaves the desk.", icon: FileText, meta: "Revision 06 · Draft" },
+  { label: "Govern", title: "Exceptions find\nthe right reviewer.", copy: "Every line is checked against its own ceiling. DealOS explains the exception, preserves the reason, and routes the exact revision.", icon: ShieldCheck, meta: "2 approvals · In sequence" },
+  { label: "Commit", title: "Promises meet\nreal inventory.", copy: "Available stock, shipment count, and warehouse cost become one practical allocation—with shortages shown before anyone over-promises.", icon: Boxes, meta: "2 warehouses · 0 hidden gaps" },
+  { label: "Settle", title: "One order. Two\nbilling rhythms.", copy: "One-time products and recurring subscriptions stay distinct, while invoices, schedules, credits, and verified payments remain connected.", icon: ReceiptText, meta: "Invoice + annual plan" },
 ];
 
-function ChapterArt({ index }: { index: number }) {
-  if (index === 0)
-    return (
-      <div className="chapter-art paper-art" aria-hidden="true">
-        <div className="paper-sheet back-sheet" />
-        <div className="paper-sheet front-sheet">
-          <span className="paper-logo">
-            <Layers /> DealOS
-          </span>
-          <span className="paper-title">
-            A new
-            <br />
-            possibility.
-          </span>
-          <div className="paper-lines">
-            <i />
-            <i />
-            <i />
-          </div>
-          <span className="paper-signature">
-            Let’s make it happen. <ArrowUpRight />
-          </span>
-        </div>
-        <span className="art-orb" />
-      </div>
-    );
-  if (index === 1)
-    return (
-      <div className="chapter-art seal-art" aria-hidden="true">
-        <div className="seal-orbit" />
-        <div className="approval-seal">
-          <span>CONFIDENCE AT EVERY STEP</span>
-          <Check />
-          <span>READY FOR WHAT’S NEXT</span>
-        </div>
-        <span className="seal-star">✳</span>
-      </div>
-    );
-  if (index === 2)
-    return (
-      <div className="chapter-art boxes-art" aria-hidden="true">
-        <div className="parcel parcel-one">
-          <div />
-          <span>
-            <Layers /> DEALOS
-            <br />
-            <small>HANDLE WITH CLARITY</small>
-          </span>
-        </div>
-        <div className="parcel parcel-two">
-          <div />
-          <span>↗</span>
-        </div>
-        <div className="parcel parcel-three">
-          <div />
-          <span>
-            MOVE
-            <br />
-            FORWARD.
-          </span>
-        </div>
-      </div>
-    );
-  return (
-    <div className="chapter-art coin-art" aria-hidden="true">
-      <div className="coin coin-back" />
-      <div className="coin coin-front">
-        <CircleDollarSign />
-      </div>
-      <span className="coin-orbit" />
-      <span className="coin-caption">EVERY DETAIL. ACCOUNTED FOR.</span>
-    </div>
-  );
+function DealFrame({ compact = false }: { compact?: boolean }) {
+  return <div className={`deal-frame ${compact ? "compact" : ""}`}>
+    <div className="frame-bar"><span className="frame-brand"><i>D</i> DealOS</span><span className="frame-state"><i /> Pending approval</span></div>
+    <div className="frame-head"><div><small>QUOTATION Q-1048</small><strong>Aranya Systems</strong></div><b>₹1,28,64,000</b></div>
+    <div className="frame-lines"><div><span>Edge workstation</span><small>24 units</small><b>₹92,16,000</b></div><div><span>Deployment service</span><small>1 project</small><b>₹24,00,000</b></div><div><span>Priority support</span><small>Annual</small><b>₹12,48,000</b></div></div>
+    <div className="frame-risk"><span><ShieldCheck /> Policy check</span><p>Service discount is <b>8 points</b> above its category ceiling.</p><strong>Manager → Finance</strong></div>
+  </div>;
+}
+
+function StatePanel({ index }: { index: number }) {
+  const state = states[index]; const Icon = state.icon;
+  return <div className="state-panel" aria-live="polite">
+    <div className="state-panel-top"><span>LIVE DEAL / Q-1048</span><Icon /></div>
+    {index === 0 && <DealFrame compact />}
+    {index === 1 && <div className="approval-ui"><div className="approval-score"><small>WORST LINE EXCESS</small><strong>8.0</strong><span>percentage points</span></div><div className="approval-route"><span className="done"><i><Check /></i><b>Sales Manager</b><small>Approved · 10:24</small></span><em /><span><i>02</i><b>Finance</b><small>Reason required</small></span></div><p>Exact revision, policy version, reviewer, time, and reason travel together.</p></div>}
+    {index === 2 && <div className="allocation-ui"><div className="warehouse"><i>01</i><span><b>Mumbai warehouse</b><small>18 workstations</small></span><strong>₹18,400</strong></div><div className="route-line"><span /><i /><span /></div><div className="warehouse"><i>02</i><span><b>Pune depot</b><small>6 workstations</small></span><strong>₹8,900</strong></div><div className="allocation-total"><span>Suggested split</span><b>2 shipments · ₹27,300</b></div></div>}
+    {index === 3 && <div className="billing-ui"><div><small>ONE-TIME</small><strong>₹1,16,16,000</strong><span>Due 04 Oct</span></div><div><small>RECURRING</small><strong>₹1,04,000<em>/mo</em></strong><span>Next bill 04 Nov</span></div><p><ReceiptText /> Payment evidence and balances remain auditable.</p></div>}
+    <div className="state-panel-foot"><span>{state.meta}</span><span>0{index + 1} / 04</span></div>
+  </div>;
 }
 
 export function Landing() {
-  const root = useRef<HTMLDivElement>(null);
-  const workflow = useRef<HTMLElement>(null);
-  const track = useRef<HTMLDivElement>(null);
-  const [menu, setMenu] = useState(false);
-  const [paused, setPaused] = useState(false);
-  const [active, setActive] = useState(0);
-  const scrollSequence = useRef<ScrollTrigger | null>(null);
-
+  const root = useRef<HTMLDivElement>(null); const [menu, setMenu] = useState(false); const [paused, setPaused] = useState(false); const [active, setActive] = useState(0);
   useLayoutEffect(() => {
     const mm = gsap.matchMedia();
-    mm.add(
-      {
-        animated: "(prefers-reduced-motion: no-preference)",
-        desktop: "(min-width: 900px)",
-      },
-      (context) => {
-        if (!context.conditions?.animated || paused) return;
-        const ctx = gsap.context(() => {
-          gsap.from(".cinema-title .title-line>span", {
-            yPercent: 115,
-            rotate: 4,
-            stagger: 0.13,
-            duration: 1.15,
-            ease: "power4.out",
-          });
-          gsap.from(".hero-intro, .cinema-hero-bottom", {
-            opacity: 0,
-            y: 22,
-            duration: 0.9,
-            delay: 0.35,
-            ease: "power2.out",
-          });
-          gsap.fromTo(
-            ".hero-sculpture",
-            { scale: 1.13 },
-            { scale: 1, duration: 1.8, ease: "power2.out" },
-          );
-          gsap.to(".hero-image-layer", {
-            yPercent: 23,
-            scale: 1.07,
-            ease: "none",
-            scrollTrigger: {
-              trigger: ".cinema-hero",
-              start: "top top",
-              end: "bottom top",
-              scrub: 1,
-            },
-          });
-          gsap.to(".cinema-title", {
-            yPercent: -24,
-            ease: "none",
-            scrollTrigger: {
-              trigger: ".cinema-hero",
-              start: "top top",
-              end: "bottom top",
-              scrub: 1,
-            },
-          });
-          gsap.to(".hero-coordinate", {
-            y: -130,
-            rotation: 30,
-            ease: "none",
-            scrollTrigger: {
-              trigger: ".cinema-hero",
-              start: "top top",
-              end: "bottom top",
-              scrub: 1.4,
-            },
-          });
-          gsap.to(".slanted-ribbon-inner", {
-            xPercent: -22,
-            ease: "none",
-            scrollTrigger: {
-              trigger: ".slanted-ribbon",
-              start: "top bottom",
-              end: "bottom top",
-              scrub: 1,
-            },
-          });
-          gsap.fromTo(
-            ".manifesto-word",
-            { color: "#b9bfae" },
-            {
-              color: "#1b3326",
-              stagger: 0.25,
-              ease: "none",
-              scrollTrigger: {
-                trigger: ".manifesto-copy",
-                start: "top 78%",
-                end: "bottom 45%",
-                scrub: 1,
-              },
-            },
-          );
-          gsap.fromTo(
-            ".manifesto-emphasis",
-            { clipPath: "inset(0 100% 0 0)", rotation: -5 },
-            {
-              clipPath: "inset(0 0% 0 0)",
-              rotation: -3,
-              duration: 1,
-              ease: "expo.inOut",
-              scrollTrigger: {
-                trigger: ".manifesto-emphasis",
-                start: "top 85%",
-              },
-            },
-          );
-          gsap.utils.toArray<HTMLElement>(".motion-reveal").forEach((el) =>
-            gsap.from(el, {
-              y: 35,
-              opacity: 0,
-              duration: 0.8,
-              ease: "power3.out",
-              scrollTrigger: { trigger: el, start: "top 90%", once: true },
-            }),
-          );
-          const portal = gsap.timeline({
-            scrollTrigger: {
-              trigger: ".connection-scene",
-              start: context.conditions?.desktop ? "top top" : "top 75%",
-              end: context.conditions?.desktop ? "+=85%" : "bottom 20%",
-              pin: !!context.conditions?.desktop,
-              scrub: 1,
-              anticipatePin: 1,
-              invalidateOnRefresh: true,
-            },
-          });
-          portal.fromTo(
-            ".connection-window",
-            { clipPath: "inset(12% 24% 12% 24% round 260px)" },
-            { clipPath: "inset(0% 0% 0% 0% round 0px)", ease: "none" },
-            0,
-          );
-          portal.fromTo(
-            ".connection-image",
-            { scale: 1.4, yPercent: -8 },
-            { scale: 1, yPercent: 4, ease: "none" },
-            0,
-          );
-          portal.fromTo(
-            ".connection-title",
-            { y: 80, opacity: 0 },
-            { y: 0, opacity: 1, ease: "power1.out" },
-            0.3,
-          );
-          if (
-            context.conditions?.desktop &&
-            track.current &&
-            workflow.current
-          ) {
-            const distance = () =>
-              Math.max(0, track.current!.scrollWidth - window.innerWidth);
-            const horizontal = gsap.to(track.current, {
-              x: () => -distance(),
-              ease: "none",
-              scrollTrigger: {
-                trigger: workflow.current,
-                start: "top top",
-                end: () => `+=${distance() + 250}`,
-                pin: true,
-                scrub: 1,
-                anticipatePin: 1,
-                invalidateOnRefresh: true,
-                onUpdate: (self) =>
-                  setActive(Math.min(3, Math.round(self.progress * 3))),
-              },
-            });
-            scrollSequence.current = horizontal.scrollTrigger ?? null;
-            gsap.utils.toArray<HTMLElement>(".chapter-art").forEach((el, i) =>
-              gsap.fromTo(
-                el,
-                { rotation: i % 2 ? -7 : 7, y: 25 },
-                {
-                  rotation: 0,
-                  y: -25,
-                  ease: "none",
-                  scrollTrigger: {
-                    trigger: el,
-                    containerAnimation: horizontal,
-                    start: "left right",
-                    end: "right left",
-                    scrub: true,
-                  },
-                },
-              ),
-            );
-          }
-          gsap.to(".outro-art", {
-            yPercent: -15,
-            rotation: -7,
-            ease: "none",
-            scrollTrigger: {
-              trigger: ".motion-outro",
-              start: "top bottom",
-              end: "bottom top",
-              scrub: 1.5,
-            },
-          });
-          gsap.fromTo(
-            ".outro-title",
-            { y: 80 },
-            {
-              y: -20,
-              ease: "none",
-              scrollTrigger: {
-                trigger: ".motion-outro",
-                start: "top bottom",
-                end: "bottom top",
-                scrub: 1,
-              },
-            },
-          );
-        }, root);
-        return () => {
-          scrollSequence.current = null;
-          ctx.revert();
-        };
-      },
-    );
-    let alive = true;
-    document.fonts?.ready.then(() => {
-      if (alive) ScrollTrigger.refresh();
+    mm.add({ motion: "(prefers-reduced-motion: no-preference)", desktop: "(min-width: 900px)" }, context => {
+      if (!context.conditions?.motion || paused) return;
+      const ctx = gsap.context(() => {
+        gsap.from(".ledger-title span", { yPercent: 115, rotate: 2, stagger: .12, duration: 1, ease: "power4.out" });
+        gsap.from(".ledger-kicker, .ledger-hero-foot", { opacity: 0, y: 18, duration: .7, delay: .35, ease: "power2.out" });
+        gsap.from(".deal-stack", { opacity: 0, x: 60, rotate: 3, duration: 1.2, delay: .2, ease: "expo.out" });
+        gsap.to(".stack-shadow", { yPercent: 22, rotate: -7, ease: "none", scrollTrigger: { trigger: ".ledger-hero", start: "top top", end: "bottom top", scrub: 1 } });
+        gsap.to(".deal-stack > .deal-frame", { yPercent: -13, rotate: 1.5, ease: "none", scrollTrigger: { trigger: ".ledger-hero", start: "top top", end: "bottom top", scrub: 1 } });
+        gsap.to(".hero-grid", { yPercent: 15, ease: "none", scrollTrigger: { trigger: ".ledger-hero", start: "top top", end: "bottom top", scrub: 1.4 } });
+        gsap.to(".hero-outline", { yPercent: -18, rotate: 4, ease: "none", scrollTrigger: { trigger: ".ledger-hero", start: "top top", end: "bottom top", scrub: 1.2 } });
+        gsap.to(".stack-note", { yPercent: -55, rotate: -2, ease: "none", scrollTrigger: { trigger: ".ledger-hero", start: "top top", end: "bottom top", scrub: 1 } });
+        gsap.to(".stack-audit", { yPercent: 55, rotate: 6, ease: "none", scrollTrigger: { trigger: ".ledger-hero", start: "top top", end: "bottom top", scrub: 1.35 } });
+        gsap.to(".operations-band-track", { xPercent: -18, ease: "none", scrollTrigger: { trigger: ".operations-band", start: "top bottom", end: "bottom top", scrub: 1 } });
+        gsap.utils.toArray<HTMLElement>(".problem-card").forEach((card, index) => gsap.from(card, { y: 55 + index * 12, opacity: 0, rotate: index % 2 ? 1 : -1, duration: .85, ease: "power3.out", scrollTrigger: { trigger: card, start: "top 88%", once: true } }));
+        gsap.utils.toArray<HTMLElement>(".problem-card > i").forEach((ring, index) => gsap.to(ring, { yPercent: 45 + index * 8, rotate: 90, ease: "none", scrollTrigger: { trigger: ring.parentElement, start: "top bottom", end: "bottom top", scrub: 1 } }));
+        if (context.conditions?.desktop) {
+          const blocks = gsap.utils.toArray<HTMLElement>(".state-copy");
+          const story = gsap.timeline({ scrollTrigger: { trigger: ".deal-story", start: "top top", end: "+=3200", pin: true, scrub: .8, anticipatePin: 1, onUpdate: self => setActive(Math.min(3, Math.floor(self.progress * 4))) } });
+          blocks.forEach((block, index) => { if (!index) return; story.fromTo(block, { autoAlpha: 0, y: 60 }, { autoAlpha: 1, y: 0, duration: .35 }, index); story.to(blocks[index - 1], { autoAlpha: 0, y: -45, duration: .28 }, index - .25); });
+          story.to(".story-depth-one", { x: -48, y: 38, rotate: -7, duration: 3.7, ease: "none" }, 0).to(".story-depth-two", { x: 54, y: -36, rotate: 8, duration: 3.7, ease: "none" }, 0);
+        }
+        gsap.utils.toArray<HTMLElement>(".proof-frame").forEach((frame, index) => gsap.fromTo(frame, { y: index % 2 ? 80 : 35 }, { y: index % 2 ? -35 : -15, ease: "none", scrollTrigger: { trigger: frame, start: "top bottom", end: "bottom top", scrub: 1.1 } }));
+        gsap.fromTo(".audit-progress i", { scaleX: 0 }, { scaleX: 1, ease: "none", scrollTrigger: { trigger: ".audit-section", start: "top 75%", end: "bottom 45%", scrub: 1 } });
+        gsap.from(".ledger-outro h2 span", { yPercent: 110, stagger: .12, duration: .9, ease: "power4.out", scrollTrigger: { trigger: ".ledger-outro", start: "top 70%", once: true } });
+      }, root); return () => ctx.revert();
     });
-    return () => {
-      alive = false;
-      mm.revert();
-    };
+    document.fonts?.ready.then(() => ScrollTrigger.refresh()); return () => mm.revert();
   }, [paused]);
 
-  function jumpChapter(index: number) {
-    setActive(index);
-    const sequence = scrollSequence.current;
-    if (sequence) {
-      window.scrollTo({
-        top: sequence.start + ((sequence.end - sequence.start) * index) / 3,
-        behavior: "auto",
-      });
-    } else
-      document.getElementById(`chapter-${index}`)?.scrollIntoView({
-        behavior: paused ? "auto" : "smooth",
-        block: "center",
-      });
-  }
-  return (
-    <div ref={root} className={`cinematic ${paused ? "motion-paused" : ""}`}>
-      <a className="skip-link" href="#main">
-        Skip to content
-      </a>
-      <nav className="cinema-nav">
-        <Brand />
-        <div className={`cinema-nav-links ${menu ? "open" : ""}`}>
-          <a href="#platform" onClick={() => setMenu(false)}>
-            The big picture
-          </a>
-          <a href="#workflow" onClick={() => setMenu(false)}>
-            The flow
-          </a>
-          <a href="#why-dealos" onClick={() => setMenu(false)}>
-            Why DealOS
-          </a>
-          <a className="cinema-mobile-login" href="/sign-in">
-            Sign in <ArrowUpRight />
-          </a>
-        </div>
-        <div className="cinema-nav-end">
-          <a className="cinema-login" href="/sign-in">
-            Sign in <ArrowUpRight />
-          </a>
-          <a className="cinema-button compact" href="/sign-up">
-            Get started <ArrowUpRight />
-          </a>
-          <button
-            className="cinema-menu"
-            aria-expanded={menu}
-            aria-label={menu ? "Close navigation" : "Open navigation"}
-            onClick={() => setMenu(!menu)}
-          >
-            {menu ? <X /> : <Menu />}
-          </button>
-        </div>
-      </nav>
-      <main id="main">
-        <section className="cinema-hero">
-          <div className="hero-image-layer" aria-hidden="true">
-            <img
-              className="hero-sculpture"
-              src="/images/momentum-sculpture.png"
-              alt=""
-              width="1536"
-              height="1024"
-              fetchPriority="high"
-            />
-          </div>
-          <div className="hero-photo-shade" />
-          <div className="hero-intro">
-            <span className="live-spark" /> THE OPERATING SYSTEM FOR EVERY DEAL
-            <span className="intro-version">DEALOS / VOL. 01</span>
-          </div>
-          <h1 className="cinema-title" aria-label="Every deal. In motion.">
-            <span className="title-line">
-              <span>EVERY DEAL.</span>
-            </span>
-            <span className="title-line lime-line">
-              <span>
-                IN MOTION<span className="title-dot">.</span>
-              </span>
-            </span>
-          </h1>
-          <div className="hero-coordinate" aria-hidden="true">
-            <span>LESS FRICTION</span>
-            <svg viewBox="0 0 90 90">
-              <path d="M45 5v80M5 45h80M17 17l56 56M17 73l56-56" />
-            </svg>
-            <span>MORE FORWARD</span>
-          </div>
-          <div className="cinema-hero-bottom">
-            <div>
-              <p>
-                From the first quote to the final payment.
-                <br />
-                One connected flow. Unstoppable potential.
-              </p>
-              <a className="cinema-button" href="/sign-up">
-                Make your next move <ArrowUpRight />
-              </a>
-            </div>
-            <a className="scroll-dial" href="#platform">
-              <span>
-                SCROLL TO
-                <br />
-                MOVE FORWARD
-              </span>
-              <ArrowDown />
-            </a>
-            <span className="hero-side-note">
-              BUILT FOR THE BUSINESS
-              <br />
-              YOU’RE BECOMING.
-            </span>
-          </div>
-        </section>
-        <div
-          className="slanted-ribbon"
-          aria-label="Quote. Approve. Fulfill. Bill."
-        >
-          <div className="slanted-ribbon-inner" aria-hidden="true">
-            {[0, 1, 2].map((n) => (
-              <span key={n}>
-                QUOTE <b>✳</b> APPROVE <b>✳</b> FULFILL <b>✳</b> BILL <b>✳</b>
-              </span>
-            ))}
-          </div>
-        </div>
-        <section className="manifesto" id="platform">
-          <div className="motion-eyebrow">
-            <span>01 / A DIFFERENT KIND OF FLOW</span>
-            <span>CONNECT THE DOTS. MOVE THE DEAL.</span>
-          </div>
-          <div className="manifesto-layout">
-            <span className="manifesto-asterisk" aria-hidden="true">
-              ✳
-            </span>
-            <div>
-              <h2 className="manifesto-copy">
-                {"Great deals need more than good intentions."
-                  .split(" ")
-                  .map((word, i) => (
-                    <span className="manifesto-word" key={i}>
-                      {word}{" "}
-                    </span>
-                  ))}
-                <br />
-                <span className="manifesto-emphasis">They need momentum.</span>
-              </h2>
-              <div className="manifesto-bottom motion-reveal">
-                <p>
-                  Too many tabs. Too many handoffs. Too much chasing.
-                  <br />
-                  Bring sales, approvals, fulfillment, and billing into one
-                  place.
-                  <br />
-                  Give your next big opportunity a clear way forward.
-                </p>
-                <a
-                  href="#workflow"
-                  className="round-arrow"
-                  aria-label="Explore the deal workflow"
-                >
-                  <ArrowUpRight />
-                </a>
-              </div>
-            </div>
-          </div>
-        </section>
-        <section
-          className="connection-scene"
-          aria-label="Connected from beginning to end"
-        >
-          <div className="connection-window">
-            <img
-              className="connection-image"
-              src="/images/connected-sculpture.png"
-              width="1536"
-              height="1024"
-              alt="Interlocking chrome, lime glass, green ceramic, and stone links representing a connected deal journey"
-              loading="lazy"
-              onLoad={() => ScrollTrigger.refresh()}
-            />
-            <div className="connection-overlay" />
-            <div className="connection-title">
-              <span className="motion-eyebrow">
-                SEPARATE TEAMS. SHARED MOMENTUM.
-              </span>
-              <h2>
-                Everything clicks.
-                <br />
-                <em>Business moves.</em>
-              </h2>
-              <span className="connection-label">
-                <span /> CONNECTED. FROM BEGINNING TO END.
-              </span>
-            </div>
-          </div>
-          <span className="scene-corner top-left">+</span>
-          <span className="scene-corner bottom-right">+</span>
-        </section>
-        <section className="motion-workflow" id="workflow" ref={workflow}>
-          <div className="workflow-heading">
-            <div className="motion-eyebrow">02 / FOLLOW THE FLOW</div>
-            <h2>
-              Four moves.
-              <br />
-              <span>One way forward.</span>
-            </h2>
-            <div
-              className="chapter-controls"
-              role="group"
-              aria-label="Choose a workflow chapter"
-            >
-              {chapters.map((chapter, i) => (
-                <button
-                  key={chapter.name}
-                  aria-label={`Explore ${chapter.name}`}
-                  aria-pressed={active === i}
-                  onClick={() => jumpChapter(i)}
-                >
-                  <span>0{i + 1}</span>
-                  {chapter.name}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="chapter-track" ref={track}>
-            {chapters.map((chapter, i) => (
-              <article
-                id={`chapter-${i}`}
-                className={`motion-chapter chapter-${chapter.color}`}
-                key={chapter.name}
-              >
-                <div className="chapter-top">
-                  <span>{chapter.caption}</span>
-                  <chapter.icon />
-                </div>
-                <ChapterArt index={i} />
-                <div className="chapter-text">
-                  <span className="chapter-number">0{i + 1}</span>
-                  <h3>
-                    {chapter.title.split("\n").map((s, j) => (
-                      <span key={j}>{s}</span>
-                    ))}
-                  </h3>
-                  <p>{chapter.copy}</p>
-                  <a href="/sign-up">
-                    Let’s {chapter.name.toLowerCase()} <ArrowUpRight />
-                  </a>
-                </div>
-              </article>
-            ))}
-          </div>
-          <div className="workflow-progress" aria-hidden="true">
-            <span style={{ transform: `translateX(${active * 100}%)` }} />
-          </div>
-        </section>
-        <section className="principles" id="why-dealos">
-          <div className="principles-heading motion-reveal">
-            <div className="motion-eyebrow">03 / THE DEALOS DIFFERENCE</div>
-            <h2>
-              Big ambition.
-              <br />
-              <em>Small details, handled.</em>
-            </h2>
-            <p>
-              The work behind every deal deserves
-              <br />
-              as much care as the deal itself.
-            </p>
-          </div>
-          <div className="principle-list">
-            {[
-              {
-                n: "01",
-                title: "Clarity over complexity.",
-                text: "Every commercial line, discount, and billing cadence has a place. See the details behind your decisions.",
-              },
-              {
-                n: "02",
-                title: "Context travels with you.",
-                text: "From ordered approvals to customer conversations, keep the next team connected to what came before.",
-              },
-              {
-                n: "03",
-                title: "Accountability comes built in.",
-                text: "Follow the records behind approvals, stock commitments, invoices, and verified payments.",
-              },
-            ].map((p) => (
-              <article className="principle motion-reveal" key={p.n}>
-                <span>{p.n}</span>
-                <div>
-                  <h3>{p.title}</h3>
-                  <p>{p.text}</p>
-                </div>
-                <ArrowUpRight />
-              </article>
-            ))}
-          </div>
-        </section>
-        <section className="motion-faq">
-          <div className="motion-eyebrow">A FEW THINGS WORTH KNOWING</div>
-          <div className="motion-faq-grid">
-            <h2>
-              Clear answers.
-              <br />
-              <em>No loose ends.</em>
-            </h2>
-            <div>
-              {[
-                [
-                  "Who is DealOS built for?",
-                  "B2B sales teams, managers, finance, and operations teams coordinating quotations, approvals, fulfillment, and billing. Customers enter a separate restricted portal.",
-                ],
-                [
-                  "Can I explore the real workspace?",
-                  "Yes. Head to sign in and select a local demo role to explore the actual DealOS workspace.",
-                ],
-                [
-                  "What happens when I sign up?",
-                  "Your account request is saved as pending. Your administrator must activate access before you can sign in.",
-                ],
-                [
-                  "Does DealOS transfer payments?",
-                  "DealOS records verified payments and tracks invoice balances. It does not transfer money.",
-                ],
-              ].map(([q, a]) => (
-                <details key={q}>
-                  <summary>
-                    {q}
-                    <Plus />
-                  </summary>
-                  <p>{a}</p>
-                </details>
-              ))}
-            </div>
-          </div>
-        </section>
-        <section className="motion-outro">
-          <img
-            className="outro-art"
-            src="/images/momentum-sculpture.png"
-            alt=""
-            aria-hidden="true"
-            width="1536"
-            height="1024"
-            loading="lazy"
-          />
-          <div className="outro-shade" />
-          <div className="outro-content">
-            <span className="motion-eyebrow">THE NEXT MOVE IS YOURS.</span>
-            <h2 className="outro-title">
-              LET’S MAKE
-              <br />
-              <span>MOVES.</span>
-              <ArrowUpRight />
-            </h2>
-            <a className="cinema-button" href="/sign-up">
-              Start your next chapter <ArrowUpRight />
-            </a>
-          </div>
-        </section>
-      </main>
-      <footer className="cinema-footer">
-        <div className="footer-top">
-          <Brand />
-          <p>Less friction. More forward.</p>
-          <a href="/sign-in">
-            Enter your workspace <ArrowUpRight />
-          </a>
-          <a href="#main" aria-label="Back to top">
-            <ArrowUpRight />
-          </a>
-        </div>
-        <div className="footer-bottom">
-          <span>© {new Date().getFullYear()} DealOS</span>
-          <span>DESIGNED TO KEEP BUSINESS MOVING.</span>
-          <button aria-pressed={paused} onClick={() => setPaused(!paused)}>
-            {paused ? <Play /> : <Pause />}
-            {paused ? "Resume motion" : "Pause motion"}
-          </button>
-        </div>
-      </footer>
-    </div>
-  );
+  return <div ref={root} className={`ledger-site ${paused ? "motion-paused" : ""}`}>
+    <a className="skip-link" href="#content">Skip to content</a>
+    <nav className="ledger-nav"><Brand /><div className={`ledger-links ${menu ? "open" : ""}`}><a href="#problem" onClick={() => setMenu(false)}>The problem</a><a href="#system" onClick={() => setMenu(false)}>How it works</a><a href="#proof" onClick={() => setMenu(false)}>Inside DealOS</a><a className="mobile-signin" href="/sign-in">Sign in <ArrowUpRight /></a></div><div className="nav-actions"><a className="signin" href="/sign-in">Sign in</a><a className="signal-button small" href="/sign-up">Request access <ArrowUpRight /></a><button className="menu-button" aria-label={menu ? "Close navigation" : "Open navigation"} aria-expanded={menu} onClick={() => setMenu(!menu)}>{menu ? <X /> : <Menu />}</button></div></nav>
+    <main id="content">
+      <section className="ledger-hero"><div className="hero-grid" aria-hidden="true" /><div className="hero-outline" aria-hidden="true"><span>LIVE / COMMERCIAL RECORD</span><i /><b>Q-1048</b></div><div className="hero-copy"><div className="ledger-kicker"><span>DEAL OPERATIONS / ONE SOURCE OF TRUTH</span><span>EST. 2026</span></div><h1 className="ledger-title" aria-label="The deal is a system. Run it like one."><span>THE DEAL IS</span><span>A SYSTEM<span className="signal-dot">.</span></span><span>RUN IT LIKE ONE.</span></h1><div className="ledger-hero-foot"><p>Quote, govern, commit, and bill from one living commercial record.</p><a className="signal-button" href="/sign-up">Open your deal room <ArrowUpRight /></a><a className="scroll-cue" href="#problem"><ArrowDown /><span>See where deals drift</span></a></div></div><div className="deal-stack" aria-label="Example DealOS quotation"><div className="stack-shadow"><span>REV / 05</span></div><div className="stack-note"><Sparkles /><span>Margin healthy after suggested support plan</span></div><div className="stack-audit"><ShieldCheck /><span>AUDIT READY</span><b>06 events</b></div><DealFrame /></div><div className="hero-index" aria-hidden="true"><span>01</span><i /><span>06</span></div></section>
+      <section className="operations-band" aria-label="DealOS workflow"><div className="operations-band-track">{[0,1,2].map(index => <span key={index}>QUOTE <i>↗</i> POLICY <i>↗</i> APPROVAL <i>↗</i> INVENTORY <i>↗</i> BILLING <i>↗</i> AUDIT <i>↗</i></span>)}</div></section>
+      <section className="problem-section" id="problem"><div className="section-intro"><span className="section-index">01 / THE HANDOFF PROBLEM</span><h2>Every team has a piece.<br /><em>Nobody has the deal.</em></h2><p>Commercial truth drifts when decisions live in separate tools. DealOS keeps the context attached.</p></div><div className="problem-grid">{[["SALES", "The price changed.", "The approval did not."], ["FINANCE", "The discount arrived.", "The reason did not."], ["OPERATIONS", "The order arrived.", "The stock promise did not."], ["CUSTOMER", "The revision arrived.", "The history did not."]].map(([role, lead, tail], index) => <article className="problem-card" key={role}><span>0{index + 1} · {role}</span><h3>{lead}<br /><em>{tail}</em></h3><i aria-hidden="true" /></article>)}</div></section>
+      <section className="deal-story" id="system"><div className="story-copy-wrap"><span className="section-index inverse">02 / ONE LIVING RECORD</span>{states.map((state, index) => <div className={`state-copy ${index === 0 ? "active" : ""}`} key={state.label}><span>0{index + 1} · {state.label}</span><h2>{state.title.split("\n").map(line => <span key={line}>{line}</span>)}</h2><p>{state.copy}</p></div>)}<div className="state-rail" aria-label={`Step ${active + 1} of 4`}>{states.map((state, index) => <span key={state.label} className={index <= active ? "on" : ""}><i />{state.label}</span>)}</div></div><div className="story-visual"><div className="story-depth story-depth-one" aria-hidden="true"><span>POLICY / V3.2</span></div><div className="story-depth story-depth-two" aria-hidden="true"><span>REVISION / 06</span></div><StatePanel index={active} /></div></section>
+      <section className="proof-section" id="proof"><div className="proof-watermark" aria-hidden="true">CONTROL / WITHOUT THE CHASE</div><div className="section-intro proof-intro"><span className="section-index">03 / WORK THAT EXPLAINS ITSELF</span><h2>See the rule.<br /><em>See the reason.</em></h2><p>The interface stays quiet until something needs attention—then it shows exactly what changed and what happens next.</p></div><div className="proof-grid"><article className="proof-frame proof-risk"><span className="frame-coordinate">01 — RISK</span><div className="proof-label"><span>BLENDED RISK</span><ShieldCheck /></div><strong>8.0</strong><small>points above ceiling</small><div className="risk-bars"><span><i />Hardware · within policy</span><span><i />Services · finance review</span><span><i />Support · within policy</span></div><p>One thin-margin line cannot disappear inside the average.</p></article><article className="proof-frame proof-route"><span className="frame-coordinate">02 — STOCK</span><div className="proof-label"><span>FULFILLMENT PREVIEW</span><Boxes /></div><div className="mini-map"><span className="origin">ORDER<br /><b>24</b></span><i /><span>MUMBAI<br /><b>18</b></span><i /><span>PUNE<br /><b>6</b></span></div><div className="proof-summary"><span>2 shipments</span><span>₹27,300 estimated</span><b>0 backordered</b></div></article><article className="proof-frame proof-bill"><span className="frame-coordinate">03 — BILLING</span><div className="proof-label"><span>HYBRID BILLING</span><ReceiptText /></div><div className="bill-row"><span>Hardware + service<small>One-time invoice</small></span><b>₹1,16,16,000</b></div><div className="bill-row"><span>Priority support<small>Monthly schedule</small></span><b>₹1,04,000<em>/mo</em></b></div><div className="bill-timeline"><i /><i /><i /><i /><span>OCT</span><span>NOV</span><span>DEC</span><span>JAN</span></div></article><article className="proof-frame proof-portal"><span className="frame-coordinate">04 — PORTAL</span><div className="proof-label"><span>CUSTOMER PORTAL</span><FileText /></div><blockquote>“Can we move the service discount to 18% if we confirm this week?”</blockquote><div className="portal-response"><span>Terms changed</span><b>Reapproval started automatically</b></div><p>Negotiation stays on the record—not in an email thread.</p></article></div></section>
+      <section className="audit-section"><div><span className="section-index inverse">04 / ACCOUNTABILITY BY DEFAULT</span><h2>Nothing important<br />becomes a mystery.</h2></div><div className="audit-list">{[["10:18", "Jordan submitted revision 06", "Commercial terms frozen"], ["10:24", "Maya approved the exception", "Reason attached"], ["10:31", "Finance review requested", "Policy v3.2 applied"], ["10:42", "Stock preview refreshed", "24 units available"]].map(([time, event, detail]) => <div key={time}><time>{time}</time><i><Check /></i><span><b>{event}</b><small>{detail}</small></span></div>)}</div><div className="audit-progress" aria-hidden="true"><i /></div></section>
+      <section className="ledger-outro"><span className="section-index">THE NEXT DEAL STARTS HERE</span><h2><span>LESS CHASING.</span><span>MORE CERTAINTY.</span></h2><div><p>A single, accountable path from first quote to final payment.</p><a className="signal-button" href="/sign-up">Request workspace access <ArrowUpRight /></a></div></section>
+    </main>
+    <footer className="ledger-footer"><Brand /><p>One record. Every decision.</p><a href="/sign-in">Enter workspace <ArrowUpRight /></a><button aria-pressed={paused} onClick={() => setPaused(!paused)}>{paused ? <Play /> : <Pause />}{paused ? "Resume motion" : "Pause motion"}</button><span>© {new Date().getFullYear()} DealOS</span></footer>
+  </div>;
 }
