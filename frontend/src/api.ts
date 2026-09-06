@@ -1,6 +1,6 @@
 export type Workspace = {
   user: { id: string; name: string; companyName?:string|null; email: string; loginId?: string; role: string; customerId?:string|null; moduleAccess: string[]; actorType:'USER'|'PLATFORM_OWNER'; platformSuperAdmin:boolean; viewContext:{readOnly:true;organizationId:string;organizationName:string;simulatedUserId:string|null;realActor:{id:string;name:string}}|null };
-  organization: { id: string; name: string; rfqHandlingMode?:'LEAD_FIRST'|'DIRECT_DRAFT' };
+  organization: { id: string; name: string; rfqHandlingMode?:'LEAD_FIRST'|'DIRECT_DRAFT'; dealRoomReady?:boolean };
   users: Array<{ id:string; name:string; email:string; loginId?:string; role:string; status:string; membershipStatus?:string; accessRole?:string; moduleAccess:string[]; createdAt:string; joinedAt?:string }>;
   customers: Customer[];
   quotes: Quote[];

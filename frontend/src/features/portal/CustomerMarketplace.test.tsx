@@ -44,4 +44,18 @@ describe('customer marketplace',()=>{
     expect(await screen.findByRole('heading',{name:'Your marketplace is ready.'})).toBeInTheDocument();
     await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith('/api/v1/auth/customer/signup',expect.objectContaining({method:'POST',body:JSON.stringify({contactName:'Asha Rao',companyName:'Buyer Co',email:'asha@buyer.example',password:'CustomerPass12!'})})));
   });
+
+  it('accepts a first request before a sales team or representative is assigned',async()=>{
+    fetchMock.mockImplementation((url:string,options?:RequestInit)=>{
+      if(url==='/api/v1/portal/organizations')return response({items:[{...organization,relationship:'AVAILABLE'}]});
+      if(url===`/api/v1/portal/organizations/${organization.id}`)return response({...organization,products:[product]});
+      if(url.endsWith('/interest')&&options?.method==='POST')return response({kind:'RELATIONSHIP_REQUEST',id:'request-1',status:'PENDING'},201);
+      return response({},404);
+    });
+    render(<CustomerMarketplace companyName="Buyer Co" currentOrganizationId={organization.id} onWorkspaceChanged={vi.fn()}/>);
+    expect(await screen.findByRole('heading',{name:'Managed rollout'})).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Requirements'),{target:{value:'Please quote this rollout for our new offices.'}});
+    fireEvent.click(screen.getByRole('button',{name:/Send interest/}));
+    expect(await screen.findByText(/assign a representative before preparing a quotation/i)).toBeInTheDocument();
+  });
 });

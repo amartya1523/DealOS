@@ -628,3 +628,66 @@
   .deal-room-header{height:64px;padding-inline:16px}
   .deal-room-tabs{top:64px}
 }
+
+/* Customer portal layout isolation and overflow safeguards.
+   The legacy workspace `header` selector is intentionally broad; reset only
+   nested customer-document headers so they can size to their content. */
+.customer-route-shell,
+.customer-route-shell .deal-room,
+.customer-route-shell .deal-room-main,
+.customer-route-shell .deal-room-main>*{min-width:0}
+.customer-route-shell .deal-room header:not(.deal-room-header){
+  height:auto;
+  min-height:0;
+  position:static;
+  top:auto;
+  z-index:auto;
+  backdrop-filter:none;
+}
+.customer-route-shell .deal-room-intro>div,
+.customer-route-shell .marketplace-summary>div,
+.customer-route-shell .marketplace-business-head>div:first-child,
+.customer-route-shell .quotation-sheet-head>div,
+.customer-route-shell .messages-panel article>div{min-width:0}
+.customer-route-shell .deal-room-intro h1,
+.customer-route-shell .deal-room-intro p,
+.customer-route-shell .marketplace-business-head h3,
+.customer-route-shell .marketplace-business-head p,
+.customer-route-shell .quotation-sheet-head h2,
+.customer-route-shell .quotation-sheet-head p,
+.customer-route-shell .messages-panel h3,
+.customer-route-shell .messages-panel p,
+.customer-route-shell .profile-card{overflow-wrap:anywhere}
+.customer-route-shell .marketplace-business-head{
+  padding:20px 0 22px;
+  align-items:flex-start;
+}
+.customer-route-shell .marketplace-business-actions,
+.customer-route-shell .quotation-sheet-head>strong{flex:none}
+.customer-route-shell .marketplace-organizations{
+  position:static;
+  top:auto;
+  height:auto;
+  padding:0;
+}
+.customer-route-shell .document-list{height:auto}
+.customer-route-shell .quote-room-layout,
+.customer-route-shell .quotation-sheet,
+.customer-route-shell .messages-panel,
+.customer-route-shell .profile-card{min-width:0;max-width:100%}
+.customer-route-shell .quotation-lines{max-width:100%;overflow-x:auto}
+
+@media(max-width:800px){
+  .customer-route-shell .marketplace-business-head{padding:16px 0 20px}
+  .customer-route-shell .marketplace-business-actions{width:100%;align-items:flex-start}
+  .customer-route-shell .marketplace-section-title{align-items:flex-start;gap:12px;flex-wrap:wrap}
+}
+
+@media(max-width:560px){
+  .customer-route-shell .deal-room-main{overflow-x:hidden}
+  .customer-route-shell .portal-sync{white-space:normal}
+  .customer-route-shell .marketplace-detail{padding:16px}
+  .customer-route-shell .marketplace-business-head h3{font-size:25px}
+  .customer-route-shell .marketplace-guard{min-width:0;width:100%}
+  .customer-route-shell .messages-panel article{grid-template-columns:30px minmax(0,1fr);padding:16px}
+}

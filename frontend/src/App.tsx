@@ -6096,7 +6096,8 @@ function CustomerPortalV2({
       document.removeEventListener("visibilitychange", sync);
     };
   }, [reload]);
-  const hasDealRoom = Boolean(data.organization.id);
+  const hasDealRoom =
+    Boolean(data.organization.id) && data.organization.dealRoomReady !== false;
   const pendingQuotes = data.quotes.filter((q) =>
     ["SENT", "NEGOTIATION"].includes(q.stage),
   ).length;
@@ -6131,7 +6132,7 @@ function CustomerPortalV2({
     active === "organizations"
       ? hasDealRoom
         ? `Browse verified organizations or continue your active deal room with ${data.organization.name}.`
-        : "Browse verified organizations and choose a product or service. Your private deal room opens after the seller approves your interest and assigns a representative."
+        : "Browse verified organizations and choose a product or service. Send your request first; the seller will then assign a sales team and representative before preparing a quotation."
       : active === "requests"
       ? "Describe what you need. Your assigned representative will review it before anything is shared back."
       : active === "quotations"
