@@ -147,7 +147,7 @@ export async function getDirectoryBusiness(prisma: PrismaClient, organizationId:
 }
 
 export async function listCustomerMarketplace(prisma: PrismaClient, user: { id:string; email:string; organizationId:string }) {
-  const [organizations, memberships, pending] = await Promise.all([
+  const [organizations, memberships, pending, customers] = await Promise.all([
     prisma.organization.findMany({
       where: { status: 'ACTIVE' },
       select: {
@@ -166,8 +166,21 @@ export async function listCustomerMarketplace(prisma: PrismaClient, user: { id:s
       where: { email: user.email.toLowerCase(), status: 'PENDING', marketplaceInterest: true },
       select: { organizationId: true },
     }),
+    prisma.customer.findMany({
+      where: { email: { equals: user.email, mode: 'insensitive' }, active: true },
+      select: {
+        organizationId: true,
+        primarySalesTeamId: true,
+        primarySalesTeam: { select: { members: { select: { userId: true } } } },
+        assignments: { where: { role: 'PRIMARY', active: true }, select: { user: { select: { id: true, role: true, status: true } } } },
+      },
+    }),
   ]);
-  const connected = new Set(memberships.map((item) => item.organizationId));
+  const assigned = new Set(customers.filter((customer) => {
+    const primary = customer.assignments[0]?.user;
+    return Boolean(customer.primarySalesTeamId && customer.primarySalesTeam && customer.assignments.length === 1 && primary?.role === 'REP' && primary.status === 'ACTIVE' && customer.primarySalesTeam.members.some((member) => member.userId === primary.id));
+  }).map((customer) => customer.organizationId));
+  const connected = new Set(memberships.filter((item) => assigned.has(item.organizationId)).map((item) => item.organizationId));
   const waiting = new Set(pending.map((item) => item.organizationId));
   const visible = new Map(organizations.map((organization) => [organization.id, {
     id: organization.id,
@@ -178,7 +191,7 @@ export async function listCustomerMarketplace(prisma: PrismaClient, user: { id:s
   }]));
   return { items: [...visible.values()].sort((left,right)=>left.displayName.localeCompare(right.displayName)).map((item) => ({
     ...item,
-    relationship: item.id === user.organizationId ? 'ACTIVE' : connected.has(item.id) ? 'CONNECTED' : waiting.has(item.id) ? 'PENDING' : 'AVAILABLE',
+    relationship: waiting.has(item.id) ? 'PENDING' : item.id === user.organizationId && assigned.has(item.id) ? 'ACTIVE' : connected.has(item.id) ? 'CONNECTED' : 'AVAILABLE',
   })) };
 }
 
@@ -343,7 +356,10 @@ export async function approveDirectoryJoinRequest(
     currency: input.currency,
     active: true,
   });
-  const customer = await createCustomerProfile(tx, actor, profile, {
+  const existingCustomer = request.marketplaceInterest ? await tx.customer.findFirst({
+    where: { organizationId: actor.organizationId, email: { equals: request.email, mode: 'insensitive' }, active: true },
+  }) : null;
+  const customer = existingCustomer ?? await createCustomerProfile(tx, actor, profile, {
     ...(!request.marketplaceInterest ? { temporaryPassword: (temporaryPassword = generateCustomerTemporaryPassword()) } : {}),
     auditAction: 'DIRECTORY_JOIN_CUSTOMER_CREATED',
     auditReason: `Approved directory request ${request.id}`,

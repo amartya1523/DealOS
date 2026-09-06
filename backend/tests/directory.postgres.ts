@@ -81,6 +81,36 @@ async function main() {
   const persistedApproval = JSON.stringify({ approvedRequest, portalUser, audits: await db.auditEvent.findMany({ where: { organizationId: organization.id } }) });
   assert(!persistedApproval.includes(approved.credentials.password), 'the one-time password must not be persisted in readable form');
 
+  // A signed-in but unassigned customer can request first. Approval reuses the
+  // customer identity, assigns the seller's team, and only then creates a Lead.
+  const existingCustomer = await db.customer.create({ data: { organizationId: organization.id, name: 'Existing Marketplace Buyer', email: `${schema}-existing@example.invalid`, tier: 'Bronze', currency: 'INR' } });
+  const existingPortalUser = await db.user.create({ data: { organizationId: organization.id, customerId: existingCustomer.id, name: 'Existing Buyer', email: existingCustomer.email!, passwordHash: 'not-a-login', status: 'ACTIVE', role: 'CUSTOMER' } });
+  await db.organizationMembership.create({ data: { organizationId: organization.id, userId: existingPortalUser.id, accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' } });
+  const offering = await db.product.create({ data: { organizationId: organization.id, name: 'Marketplace rollout', sku: `${schema}-marketplace`, category: 'Services', description: 'Implementation service', unit: 'Project', price: 1000, cost: 600, taxRate: 18, storeVisible: true } });
+  const customerCountBeforeMarketplaceApproval = await db.customer.count();
+  const marketplaceRequest = await createDirectoryJoinRequest(db, organization.id, {
+    email: existingPortalUser.email,
+    companyName: existingCustomer.name,
+    contactName: existingPortalUser.name,
+    message: 'Please prepare a quotation after assigning your sales team.',
+    productId: offering.id,
+    quantity: 2,
+    marketplaceInterest: true,
+  }, '192.0.2.13', new Date(), true);
+  assert.equal(await db.portalRequest.count({ where: { customerId: existingCustomer.id } }), 0, 'the request must not enter quotation handling before assignment');
+  const marketplaceApproval = await db.$transaction((tx) => approveDirectoryJoinRequest(tx, actor, marketplaceRequest.id, {
+    primarySalesTeamId: team.id,
+    primaryRepId: rep.id,
+    collaboratorIds: [],
+    customerTier: 'Gold',
+    currency: 'INR',
+  }));
+  assert.equal(marketplaceApproval.request.resultingCustomer?.id, existingCustomer.id, 'approval must reuse the existing customer identity');
+  assert.equal(await db.customer.count(), customerCountBeforeMarketplaceApproval, 'approval must not duplicate an existing customer');
+  assert.equal(await db.customerRepresentative.count({ where: { customerId: existingCustomer.id, userId: rep.id, role: 'PRIMARY', active: true } }), 1);
+  const routedRequest = await db.portalRequest.findFirstOrThrow({ where: { customerId: existingCustomer.id }, include: { resultingLead: true } });
+  assert.equal(routedRequest.resultingLead?.assignedRepId, rep.id, 'the request must route to the representative only after assignment');
+
   const declineCustomerCount = await db.customer.count();
   const declineUserCount = await db.user.count();
   const declineRequest = await createDirectoryJoinRequest(db, organization.id, {
@@ -145,7 +175,7 @@ async function main() {
   const northstarRequests = await listDirectoryJoinRequests(db, { id: northstarAdmin.id, role: 'ADMIN', organizationId: northstarAdmin.organizationId!, requestId: 'directory-seed-tenant-test' });
   assert.equal(northstarRequests.items.length, 0, 'seeded request inboxes must remain tenant-isolated');
 
-  console.log(JSON.stringify({ passed: 37, schema, checks: ['public allowlist', 'discoverability', 'inactive organization filtering', 'submit-only request', 'duplicate pending', 'atomic approval', 'shared assignment', 'portal membership', 'hashed one-time credential', 'decline isolation', 'cross-tenant isolation', 'repeatable seed reset', 'seeded public profiles', 'seeded pending case', 'seeded approved case', 'seeded customer login and assignment', 'seeded declined case', 'seeded decision audit', 'seeded tenant isolation'] }));
+  console.log(JSON.stringify({ passed: 43, schema, checks: ['public allowlist', 'discoverability', 'inactive organization filtering', 'submit-only request', 'duplicate pending', 'atomic approval', 'shared assignment', 'portal membership', 'hashed one-time credential', 'request-before-assignment', 'existing customer reuse', 'post-assignment lead routing', 'decline isolation', 'cross-tenant isolation', 'repeatable seed reset', 'seeded public profiles', 'seeded pending case', 'seeded approved case', 'seeded customer login and assignment', 'seeded declined case', 'seeded decision audit', 'seeded tenant isolation'] }));
 }
 
 try {

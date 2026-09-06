@@ -46,9 +46,21 @@ describe('public business directory', () => {
       organization:{findMany:async(input:any)=>{organizationWhere=input.where;return [{id:organizationId,name:'Internal Name',directoryProfile:null,_count:{products:2}}]}},
       organizationMembership:{findMany:async()=>[]},
       directoryJoinRequest:{findMany:async()=>[]},
+      customer:{findMany:async()=>[]},
     } as unknown as PrismaClient;
     await expect(listCustomerMarketplace(prisma,{id:'customer-user',email:'buyer@example.com',organizationId:''})).resolves.toEqual({items:[{id:organizationId,displayName:'Internal Name',shortDescription:null,category:null,offeringCount:2,relationship:'AVAILABLE'}]});
     expect(organizationWhere).toEqual({status:'ACTIVE'});
+  });
+
+  it('keeps an unassigned organization requestable and shows a submitted request as pending', async()=>{
+    const makePrisma=(pending:boolean)=>({
+      organization:{findMany:async()=>[{id:organizationId,name:'Seller',directoryProfile:null,_count:{products:1}}]},
+      organizationMembership:{findMany:async()=>[{organizationId,organization:{name:'Seller',status:'ACTIVE',directoryProfile:null}}]},
+      directoryJoinRequest:{findMany:async()=>pending?[{organizationId}]:[]},
+      customer:{findMany:async()=>[{organizationId,primarySalesTeamId:null,primarySalesTeam:null,assignments:[]}]},
+    }) as unknown as PrismaClient;
+    await expect(listCustomerMarketplace(makePrisma(false),{id:'customer-user',email:'buyer@example.com',organizationId})).resolves.toMatchObject({items:[{relationship:'AVAILABLE'}]});
+    await expect(listCustomerMarketplace(makePrisma(true),{id:'customer-user',email:'buyer@example.com',organizationId})).resolves.toMatchObject({items:[{relationship:'PENDING'}]});
   });
 });
 

@@ -767,7 +767,17 @@ app.get('/api/v1/workspace', authenticate, async (req: AuthRequest, res) => {
   });
   const priceLists=dataAccess.products?await db.priceList.findMany({where:{organizationId:req.user!.organizationId},include:{items:{include:{product:{select:{id:true,name:true,sku:true}},variant:{select:{id:true,name:true,sku:true}}}}},orderBy:{name:'asc'}}):[];
   const notifications=!portal?await db.notification.findMany({where:{recipientId:req.user!.id},orderBy:{createdAt:'desc'},take:100}):[];
-  return ok(req, res, { user: req.user, organization, users, customers: customerDtos, quotes, products,priceLists, policies, warehouses: warehouseDtos, subscriptions, invoices, alerts,notifications, audits });
+  const portalCustomer = portal ? await db.customer.findFirst({
+    where: { id: req.user!.customerId!, organizationId: req.user!.organizationId, active: true },
+    select: {
+      primarySalesTeamId: true,
+      primarySalesTeam: { select: { members: { select: { userId: true } } } },
+      assignments: { where: { role: 'PRIMARY', active: true }, select: { user: { select: { id: true, role: true, status: true } } } },
+    },
+  }) : null;
+  const portalPrimary = portalCustomer?.assignments[0]?.user;
+  const dealRoomReady = !portal || Boolean(portalCustomer?.primarySalesTeamId && portalCustomer.primarySalesTeam && portalCustomer.assignments.length === 1 && portalPrimary?.role === 'REP' && portalPrimary.status === 'ACTIVE' && portalCustomer.primarySalesTeam.members.some((member) => member.userId === portalPrimary.id));
+  return ok(req, res, { user: req.user, organization: organization ? { ...organization, dealRoomReady } : organization, users, customers: customerDtos, quotes, products,priceLists, policies, warehouses: warehouseDtos, subscriptions, invoices, alerts,notifications, audits });
 });
 
 app.post('/api/v1/customers', authenticate, requireModule('customers'), requireRole('ADMIN', 'MANAGER'), requireCsrf, async (req: AuthRequest, res) => {
@@ -1415,8 +1425,17 @@ app.post('/api/v1/portal/organizations/:organizationId/interest', authenticate, 
   const parsed = customerMarketplaceInterestSchema.safeParse(req.body);
   if (!organizationId.success || !parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Choose an offering and describe what you need.', parsed.success ? undefined : parsed.error.flatten());
   const membership = await db.organizationMembership.findFirst({ where: { organizationId: organizationId.data, userId: req.user!.id, accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' }, select: { id: true } });
-  const customer = membership ? await db.customer.findFirst({ where: { organizationId: organizationId.data, email: { equals: req.user!.email, mode: 'insensitive' }, active: true }, select: { id: true } }) : null;
-  if (customer) {
+  const customer = membership ? await db.customer.findFirst({
+    where: { organizationId: organizationId.data, email: { equals: req.user!.email, mode: 'insensitive' }, active: true },
+    select: {
+      id: true, primarySalesTeamId: true,
+      primarySalesTeam: { select: { members: { select: { userId: true } } } },
+      assignments: { where: { role: 'PRIMARY', active: true }, select: { user: { select: { id: true, role: true, status: true } } } },
+    },
+  }) : null;
+  const primary = customer?.assignments[0]?.user;
+  const assignmentReady = Boolean(customer?.primarySalesTeamId && customer.primarySalesTeam && customer.assignments.length === 1 && primary?.role === 'REP' && primary.status === 'ACTIVE' && customer.primarySalesTeam.members.some((member) => member.userId === primary.id));
+  if (customer && assignmentReady) {
     const product = await db.product.findFirst({ where: { id: parsed.data.productId, organizationId: organizationId.data, active: true, storeVisible: true }, select: { id: true } });
     if (!product) return fail(req, res, 422, 'PRODUCT_UNAVAILABLE', 'That product or service is no longer available.');
     const result = await db.$transaction((tx) => submitPortalRequest(tx, {
