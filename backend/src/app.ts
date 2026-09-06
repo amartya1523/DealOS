@@ -30,6 +30,7 @@ import { createRazorpayClient, paymentWebhookKey, readRazorpayConfiguration, rup
 import { createCustomerProfile, customerCreationSchema, customerProfileSchema, CustomerProfileError } from './customers.js';
 import { approveDirectoryJoinRequest, approveDirectoryJoinRequestSchema, createDirectoryJoinRequest, declineDirectoryJoinRequest, declineDirectoryJoinRequestSchema, directoryJoinListSchema, directoryJoinRequestSchema, DirectoryError, getOrganizationDirectoryProfile, listDirectoryBusinesses, listDirectoryJoinRequests, organizationProfileSchema, updateOrganizationDirectoryProfile } from './directory.js';
 import { createSalesTeam, SalesTeamError, salesTeamMutationSchema, updateSalesTeam } from './sales-teams.js';
+import { hasModuleAccess, provisionableRoles, roleModulePresets, workspaceDataAccess, workspaceModules as modules } from './access-policy.js';
 
 type Actor = { id: string; name: string; email: string; loginId: string | null; role: string; customerId: string | null; organizationId: string; moduleAccess: string[]; csrfToken: string; actorType: 'USER' | 'PLATFORM_OWNER'; platformSuperAdmin: boolean; readOnlyView: boolean; organization: { id: string; name: string; status: string } | null; viewContext: { readOnly: true; organizationId: string; organizationName: string; simulatedUserId: string | null; realActor: { id: string; name: string } } | null };
 type AuthRequest = Request & { user?: Actor; requestId?: string };
@@ -47,13 +48,6 @@ const googleClientAudiences = [
   process.env.GOOGLE_IOS_CLIENT_ID?.trim() ?? '',
   process.env.GOOGLE_ANDROID_CLIENT_ID?.trim() ?? '',
 ].filter((clientId): clientId is string => Boolean(clientId));
-const modules = ['dashboard','quotations','approvals','fulfillment','subscriptions','invoices','health','reports','products','customers','policies'] as const;
-const provisionableRoles = ['REP','MANAGER','FINANCE'] as const;
-const roleModulePresets: Record<typeof provisionableRoles[number], Array<typeof modules[number]>> = {
-  REP: ['dashboard', 'quotations', 'health'],
-  MANAGER: ['dashboard', 'quotations', 'approvals', 'health', 'reports', 'customers', 'policies'],
-  FINANCE: ['dashboard', 'approvals', 'fulfillment', 'invoices', 'reports'],
-};
 const ok = (req: AuthRequest, res: Response, data: unknown, status = 200) => res.status(status).json({ success: true, data, meta: { requestId: req.requestId } });
 const fail = (req: AuthRequest, res: Response, status: number, code: string, message: string, details?: unknown) => res.status(status).json({ success: false, error: { code, message, details }, meta: { requestId: req.requestId } });
 const decimal = (value: unknown) => Number(value);
@@ -347,7 +341,7 @@ async function authenticate(req: AuthRequest, res: Response, next: NextFunction)
 }
 
 const requireRole = (...roles: string[]) => (req: AuthRequest, res: Response, next: NextFunction) => roles.includes(req.user?.role ?? '') ? next() : fail(req, res, 403, 'FORBIDDEN', 'You do not have permission to perform this action.');
-const hasModule = (actor: Actor | undefined, module: typeof modules[number]) => actor?.role === 'ADMIN' || actor?.moduleAccess.includes(module);
+const hasModule = (actor: Actor | undefined, module: typeof modules[number]) => hasModuleAccess(actor,module);
 const requireModule = (module: typeof modules[number]) => (req: AuthRequest, res: Response, next: NextFunction) => hasModule(req.user, module) ? next() : fail(req, res, 403, 'FORBIDDEN', 'This module is not enabled for your account.');
 const requireCsrf = (req: AuthRequest, res: Response, next: NextFunction) => {
   if (req.user?.readOnlyView) return fail(req, res, 403, 'VIEW_AS_READ_ONLY', 'Exit View As mode before making changes.');
@@ -676,21 +670,22 @@ app.get('/api/v1/workspace', authenticate, async (req: AuthRequest, res) => {
   const portal = req.user!.role === 'CUSTOMER';
   if (portal && !req.user!.customerId) return fail(req, res, 403, 'FORBIDDEN', 'This portal account is not linked to a customer.');
   const quoteWhere = portal ? { organizationId: req.user!.organizationId, customerId: req.user!.customerId!, sentAt: { not: null } } : internalQuoteWhere(req.user!);
+  const dataAccess = workspaceDataAccess(req.user!);
   const repScopingEnabled = process.env.NODE_ENV !== 'production' || process.env.CUSTOMER_ASSIGNMENT_SCOPING_ENABLED === 'true';
   const workspaceCustomerScope = req.user!.role === 'REP' && !repScopingEnabled ? {} : customerRecordScope(req.user!);
   if (!portal && !req.user!.readOnlyView && hasModule(req.user, 'health')) await db.$transaction((tx) => evaluateAlerts(tx, req.user!.organizationId, quotationRecordScope(req.user!)));
   const [organization, users, customers, rawQuotes, products, policies, warehouses, rawSubscriptions, rawInvoices, alerts, audits] = await Promise.all([
     db.organization.findUnique({ where: { id: req.user!.organizationId }, select: { id: true, name: true, rfqHandlingMode: true } }),
     req.user!.role === 'ADMIN' ? db.organizationMembership.findMany({ where: { organizationId: req.user!.organizationId }, select: { accessRole: true, businessRole: true, status: true, createdAt: true, user: { select: { id: true, name: true, email: true, loginId: true, status: true, moduleAccess: true, createdAt: true } } }, orderBy: { createdAt: 'desc' } }).then((memberships) => memberships.map(({ user, ...membership }) => ({ ...user, role: membership.businessRole, membershipStatus: membership.status, accessRole: membership.accessRole, joinedAt: membership.createdAt }))) : [],
-    !portal && (hasModule(req.user, 'customers') || hasModule(req.user, 'invoices')) ? db.customer.findMany({ where: { organizationId: req.user!.organizationId, AND: [workspaceCustomerScope] }, include: { primarySalesTeam: { select: { id: true, name: true } }, assignments: { where: { active: true }, select: { role: true, assignedAt: true, user: { select: { id: true, name: true } } }, orderBy: { assignedAt: 'asc' } }, quotes: { select: { id: true, number: true, stage: true, total: true, version: true, ownerId: true, updatedAt: true }, orderBy: { updatedAt: 'desc' }, take: 20 }, invoices: { select: { id: true, number: true, state: true, amount: true, paidAmount: true, dueAt: true }, orderBy: { createdAt: 'desc' }, take: 5 }, users: { where: { role: 'CUSTOMER' }, select: { id: true, email: true, status: true, googleSubject: true } }, invitations: { orderBy: { createdAt: 'desc' }, take: 25, select: { id: true, email: true, status: true, expiresAt: true, acceptedAt: true, revokedAt: true, createdAt: true } } }, orderBy: { updatedAt: 'desc' } }) : [],
-    db.quote.findMany({ where: quoteWhere, include: { currentRevision: true, owner: { select: { id: true, name: true } }, lines: { include: { product: true } }, approvals: { orderBy: [{ cycle: 'desc' }, { sequence: 'asc' }] }, fulfillment: true, order: true, negotiation: { orderBy: { createdAt: 'desc' } }, invoices: true }, orderBy: { updatedAt: 'desc' } }),
-    !portal && (hasModule(req.user, 'products') || hasModule(req.user, 'invoices')) ? db.product.findMany({ where: { organizationId: req.user!.organizationId }, include: { stocks: { include: { warehouse: true } } }, orderBy: { name: 'asc' } }) : [],
-    !portal && hasModule(req.user, 'policies') ? db.discountPolicy.findMany({ where: { organizationId: req.user!.organizationId }, orderBy: { tier: 'asc' } }) : [],
-    !portal && hasModule(req.user, 'fulfillment') ? db.warehouse.findMany({ where: { organizationId: req.user!.organizationId }, include: { stocks: { include: { product: true } } }, orderBy: { priority: 'asc' } }) : [],
-    !portal && req.user!.role === 'ADMIN' ? db.subscription.findMany({ where: { organizationId: req.user!.organizationId }, include: { changes: { orderBy: { createdAt: 'desc' }, take: 50 } }, orderBy: { nextBillAt: 'asc' } }) : [],
-    (portal || hasModule(req.user, 'invoices')) ? db.invoice.findMany({ where: { organizationId: req.user!.organizationId, ...(portal ? { customerId: req.user!.customerId! } : req.user!.role === 'REP' ? { quote: { ownerId: req.user!.id } } : {}) }, include: { payments: true, notes: { orderBy: { createdAt: 'desc' } }, customerRecord: { select: { id: true, email: true, phone: true, countryCode: true, contactPerson: true, currency: true } }, quote: { select: { id: true, number: true, stage: true } }, order: { include: { fulfillment: true } } }, orderBy: { createdAt: 'desc' } }) : [],
-    !portal && (hasModule(req.user, 'health') || hasModule(req.user, 'quotations')) ? db.alert.findMany({ where: { organizationId: req.user!.organizationId, OR: [{ recipientId: null }, { recipientId: req.user!.id }] }, orderBy: { createdAt: 'desc' } }) : [],
-    !portal && (hasModule(req.user, 'reports') || hasModule(req.user, 'health')) ? db.auditEvent.findMany({ where: { organizationId: req.user!.organizationId, ...(req.user!.role === 'REP' ? { actorId: req.user!.id } : {}) }, orderBy: { createdAt: 'desc' }, take: 60 }) : [],
+    dataAccess.customers ? db.customer.findMany({ where: { organizationId: req.user!.organizationId, AND: [workspaceCustomerScope] }, include: { primarySalesTeam: { select: { id: true, name: true } }, assignments: { where: { active: true }, select: { role: true, assignedAt: true, user: { select: { id: true, name: true } } }, orderBy: { assignedAt: 'asc' } }, quotes: { select: { id: true, number: true, stage: true, total: true, version: true, ownerId: true, updatedAt: true }, orderBy: { updatedAt: 'desc' }, take: 20 }, invoices: { select: { id: true, number: true, state: true, amount: true, paidAmount: true, dueAt: true }, orderBy: { createdAt: 'desc' }, take: 5 }, users: { where: { role: 'CUSTOMER' }, select: { id: true, email: true, status: true, googleSubject: true } }, invitations: { orderBy: { createdAt: 'desc' }, take: 25, select: { id: true, email: true, status: true, expiresAt: true, acceptedAt: true, revokedAt: true, createdAt: true } } }, orderBy: { updatedAt: 'desc' } }) : [],
+    dataAccess.quotes ? db.quote.findMany({ where: quoteWhere, include: { currentRevision: true, owner: { select: { id: true, name: true } }, lines: { include: { product: true } }, approvals: { orderBy: [{ cycle: 'desc' }, { sequence: 'asc' }] }, fulfillment: true, order: true, negotiation: { orderBy: { createdAt: 'desc' } }, invoices: true }, orderBy: { updatedAt: 'desc' } }) : [],
+    dataAccess.products ? db.product.findMany({ where: { organizationId: req.user!.organizationId }, include: { stocks: { include: { warehouse: true } } }, orderBy: { name: 'asc' } }) : [],
+    dataAccess.policies ? db.discountPolicy.findMany({ where: { organizationId: req.user!.organizationId }, orderBy: { tier: 'asc' } }) : [],
+    dataAccess.warehouses ? db.warehouse.findMany({ where: { organizationId: req.user!.organizationId }, include: { stocks: { include: { product: true } } }, orderBy: { priority: 'asc' } }) : [],
+    dataAccess.subscriptions ? db.subscription.findMany({ where: { organizationId: req.user!.organizationId }, include: { changes: { orderBy: { createdAt: 'desc' }, take: 50 } }, orderBy: { nextBillAt: 'asc' } }) : [],
+    dataAccess.invoices ? db.invoice.findMany({ where: { organizationId: req.user!.organizationId, ...(portal ? { customerId: req.user!.customerId! } : req.user!.role === 'REP' ? { quote: { ownerId: req.user!.id } } : {}) }, include: { payments: true, notes: { orderBy: { createdAt: 'desc' } }, customerRecord: { select: { id: true, email: true, phone: true, countryCode: true, contactPerson: true, currency: true } }, quote: { select: { id: true, number: true, stage: true } }, order: { include: { fulfillment: true } } }, orderBy: { createdAt: 'desc' } }) : [],
+    dataAccess.alerts ? db.alert.findMany({ where: { organizationId: req.user!.organizationId, OR: [{ recipientId: null }, { recipientId: req.user!.id }] }, orderBy: { createdAt: 'desc' } }) : [],
+    dataAccess.audits ? db.auditEvent.findMany({ where: { organizationId: req.user!.organizationId, ...(req.user!.role === 'REP' ? { actorId: req.user!.id } : {}) }, orderBy: { createdAt: 'desc' }, take: 60 }) : [],
   ]);
   const quotes = portal ? rawQuotes.map(portalQuoteDto) : rawQuotes.map((quote) => ({ ...quote, riskBreakdown: approvalRiskBreakdown(quote) }));
   const invoices = portal ? rawInvoices.map(portalInvoiceDto) : rawInvoices.map(internalInvoiceDto);
