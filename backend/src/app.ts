@@ -29,6 +29,7 @@ import { convertLead, dismissLead, dismissLeadSchema, getLead, leadListSchema, l
 import { createRazorpayClient, paymentWebhookKey, readRazorpayConfiguration, rupeesToPaise, verifyCheckoutSignature, verifyWebhookSignature } from './payments.js';
 import { createCustomerProfile, customerCreationSchema, customerProfileSchema, CustomerProfileError } from './customers.js';
 import { approveDirectoryJoinRequest, approveDirectoryJoinRequestSchema, createDirectoryJoinRequest, declineDirectoryJoinRequest, declineDirectoryJoinRequestSchema, directoryJoinListSchema, directoryJoinRequestSchema, DirectoryError, getOrganizationDirectoryProfile, listDirectoryBusinesses, listDirectoryJoinRequests, organizationProfileSchema, updateOrganizationDirectoryProfile } from './directory.js';
+import { createSalesTeam, SalesTeamError, salesTeamMutationSchema, updateSalesTeam } from './sales-teams.js';
 
 type Actor = { id: string; name: string; email: string; loginId: string | null; role: string; customerId: string | null; organizationId: string; moduleAccess: string[]; csrfToken: string; actorType: 'USER' | 'PLATFORM_OWNER'; platformSuperAdmin: boolean; readOnlyView: boolean; organization: { id: string; name: string; status: string } | null; viewContext: { readOnly: true; organizationId: string; organizationName: string; simulatedUserId: string | null; realActor: { id: string; name: string } } | null };
 type AuthRequest = Request & { user?: Actor; requestId?: string };
@@ -824,12 +825,26 @@ app.get('/api/v1/customers', authenticate, requireModule('quotations'), requireR
 });
 
 app.get('/api/v1/sales-teams', authenticate, requireModule('customers'), requireRole('MANAGER', 'ADMIN'), async (req: AuthRequest, res) => {
-  const teams = await db.salesTeam.findMany({
-    where: { organizationId: req.user!.organizationId, ...(req.user!.role === 'MANAGER' ? { managerId: req.user!.id } : {}) },
-    select: { id: true, name: true, managerId: true, members: { where: { user: { status: 'ACTIVE', role: 'REP' } }, select: { user: { select: { id: true, name: true } } }, orderBy: { user: { name: 'asc' } } } },
-    orderBy: { name: 'asc' },
+  const [teams, representatives, managers] = await Promise.all([
+    db.salesTeam.findMany({
+      where: { organizationId: req.user!.organizationId, ...(req.user!.role === 'MANAGER' ? { managerId: req.user!.id } : {}) },
+      select: {
+        id: true,
+        name: true,
+        managerId: true,
+        manager: { select: { id: true, name: true } },
+        members: { where: { user: { status: 'ACTIVE', role: 'REP' } }, select: { user: { select: { id: true, name: true } } }, orderBy: { user: { name: 'asc' } } },
+      },
+      orderBy: { name: 'asc' },
+    }),
+    req.user!.role === 'ADMIN' ? db.user.findMany({ where: { organizationId: req.user!.organizationId, status: 'ACTIVE', role: 'REP' }, select: { id: true, name: true }, orderBy: { name: 'asc' } }) : [],
+    req.user!.role === 'ADMIN' ? db.user.findMany({ where: { organizationId: req.user!.organizationId, status: 'ACTIVE', role: { in: ['MANAGER', 'ADMIN'] } }, select: { id: true, name: true }, orderBy: { name: 'asc' } }) : [],
+  ]);
+  return ok(req, res, {
+    items: teams.map((team) => ({ id: team.id, name: team.name, managerId: team.managerId, manager: team.manager, representatives: team.members.map((member) => member.user) })),
+    canManage: req.user!.role === 'ADMIN',
+    options: { representatives, managers },
   });
-  return ok(req, res, { items: teams.map((team) => ({ id: team.id, name: team.name, managerId: team.managerId, representatives: team.members.map((member) => member.user) })) });
 });
 
 app.get('/api/v1/directory/join-requests', authenticate, requireModule('customers'), requireRole('MANAGER', 'ADMIN'), async (req: AuthRequest, res) => {
@@ -860,18 +875,16 @@ app.put('/api/v1/customers/:id/relationships', authenticate, requireModule('cust
   } catch (error) { return next(error); }
 });
 
-app.post('/api/v1/sales-teams',authenticate,requireModule('quotations'),requireRole('ADMIN'),requireCsrf,async(req:AuthRequest,res)=>{
-  const parsed=z.object({name:z.string().trim().min(2).max(120),managerId:z.string().uuid().nullable(),memberIds:z.array(z.string().uuid()).max(200).default([])}).strict().safeParse(req.body);
-  if(!parsed.success)return fail(req,res,422,'VALIDATION_ERROR','Enter a team name and valid organization members.',parsed.error.flatten());
-  const ids=[...new Set([...(parsed.data.managerId?[parsed.data.managerId]:[]),...parsed.data.memberIds])];
-  const people=ids.length?await db.user.findMany({where:{id:{in:ids},organizationId:req.user!.organizationId,status:'ACTIVE',role:{in:['REP','MANAGER','ADMIN']}},select:{id:true,role:true}}):[];
-  if(people.length!==ids.length)return fail(req,res,422,'VALIDATION_ERROR','One or more selected team members are unavailable.');
-  const manager=parsed.data.managerId?people.find(person=>person.id===parsed.data.managerId):null;
-  if(manager&&!['MANAGER','ADMIN'].includes(manager.role))return fail(req,res,422,'VALIDATION_ERROR','A sales team manager must have the Manager or Administrator role.');
-  const duplicate=await db.salesTeam.findFirst({where:{organizationId:req.user!.organizationId,name:{equals:parsed.data.name,mode:'insensitive'}},select:{id:true}});
-  if(duplicate)return fail(req,res,409,'DUPLICATE_TEAM','A sales team with this name already exists.');
-  const team=await db.$transaction(async(tx)=>{const created=await tx.salesTeam.create({data:{organizationId:req.user!.organizationId,name:parsed.data.name,managerId:parsed.data.managerId,members:{create:ids.map(userId=>({userId}))}}});await audit(tx,req,'SALES_TEAM_CREATED','SalesTeam',created.id,parsed.data.name);return created});
-  return ok(req,res,{id:team.id,name:team.name,managerId:team.managerId,memberIds:ids},201);
+app.post('/api/v1/sales-teams',authenticate,requireModule('quotations'),requireRole('ADMIN'),requireCsrf,async(req:AuthRequest,res,next)=>{
+  const parsed=salesTeamMutationSchema.safeParse(req.body);
+  if(!parsed.success)return fail(req,res,422,'VALIDATION_ERROR','Enter a team name and select at least one active sales representative.',parsed.error.flatten());
+  try{return ok(req,res,await createSalesTeam(db,{id:req.user!.id,role:req.user!.role,organizationId:req.user!.organizationId,requestId:req.requestId},parsed.data),201)}catch(error){return next(error)}
+});
+
+app.patch('/api/v1/sales-teams/:id',authenticate,requireModule('quotations'),requireRole('ADMIN'),requireCsrf,async(req:AuthRequest,res,next)=>{
+  const parsed=salesTeamMutationSchema.safeParse(req.body);
+  if(!parsed.success)return fail(req,res,422,'VALIDATION_ERROR','Enter a team name and select at least one active sales representative.',parsed.error.flatten());
+  try{return ok(req,res,await updateSalesTeam(db,{id:req.user!.id,role:req.user!.role,organizationId:req.user!.organizationId,requestId:req.requestId},routeParam(req,'id'),parsed.data))}catch(error){return next(error)}
 });
 
 app.get('/api/v1/quotations', authenticate, requireModule('quotations'), requireRole('REP', 'MANAGER', 'FINANCE', 'ADMIN'), async (req: AuthRequest, res) => {
@@ -1934,6 +1947,7 @@ app.use((error: unknown, req: AuthRequest, res: Response, _next: NextFunction) =
   }
   if (error instanceof CustomerProfileError) return fail(req, res, error.status, error.code, error.message);
   if (error instanceof QuotationCreationError) return fail(req, res, error.status, error.code, error.message);
+  if (error instanceof SalesTeamError) return fail(req, res, error.status, error.code, error.message);
   if (error instanceof DomainError) return fail(req, res, error.status, error.code, error.message);
   console.error(JSON.stringify({ level: 'error', requestId: req.requestId, route: req.path, error: error instanceof Error ? error.name : 'UnknownError' }));
   return fail(req, res, 500, 'INTERNAL_ERROR', 'The request could not be completed.');

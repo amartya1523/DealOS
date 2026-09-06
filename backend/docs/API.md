@@ -208,26 +208,27 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 
 ### AUTH-09 — Create a sales team
 
-- **Method/path:** `POST /api/v1/admin/teams`
-- **Purpose:** Create a sales team.
+- **Method/path:** `POST /api/v1/sales-teams`
+- **Purpose:** Create one named team and place multiple sales representatives on it in a single action.
 - **Actor / authorization:** Admin; resource scope and global restrictions above apply.
 - **Authentication:** Active database-backed session required.
-- **Request:** `{name, memberIds}`.
-- **Validation:** unique name; members active internal identities.
-- **Response:** 201 TeamDTO.
+- **Request:** `{name, managerId:null|string, memberIds:string[]}`. `memberIds` is the complete selected Rep list.
+- **Validation:** organization-scoped, case-insensitively unique name; 1–200 distinct active Rep identities; optional manager must be an active Manager or Admin in the same organization.
+- **Response:** 201 `{id,name,managerId,memberIds}`.
 - **Errors:** common error contract above; validation, permission, lifecycle and concurrency conditions are enforced before commit.
 - **Business rules:** R-004, BR-017.
 
 ### AUTH-10 — Update team membership
 
-- **Method/path:** `PATCH /api/v1/admin/teams/:id`
-- **Purpose:** Update team membership.
+- **Method/path:** `PATCH /api/v1/sales-teams/:id`
+- **Purpose:** Rename a team, change its manager, and replace its complete Rep membership from the simple team editor.
 - **Actor / authorization:** Admin; resource scope and global restrictions above apply.
 - **Authentication:** Active database-backed session required.
-- **Request:** `{expectedVersion, name?, memberIds?, active?}`.
-- **Validation:** valid internal identities; do not remove last access path to owned active deals without reassignment.
-- **Response:** 200 TeamDTO.
+- **Request:** `{name, managerId:null|string, memberIds:string[]}`. All fields describe the desired final team state.
+- **Validation:** same organization, name and identity rules as AUTH-09. A Rep cannot be removed while actively assigned to a customer on the team or while owning a non-confirmed/non-rejected quotation for it; reassign that work first.
+- **Response:** 200 `{id,name,managerId,memberIds}`.
 - **Errors:** common error contract above; validation, permission, lifecycle and concurrency conditions are enforced before commit.
+- **Audit:** successful create/update writes `SALES_TEAM_CREATED` / `SALES_TEAM_UPDATED`; a rejected removal changes nothing.
 - **Business rules:** R-004, BR-017.
 
 ### CAT-01 — Find accessible buying businesses

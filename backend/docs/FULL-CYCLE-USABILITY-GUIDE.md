@@ -76,10 +76,23 @@ Sign in at `/sign-in` as `admin@dealos.demo` and confirm:
 3. **Rules** contains Bronze, Silver, and Gold policies with different line limits and Finance thresholds.
 4. **Customers → Acme Corp** shows the Enterprise Sales team, Aarav as primary rep, Leena as collaborator, portal history, and commercial history.
 5. **Fulfillment** shows Main Warehouse, East Depot, and South Hub with on-hand, reserved, and available quantities.
-6. **User access** shows every active role plus the intentionally pending teammate.
+6. **User access** shows every active role plus the intentionally pending teammate. Its **Sales teams** section shows Enterprise Sales with Aarav and Leena under Maya.
 7. The public **Business directory** shows DealOS Demo Commerce and Northstar Distribution without exposing catalog prices, costs, stock, customers, users, or policies.
 
 Usability questions: Can you tell where you are, what the next useful action is, and why some actions are unavailable without reading source code?
+
+### Test the simple multi-Rep team editor
+
+Stay signed in as `admin@dealos.demo` and open **User access → Sales teams**.
+
+1. Click **Create team**, enter `Field Sales Test`, select Maya Shah as manager, tick both Aarav Mehta and Leena Iyer, and click **Create team**.
+2. Confirm the new card says **2 sales representatives** and lists both names.
+3. Click **Edit team**, untick Leena, and save. Confirm the card now lists only Aarav and says **1 sales representative**.
+4. Edit the new team again, add Leena back, and save. This verifies that the same Rep can participate in more than one team.
+5. Edit **Enterprise Sales**, untick Aarav, and try to save. The save must be rejected with a message telling you to reassign Aarav's customer or active deal work first. Tick him again or cancel so the seeded workflow is unchanged.
+6. Refresh the page and confirm every successful membership change persisted. Run the reset in section 10 when you want to remove the test team and restore the original seed.
+
+Pass condition: an Admin can create or edit a team without leaving User access, select multiple active Reps with checkboxes, choose an optional manager, and understand exactly how to recover from a protected removal. Pending users and non-Rep roles never appear in the Rep picker.
 
 ## 4. Run the complete happy path with Q-0102
 
