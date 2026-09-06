@@ -19,6 +19,13 @@ describe('customer portal quotation boundary', () => {
     expect(dto.capabilities).toMatchObject({ comment: true, accept: true, propose: true });
   });
 
+  it('normalizes legacy snapshots from the linked product without exposing cost', () => {
+    const legacyRevision = { ...revision, linesSnapshot: [{ productId: 'product-1', quantity: 2, unitPrice: 100 }] };
+    const dto = customerSafeQuotationDto({ id: 'quote-1', number: 'Q-1', customer: 'Acme', customerTier: 'Gold', stage: 'APPROVED', version: 4, sentAt: revision.sentAt, currentRevision: legacyRevision, negotiation: [], order: null, lines: [{ productId: 'product-1', quantity: 2, unitPrice: 100, discount: 0, product: { name: 'Legacy laptop', sku: 'LEG-1', category: 'Hardware', description: 'Recovered catalog identity', taxRate: 18, recurring: false } }] });
+    expect(dto.lines[0]).toMatchObject({ quantity: 2, gross: '200', net: '200', tax: '36', product: { name: 'Legacy laptop', sku: 'LEG-1' } });
+    expect(JSON.stringify(dto)).not.toContain('cost');
+  });
+
   it('rejects stale and superseded revisions', () => {
     const quote = { version: 4, stage: 'APPROVED', sentAt: revision.sentAt, currentRevisionId: revision.id, currentRevision: revision, order: null };
     expect(() => requireExactSentRevision(quote, { revisionId: revision.id, expectedVersion: 3 })).toThrowError(PortalError);

@@ -31,7 +31,8 @@ describe('continuing operations', () => {
     expect(report.rows[0]).toMatchObject({ total: 354, invoiced: 354, paid: 100, outstanding: 254 });
     expect(report.totalsByCurrency.INR).toMatchObject({ sales: 354, outstanding: 254 });
     expect(reportAsPdf(report).subarray(0, 4).toString()).toBe('%PDF');
-    expect(reportAsXls(report).toString()).toContain('SO-1');
+    const workbook = await reportAsXls(report);
+    expect(workbook.subarray(0,2).toString()).toBe('PK');
   });
 
   it('does not expose a customer portal payment-processing route', async () => {

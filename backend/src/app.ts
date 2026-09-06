@@ -20,7 +20,7 @@ import { acceptPortalInvitation, assertCustomerCreationPortalAccess, inspectPort
 import { createReturnedDraft, decideStep, evaluateRisk, GovernanceError, openCase } from './governance.js';
 import { customerSafeQuotationDto, idempotencyKey, PortalError, portalAcceptSchema, portalCommentSchema, portalProposalSchema, proposalResponseSchema, requireExactSentRevision, sendQuotationSchema } from './portal.js';
 import { confirmEligibleRevision, OrderConfirmationError } from './orders.js';
-import { BillingError, changeSubscription, recordPayment, requestInvoiceDueDateChange, reversePayment } from './billing.js';
+import { BillingError, changeSubscription, recordPayment, requestInvoiceDueDateChange, reversePayment, runRecurringBilling } from './billing.js';
 import { evaluateAlerts } from './deal-health.js';
 import { aggregateSales, reportAsPdf, reportAsXls } from './reporting.js';
 import { consolidateBackorder, consolidateSchema, FulfillmentError, previewSplit, receiveStock, receiveStockSchema, reserveStock, reserveStockSchema } from './fulfillment.js';
@@ -31,6 +31,7 @@ import { createCustomerProfile, customerCreationSchema, customerProfileSchema, C
 import { approveDirectoryJoinRequest, approveDirectoryJoinRequestSchema, createDirectoryJoinRequest, declineDirectoryJoinRequest, declineDirectoryJoinRequestSchema, directoryJoinListSchema, directoryJoinRequestSchema, DirectoryError, getOrganizationDirectoryProfile, listDirectoryBusinesses, listDirectoryJoinRequests, organizationProfileSchema, updateOrganizationDirectoryProfile } from './directory.js';
 import { createSalesTeam, SalesTeamError, salesTeamMutationSchema, updateSalesTeam } from './sales-teams.js';
 import { hasModuleAccess, provisionableRoles, roleModulePresets, workspaceDataAccess, workspaceModules as modules } from './access-policy.js';
+import { shipOrder, ShipmentError, shipOrderSchema } from './shipments.js';
 
 type Actor = { id: string; name: string; email: string; loginId: string | null; role: string; customerId: string | null; organizationId: string; moduleAccess: string[]; csrfToken: string; actorType: 'USER' | 'PLATFORM_OWNER'; platformSuperAdmin: boolean; readOnlyView: boolean; organization: { id: string; name: string; status: string } | null; viewContext: { readOnly: true; organizationId: string; organizationName: string; simulatedUserId: string | null; realActor: { id: string; name: string } } | null };
 type AuthRequest = Request & { user?: Actor; requestId?: string };
@@ -431,7 +432,7 @@ function internalInvoiceDto(invoice: any) {
   return {
     ...invoice,
     currency: invoice.currency,
-    credits: [],
+    credits: invoice.credits ?? [],
   };
 }
 
@@ -569,6 +570,23 @@ app.post('/api/v1/auth/login', async (req: AuthRequest, res) => {
   return ok(req, res, { id: user.id, name: user.name, email: user.email, role: user.role, customerId: user.customerId, csrfToken: csrfForToken(token) });
 });
 
+app.post('/api/v1/auth/password/forgot',async(req:AuthRequest,res)=>{
+  if(req.headers.origin!==allowedOrigin)return fail(req,res,403,'ORIGIN_INVALID','This request origin is not allowed.');
+  const parsed=z.object({email:z.string().trim().email().toLowerCase()}).strict().safeParse(req.body);if(!parsed.success)return fail(req,res,422,'VALIDATION_ERROR','Enter a valid account email.');
+  const user=await db.user.findUnique({where:{email:parsed.data.email}});let resetToken:string|undefined;
+  if(user&&user.status==='ACTIVE'&&user.organizationId){resetToken=crypto.randomBytes(32).toString('hex');await db.passwordResetToken.create({data:{organizationId:user.organizationId,userId:user.id,tokenHash:hash(resetToken),expiresAt:new Date(Date.now()+30*60_000)}});await db.auditEvent.create({data:{organizationId:user.organizationId,actorId:user.id,action:'PASSWORD_RESET_REQUESTED',resource:'User',resourceId:user.id,requestId:req.requestId,reason:'A time-limited password reset was requested.'}});}
+  return ok(req,res,{accepted:true,...(process.env.NODE_ENV==='development'&&resetToken?{resetToken}: {})});
+});
+
+app.post('/api/v1/auth/password/reset',async(req:AuthRequest,res)=>{
+  if(req.headers.origin!==allowedOrigin)return fail(req,res,403,'ORIGIN_INVALID','This request origin is not allowed.');
+  const parsed=z.object({token:z.string().min(32).max(256),password:z.string().min(12).max(128)}).strict().safeParse(req.body);if(!parsed.success)return fail(req,res,422,'VALIDATION_ERROR','Enter a valid reset token and a password of at least 12 characters.');
+  const record=await db.passwordResetToken.findUnique({where:{tokenHash:hash(parsed.data.token)},include:{user:true}});if(!record||record.usedAt||record.expiresAt<=new Date()||record.user.status!=='ACTIVE'||!record.user.organizationId)return fail(req,res,410,'RESET_TOKEN_INVALID','This reset link is invalid or expired.');
+  const resetOrganizationId=record.user.organizationId;
+  await db.$transaction(async tx=>{await tx.passwordResetToken.update({where:{id:record.id},data:{usedAt:new Date()}});await tx.user.update({where:{id:record.userId},data:{passwordHash:await bcrypt.hash(parsed.data.password,12)}});await tx.session.deleteMany({where:{userId:record.userId}});await tx.auditEvent.create({data:{organizationId:resetOrganizationId,actorId:record.userId,action:'PASSWORD_RESET_COMPLETED',resource:'User',resourceId:record.userId,requestId:req.requestId,reason:'Password reset completed; prior sessions revoked.'}})});
+  return ok(req,res,{reset:true});
+});
+
 app.post('/api/v1/auth/super-admin/login', async (req: AuthRequest, res) => {
   if (req.headers.origin !== allowedOrigin) return fail(req, res, 403, 'ORIGIN_INVALID', 'This request origin is not allowed.');
   const parsed = z.object({ loginId: z.string().trim().min(1).max(200), password: z.string().min(1).max(256) }).strict().safeParse(req.body);
@@ -679,11 +697,11 @@ app.get('/api/v1/workspace', authenticate, async (req: AuthRequest, res) => {
     req.user!.role === 'ADMIN' ? db.organizationMembership.findMany({ where: { organizationId: req.user!.organizationId }, select: { accessRole: true, businessRole: true, status: true, createdAt: true, user: { select: { id: true, name: true, email: true, loginId: true, status: true, moduleAccess: true, createdAt: true } } }, orderBy: { createdAt: 'desc' } }).then((memberships) => memberships.map(({ user, ...membership }) => ({ ...user, role: membership.businessRole, membershipStatus: membership.status, accessRole: membership.accessRole, joinedAt: membership.createdAt }))) : [],
     dataAccess.customers ? db.customer.findMany({ where: { organizationId: req.user!.organizationId, AND: [workspaceCustomerScope] }, include: { primarySalesTeam: { select: { id: true, name: true } }, assignments: { where: { active: true }, select: { role: true, assignedAt: true, user: { select: { id: true, name: true } } }, orderBy: { assignedAt: 'asc' } }, quotes: { select: { id: true, number: true, stage: true, total: true, version: true, ownerId: true, updatedAt: true }, orderBy: { updatedAt: 'desc' }, take: 20 }, invoices: { select: { id: true, number: true, state: true, amount: true, paidAmount: true, dueAt: true }, orderBy: { createdAt: 'desc' }, take: 5 }, users: { where: { role: 'CUSTOMER' }, select: { id: true, email: true, status: true, googleSubject: true } }, invitations: { orderBy: { createdAt: 'desc' }, take: 25, select: { id: true, email: true, status: true, expiresAt: true, acceptedAt: true, revokedAt: true, createdAt: true } } }, orderBy: { updatedAt: 'desc' } }) : [],
     dataAccess.quotes ? db.quote.findMany({ where: quoteWhere, include: { currentRevision: true, owner: { select: { id: true, name: true } }, lines: { include: { product: true } }, approvals: { orderBy: [{ cycle: 'desc' }, { sequence: 'asc' }] }, fulfillment: true, order: true, negotiation: { orderBy: { createdAt: 'desc' } }, invoices: true }, orderBy: { updatedAt: 'desc' } }) : [],
-    dataAccess.products ? db.product.findMany({ where: { organizationId: req.user!.organizationId }, include: { stocks: { include: { warehouse: true } } }, orderBy: { name: 'asc' } }) : [],
+    dataAccess.products ? db.product.findMany({ where: { organizationId: req.user!.organizationId }, include: { variants:{orderBy:{name:'asc'}},priceListItems:{include:{priceList:true}},stocks: { include: { warehouse: true } } }, orderBy: { name: 'asc' } }) : [],
     dataAccess.policies ? db.discountPolicy.findMany({ where: { organizationId: req.user!.organizationId }, orderBy: { tier: 'asc' } }) : [],
     dataAccess.warehouses ? db.warehouse.findMany({ where: { organizationId: req.user!.organizationId }, include: { stocks: { include: { product: true } } }, orderBy: { priority: 'asc' } }) : [],
     dataAccess.subscriptions ? db.subscription.findMany({ where: { organizationId: req.user!.organizationId }, include: { changes: { orderBy: { createdAt: 'desc' }, take: 50 } }, orderBy: { nextBillAt: 'asc' } }) : [],
-    dataAccess.invoices ? db.invoice.findMany({ where: { organizationId: req.user!.organizationId, ...(portal ? { customerId: req.user!.customerId! } : req.user!.role === 'REP' ? { quote: { ownerId: req.user!.id } } : {}) }, include: { payments: true, notes: { orderBy: { createdAt: 'desc' } }, customerRecord: { select: { id: true, email: true, phone: true, countryCode: true, contactPerson: true, currency: true } }, quote: { select: { id: true, number: true, stage: true } }, order: { include: { fulfillment: true } } }, orderBy: { createdAt: 'desc' } }) : [],
+    dataAccess.invoices ? db.invoice.findMany({ where: { organizationId: req.user!.organizationId, ...(portal ? { customerId: req.user!.customerId! } : req.user!.role === 'REP' ? { quote: { ownerId: req.user!.id } } : {}) }, include: { payments: true, credits: { orderBy: { createdAt: 'desc' } }, notes: { orderBy: { createdAt: 'desc' } }, customerRecord: { select: { id: true, email: true, phone: true, countryCode: true, contactPerson: true, currency: true } }, quote: { select: { id: true, number: true, stage: true } }, order: { include: { fulfillment: true } } }, orderBy: { createdAt: 'desc' } }) : [],
     dataAccess.alerts ? db.alert.findMany({ where: { organizationId: req.user!.organizationId, OR: [{ recipientId: null }, { recipientId: req.user!.id }] }, orderBy: { createdAt: 'desc' } }) : [],
     dataAccess.audits ? db.auditEvent.findMany({ where: { organizationId: req.user!.organizationId, ...(req.user!.role === 'REP' ? { actorId: req.user!.id } : {}) }, orderBy: { createdAt: 'desc' }, take: 60 }) : [],
   ]);
@@ -695,7 +713,9 @@ app.get('/api/v1/workspace', authenticate, async (req: AuthRequest, res) => {
     const primary = customer.assignments.find((assignment) => assignment.role === 'PRIMARY');
     return { ...customer, invitations: customer.invitations.map((invitation) => ({ ...invitation, invitedAt: invitation.createdAt, status: invitation.status === 'PENDING' && invitation.expiresAt <= new Date() ? 'EXPIRED' : invitation.status })), primaryTeam: customer.primarySalesTeam, primaryRepresentative: primary ? { ...primary.user, assignedAt: primary.assignedAt.toISOString() } : null, collaborators: customer.assignments.filter((assignment) => assignment.role === 'COLLABORATOR').map((assignment) => ({ ...assignment.user, assignedAt: assignment.assignedAt.toISOString() })), openQuotationCount: customer.quotes.filter((quote) => !['CONFIRMED','REJECTED'].includes(quote.stage)).length, lastActivity: customer.quotes[0]?.updatedAt.toISOString() ?? customer.updatedAt.toISOString() };
   });
-  return ok(req, res, { user: req.user, organization, users, customers: customerDtos, quotes, products, policies, warehouses: warehouseDtos, subscriptions, invoices, alerts, audits });
+  const priceLists=dataAccess.products?await db.priceList.findMany({where:{organizationId:req.user!.organizationId},include:{items:{include:{product:{select:{id:true,name:true,sku:true}},variant:{select:{id:true,name:true,sku:true}}}}},orderBy:{name:'asc'}}):[];
+  const notifications=!portal?await db.notification.findMany({where:{recipientId:req.user!.id},orderBy:{createdAt:'desc'},take:100}):[];
+  return ok(req, res, { user: req.user, organization, users, customers: customerDtos, quotes, products,priceLists, policies, warehouses: warehouseDtos, subscriptions, invoices, alerts,notifications, audits });
 });
 
 app.post('/api/v1/customers', authenticate, requireModule('customers'), requireRole('ADMIN', 'MANAGER'), requireCsrf, async (req: AuthRequest, res) => {
@@ -924,29 +944,31 @@ app.get('/api/v1/quotations/:id', authenticate, requireModule('quotations'), req
       team: { select: { id: true, name: true, managerId: true } },
       currentRevision: true,
       revisions: { orderBy: { revisionNumber: 'desc' } },
-      lines: { include: { product: true } },
+      lines: { include: { product: true,variant:true } },
       approvals: { include: { reviewer: { select: { id: true, name: true } }, revision: { select: { submittedById: true } } }, orderBy: [{ cycle: 'desc' }, { sequence: 'asc' }] },
       approvalCases: { orderBy: { cycle: 'desc' }, take: 10 },
       negotiation: { orderBy: { createdAt: 'desc' } },
       order: { select: { id: true, number: true, state: true } },
       invoices: { select: { id: true, number: true, state: true } },
       sourcePortalRequest: { include: { lines: { include: { product: { select: { id: true, name: true, sku: true } } }, orderBy: { id: 'asc' } } } },
+      recommendationActions:true,
     },
   });
   if (!quote || !(await canAccessInternalQuote(req.user!, quote))) return fail(req, res, 404, 'NOT_FOUND', 'Quotation not found.');
   const capabilities = quotationCapabilities(req.user!, quote);
-  const [activity, teams, owners, managers, submittedBy, catalog, viewerAssignment, activePolicy] = await Promise.all([
+  const [activity, teams, owners, managers, submittedBy, catalog, viewerAssignment, activePolicy,priceLists] = await Promise.all([
     db.auditEvent.findMany({ where: { organizationId: req.user!.organizationId, resource: 'Quote', resourceId: quote.id }, include: { actor: { select: { id: true, name: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }),
     db.salesTeam.findMany({ where: { organizationId: req.user!.organizationId, ...(req.user!.role === 'MANAGER' ? { managerId: req.user!.id } : {}) }, select: { id: true, name: true, managerId: true, members: { select: { userId: true } } }, orderBy: { name: 'asc' } }),
     db.user.findMany({ where: { organizationId: req.user!.organizationId, status: 'ACTIVE', role: 'REP' }, select: { id: true, name: true, role: true }, orderBy: { name: 'asc' } }),
     db.user.findMany({ where: { organizationId: req.user!.organizationId, status: 'ACTIVE', role: { in: ['MANAGER','ADMIN'] } }, select: { id: true, name: true, role: true }, orderBy: { name: 'asc' } }),
     quote.currentRevision?.submittedById ? db.user.findUnique({ where: { id: quote.currentRevision.submittedById }, select: { id: true, name: true } }) : Promise.resolve(null),
-    db.product.findMany({where:{organizationId:req.user!.organizationId,active:true},select:{id:true,name:true,sku:true,category:true,description:true,unit:true,price:true,cost:true,taxRate:true,recurring:true,cadence:true,active:true},orderBy:{name:'asc'}}),
+    db.product.findMany({where:{organizationId:req.user!.organizationId,active:true},select:{id:true,name:true,sku:true,category:true,description:true,unit:true,price:true,cost:true,taxRate:true,recurring:true,cadence:true,active:true,variants:{where:{active:true},orderBy:{name:'asc'}}},orderBy:{name:'asc'}}),
     req.user!.role === 'REP' ? db.customerRepresentative.findFirst({ where: { customerId: quote.customerId, userId: req.user!.id, active: true }, select: { role: true } }) : Promise.resolve(null),
     db.discountPolicy.findFirst({where:{organizationId:req.user!.organizationId,tier:quote.customerTier}}),
+    db.priceList.findMany({where:{organizationId:req.user!.organizationId,active:true,OR:[{customerTier:null},{customerTier:quote.customerTier}],currency:quote.customerRecord.currency},include:{items:true},orderBy:{name:'asc'}}),
   ]);
   const lines = quote.lines.map((line) => ({
-    id: line.id, productId: line.productId, quantity: line.quantity, unitPrice: line.unitPrice.toString(),
+    id: line.id, productId: line.productId,variantId:line.variantId,variant:line.variant, quantity: line.quantity, unitPrice: line.unitPrice.toString(),
     ...(capabilities.viewCost ? { unitCost: line.unitCost.toString() } : {}), discount: line.discount.toString(), allowedDiscount: line.allowedDiscount.toString(),
     product: { id: line.product.id, name: line.product.name, sku: line.product.sku, category: line.product.category, description: line.product.description, unit: line.product.unit, price: line.product.price.toString(), ...(capabilities.viewCost ? { cost: line.product.cost.toString() } : {}), taxRate: line.product.taxRate.toString(), recurring: line.product.recurring, cadence: line.product.cadence, active: line.product.active },
   }));
@@ -970,8 +992,9 @@ app.get('/api/v1/quotations/:id', authenticate, requireModule('quotations'), req
     revisions: revisionHistory(quote.revisions, capabilities.viewMargin, capabilities.viewCost),
     activity: activity.map((event)=>({ id:event.id, action:event.action, reason:event.reason, revisionId:event.revisionId, actor:event.actor??{id:'system',name:'System'}, createdAt:event.createdAt.toISOString() })),
     assignmentOptions: { teams: teams.map((team)=>({id:team.id,name:team.name,managerId:team.managerId,memberIds:team.members.map((member)=>member.userId)})), owners, managers, canCreateTeam:req.user!.role==='ADMIN'&&!req.user!.readOnlyView },
-    catalog:catalog.map((product)=>({id:product.id,name:product.name,sku:product.sku,category:product.category,description:product.description,unit:product.unit,price:product.price.toString(),...(capabilities.viewCost?{cost:product.cost.toString()}:{}),taxRate:product.taxRate.toString(),recurring:product.recurring,cadence:product.cadence,active:product.active})),
-    addOns:activePolicy?catalog.filter((product)=>!quote.lines.some((line)=>line.productId===product.id)).map((product)=>{const contribution=calculateAddOnContribution({productId:product.id,quantity:1,unitPrice:product.price,unitCost:product.cost,discount:0,allowedDiscount:allowedDiscountForCategory(product.category,activePolicy),taxRate:product.taxRate,cadence:product.recurring?product.cadence:'One-time'},quote.orderDiscount,{financeThreshold:activePolicy.financeThreshold,aggregateDiscountLimit:activePolicy.aggregateDiscountLimit,minimumMarginPercent:activePolicy.minimumMarginPercent});return{id:product.id,name:product.name,sku:product.sku,category:product.category,cadence:contribution.cadence,marginContribution:String(contribution.marginContribution),netContribution:String(contribution.netContribution)}}):[],
+    priceListId:quote.priceListId,priceLists:priceLists.map(list=>({id:list.id,name:list.name,currency:list.currency,customerTier:list.customerTier})),
+    catalog:catalog.map((product)=>({id:product.id,name:product.name,sku:product.sku,category:product.category,description:product.description,unit:product.unit,price:product.price.toString(),...(capabilities.viewCost?{cost:product.cost.toString()}:{}),taxRate:product.taxRate.toString(),recurring:product.recurring,cadence:product.cadence,active:product.active,variants:product.variants.map(variant=>({id:variant.id,name:variant.name,sku:variant.sku,attributes:variant.attributes,priceDelta:variant.priceDelta.toString(),costDelta:variant.costDelta.toString(),active:variant.active}))})),
+    addOns:activePolicy?catalog.filter((product)=>!quote.lines.some((line)=>line.productId===product.id)&&!quote.recommendationActions.some(action=>action.productId===product.id&&action.action==='DISMISSED')).map((product)=>{const contribution=calculateAddOnContribution({productId:product.id,quantity:1,unitPrice:product.price,unitCost:product.cost,discount:0,allowedDiscount:allowedDiscountForCategory(product.category,activePolicy),taxRate:product.taxRate,cadence:product.recurring?product.cadence:'One-time'},quote.orderDiscount,{financeThreshold:activePolicy.financeThreshold,aggregateDiscountLimit:activePolicy.aggregateDiscountLimit,minimumMarginPercent:activePolicy.minimumMarginPercent});const categoryAffinity=quote.lines.filter(line=>line.product.category===product.category).length;const score=Number(contribution.marginContribution)+categoryAffinity*100;return{id:product.id,name:product.name,sku:product.sku,category:product.category,cadence:contribution.cadence,marginContribution:String(contribution.marginContribution),netContribution:String(contribution.netContribution),score,reason:categoryAffinity?`Matches ${categoryAffinity} selected ${product.category.toLowerCase()} line(s) and preserves ${contribution.marginContribution.toFixed(2)} margin.`:`Adds ${contribution.marginContribution.toFixed(2)} margin without breaching the current policy preview.`}}).sort((a,b)=>b.score-a.score):[],
     negotiation: quote.negotiation, order: quote.order, invoices: quote.invoices,
     origin: quote.sourcePortalRequest ? { type: 'PORTAL_REQUEST', request: { id: quote.sourcePortalRequest.id, requirementsText: quote.sourcePortalRequest.requirementsText, preferredDeliveryDate: quote.sourcePortalRequest.preferredDeliveryDate?.toISOString()??null, createdAt: quote.sourcePortalRequest.createdAt.toISOString(), lines: quote.sourcePortalRequest.lines.map((line) => ({ id: line.id, product: line.product, freeTextDescription: line.freeTextDescription, quantity: line.quantity?.toString()??null, degraded: line.degraded, degradedReason: line.degradedReason })) } } : { type: 'INTERNAL' },
   });
@@ -997,6 +1020,15 @@ app.patch('/api/v1/quotations/:id/assignment', authenticate, requireModule('quot
     return {owner:{id:owner.id,name:owner.name},team:team?{id:team.id,name:team.name}:null};
   });
   return ok(req,res,updated);
+});
+
+app.post('/api/v1/quotations/:id/recommendations/:productId',authenticate,requireModule('quotations'),requireRole('REP'),requireCsrf,async(req:AuthRequest,res)=>{
+  const parsed=z.object({action:z.enum(['ACCEPTED','DISMISSED']),reason:z.string().trim().min(2).max(500)}).strict().safeParse(req.body);
+  if(!parsed.success)return fail(req,res,422,'VALIDATION_ERROR','Choose accept or dismiss and provide a reason.',parsed.error.flatten());
+  const quote=await db.quote.findFirst({where:{id:routeParam(req,'id'),organizationId:req.user!.organizationId,ownerId:req.user!.id,stage:'DRAFT'}});if(!quote)return fail(req,res,404,'NOT_FOUND','Editable quotation not found.');
+  const product=await db.product.findFirst({where:{id:routeParam(req,'productId'),organizationId:req.user!.organizationId,active:true}});if(!product)return fail(req,res,404,'NOT_FOUND','Recommended product not found.');
+  const action=await db.$transaction(async tx=>{const value=await tx.recommendationAction.upsert({where:{quoteId_productId:{quoteId:quote.id,productId:product.id}},create:{quoteId:quote.id,productId:product.id,actorId:req.user!.id,action:parsed.data.action,reason:parsed.data.reason},update:{actorId:req.user!.id,action:parsed.data.action,reason:parsed.data.reason,createdAt:new Date()}});await audit(tx,req,`RECOMMENDATION_${parsed.data.action}`,'Quote',quote.id,`${product.name}: ${parsed.data.reason}`,quote.currentRevisionId??undefined);return value});
+  return ok(req,res,action);
 });
 
 async function customerQuotationPreview(actor:Actor, quoteId:string):Promise<CustomerQuotationPreview|null> {
@@ -1037,6 +1069,7 @@ app.post('/api/v1/quotations', authenticate, requireModule('quotations'), requir
       validUntil: parsed.data.validUntil ? new Date(parsed.data.validUntil) : null,
       promisedDeliveryAt: parsed.data.promisedDeliveryAt ? new Date(parsed.data.promisedDeliveryAt) : null,
       terms: parsed.data.terms || null,
+      priceListId: parsed.data.priceListId,
       requestId: req.requestId,
     }));
   } catch (error) {
@@ -1048,26 +1081,35 @@ app.post('/api/v1/quotations', authenticate, requireModule('quotations'), requir
   return ok(req, res, quotationSummaryDto(quote), 201);
 });
 
-type CommercialLine = { productId: string; quantity: number; discount: number };
+type CommercialLine = { productId: string; variantId?:string|null; quantity: number; discount: number };
 
-async function prepareQuoteCalculation(organizationId: string, customerTier: string, lines: CommercialLine[], orderDiscount: number) {
+async function prepareQuoteCalculation(organizationId: string, customerTier: string, lines: CommercialLine[], orderDiscount: number, priceListId?:string|null) {
   const productIds = [...new Set(lines.map((line) => line.productId))];
-  const products = await db.product.findMany({ where: { id: { in: productIds }, organizationId, active: true } });
+  const products = await db.product.findMany({ where: { id: { in: productIds }, organizationId, active: true },include:{variants:{where:{active:true}}} });
   if (products.length !== productIds.length) throw new DomainError(422, 'CONFIGURATION_REQUIRED', 'One or more products are unavailable.');
+  const variantIds=[...new Set(lines.map(line=>line.variantId).filter((value):value is string=>Boolean(value)))];
+  const variants=variantIds.length?await db.productVariant.findMany({where:{id:{in:variantIds},organizationId,active:true}}):[];
+  if(variants.length!==variantIds.length)throw new DomainError(422,'CONFIGURATION_REQUIRED','One or more product variants are unavailable.');
+  if(lines.some(line=>line.variantId&&!variants.some(variant=>variant.id===line.variantId&&variant.productId===line.productId)))throw new DomainError(422,'VARIANT_PRODUCT_MISMATCH','A selected variant does not belong to its product.');
+  const now=new Date();
+  const priceList=priceListId?await db.priceList.findFirst({where:{id:priceListId,organizationId,active:true,effectiveFrom:{lte:now},OR:[{effectiveTo:null},{effectiveTo:{gt:now}}],AND:[{OR:[{customerTier:null},{customerTier}]}]},include:{items:true}}):null;
+  if(priceListId&&!priceList)throw new DomainError(422,'PRICE_LIST_UNAVAILABLE','The selected price list is inactive, expired, or not valid for this customer tier.');
   const policy = await db.discountPolicy.findFirst({ where: { organizationId, tier: customerTier } });
   if (!policy) throw new DomainError(422, 'CONFIGURATION_REQUIRED', 'Configure this customer tier before pricing the quotation.');
   const inputs = lines.map((line) => {
     const product = products.find((item) => item.id === line.productId)!;
+    const variant=line.variantId?variants.find(item=>item.id===line.variantId):null;
+    const priced=priceList?.items.find(item=>item.productId===line.productId&&item.variantId===line.variantId)??priceList?.items.find(item=>item.productId===line.productId&&item.variantId===null);
     return {
       ...line,
-      unitPrice: product.price,
-      unitCost: product.cost,
+      unitPrice: priced?.unitPrice??product.price.add(variant?.priceDelta??0),
+      unitCost: product.cost.add(variant?.costDelta??0),
       taxRate: product.taxRate,
       cadence: product.recurring ? product.cadence : 'One-time',
       allowedDiscount: allowedDiscountForCategory(product.category, policy),
     };
   });
-  return { inputs, products, policy, calculation: calculateQuote(inputs, orderDiscount, {
+  return { inputs, products, variants, priceList, policy, calculation: calculateQuote(inputs, orderDiscount, {
     financeThreshold: policy.financeThreshold,
     aggregateDiscountLimit: policy.aggregateDiscountLimit,
     minimumMarginPercent: policy.minimumMarginPercent,
@@ -1087,6 +1129,7 @@ function quoteCalculationDto(prepared: Awaited<ReturnType<typeof prepareQuoteCal
     }])),
     lines: calculation.lines.map((line, index) => ({
       productId: prepared.inputs[index]!.productId,
+      variantId: prepared.inputs[index]!.variantId??null,
       quantity: line.quantity,
       unitPrice: line.unitPrice.toString(),
       discount: line.discount,
@@ -1101,6 +1144,8 @@ function quoteCalculationDto(prepared: Awaited<ReturnType<typeof prepareQuoteCal
   };
 }
 
+function commercialSnapshot(prepared:Awaited<ReturnType<typeof prepareQuoteCalculation>>){const{inputs,products,variants,priceList,calculation}=prepared;return inputs.map((line,index)=>{const product=products.find(item=>item.id===line.productId)!;const variant=line.variantId?variants.find(item=>item.id===line.variantId):null;const calculated=calculation.lines[index]!;return{productId:line.productId,variantId:variant?.id??null,variantName:variant?.name??null,variantSku:variant?.sku??null,priceListId:priceList?.id??null,priceListName:priceList?.name??null,name:product.name,sku:product.sku,category:product.category,description:product.description,quantity:line.quantity,unitPrice:line.unitPrice.toString(),unitCost:line.unitCost.toString(),taxRate:line.taxRate.toString(),cadence:line.cadence,discount:line.discount,effectiveDiscount:calculated.effectiveDiscount,allowedDiscount:line.allowedDiscount.toString(),gross:calculated.gross,net:calculated.net,tax:calculated.tax,lineCost:calculated.lineCost,excess:calculated.excess}})}
+
 app.post('/api/v1/quotations/:id/preview', authenticate, requireModule('quotations'), requireRole('REP'), requireCsrf, async (req: AuthRequest, res) => {
   const parsed = quotePreviewSchema.safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Add valid quotation lines to calculate a preview.', parsed.error.flatten());
@@ -1109,8 +1154,8 @@ app.post('/api/v1/quotations/:id/preview', authenticate, requireModule('quotatio
   if (quote.ownerId !== req.user!.id) return fail(req, res, 403, 'OWNER_REQUIRED', 'Only the quotation owner can calculate edits.');
   if (quote.stage !== 'DRAFT' || quote.currentRevision?.state !== 'DRAFT') return fail(req, res, 409, 'INVALID_STATE', 'Only a draft quotation can be previewed.');
   if (quote.version !== parsed.data.expectedVersion || quote.currentRevisionId !== parsed.data.revisionId) return fail(req, res, 409, 'STALE_VERSION', 'Refresh the quotation before recalculating.');
-  const lines = parsed.data.lines.map((line) => ({ productId: line.variantId, quantity: line.quantity, discount: line.lineDiscount }));
-  const prepared = await prepareQuoteCalculation(req.user!.organizationId, quote.customerTier, lines, parsed.data.orderDiscount);
+  const lines = parsed.data.lines.map((line) => ({ productId: line.variantId, variantId:line.productVariantId, quantity: line.quantity, discount: line.lineDiscount }));
+  const prepared = await prepareQuoteCalculation(req.user!.organizationId, quote.customerTier, lines, parsed.data.orderDiscount,parsed.data.priceListId??quote.priceListId);
   return ok(req, res, {
     revisionId: quote.currentRevisionId,
     version: quote.version,
@@ -1125,9 +1170,10 @@ app.put('/api/v1/quotations/:id/draft', authenticate, requireModule('quotations'
   if (!quote || !(await canAccessInternalQuote(req.user!, quote))) return fail(req, res, 404, 'NOT_FOUND', 'Quotation not found.');
   if (quote.ownerId !== req.user!.id) return fail(req, res, 403, 'OWNER_REQUIRED', 'Only the quotation owner can save this draft.');
   if (quote.version !== parsed.data.expectedVersion || quote.currentRevisionId !== parsed.data.revisionId || quote.stage !== 'DRAFT' || quote.currentRevision?.state !== 'DRAFT') return fail(req, res, 409, 'STALE_VERSION', 'Refresh the quotation before saving.');
-  const { inputs, products, policy, calculation } = await prepareQuoteCalculation(req.user!.organizationId, quote.customerTier, parsed.data.lines, parsed.data.orderDiscount);
+  const prepared = await prepareQuoteCalculation(req.user!.organizationId, quote.customerTier, parsed.data.lines, parsed.data.orderDiscount,parsed.data.priceListId??quote.priceListId);
+  const { inputs, products, policy, calculation } = prepared;
   const evaluation = evaluateRisk(calculation, policy);
-  const snapshot = inputs.map((line,index) => { const product=products.find((item)=>item.id===line.productId)!; const calculated=calculation.lines[index]!; return { productId: line.productId, name:product.name, sku:product.sku, category:product.category, description:product.description, quantity: line.quantity, unitPrice: line.unitPrice.toString(), unitCost: line.unitCost.toString(), taxRate: line.taxRate.toString(), cadence: line.cadence, discount: line.discount, effectiveDiscount: calculated.effectiveDiscount, allowedDiscount: line.allowedDiscount.toString(), gross: calculated.gross, net:calculated.net, tax:calculated.tax, lineCost:calculated.lineCost, excess:calculated.excess }; });
+  const snapshot = commercialSnapshot(prepared);
   const updated = await db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "Quote" WHERE "id" = ${quote.id} FOR UPDATE`;
     const latest = await tx.quote.findUniqueOrThrow({ where: { id: quote.id }, include: { currentRevision: true } });
@@ -1143,12 +1189,12 @@ app.put('/api/v1/quotations/:id/draft', authenticate, requireModule('quotations'
       policySnapshot: asJson(evaluation), termsHash: termsHash({ quoteId: quote.id, sourceRevisionId: parsed.data.revisionId, snapshot, orderDiscount: parsed.data.orderDiscount, calculation, validUntil: parsed.data.validUntil, promisedDeliveryAt: parsed.data.promisedDeliveryAt, terms: parsed.data.terms }),
     } });
     await tx.quoteLine.deleteMany({ where: { quoteId: quote.id } });
-    await tx.quoteLine.createMany({ data: inputs.map((line) => ({ quoteId: quote.id, productId: line.productId, quantity: line.quantity, unitPrice: line.unitPrice, unitCost: line.unitCost, discount: line.discount, allowedDiscount: line.allowedDiscount })) });
-    const savedQuote = await tx.quote.update({ where: { id: quote.id }, data: { currentRevisionId: revision.id, orderDiscount: parsed.data.orderDiscount, total: calculation.total, taxTotal: calculation.taxTotal, totalsByCadence: asJson(calculation.totalsByCadence), margin: calculation.margin, riskScore: calculation.riskScore, version: { increment: 1 }, lastActivity: new Date() } });
+    await tx.quoteLine.createMany({ data: inputs.map((line) => ({ quoteId: quote.id, productId: line.productId,variantId:line.variantId??null, quantity: line.quantity, unitPrice: line.unitPrice, unitCost: line.unitCost, discount: line.discount, allowedDiscount: line.allowedDiscount })) });
+    const savedQuote = await tx.quote.update({ where: { id: quote.id }, data: { currentRevisionId: revision.id,priceListId:parsed.data.priceListId===undefined?latest.priceListId:parsed.data.priceListId, orderDiscount: parsed.data.orderDiscount, total: calculation.total, taxTotal: calculation.taxTotal, totalsByCadence: asJson(calculation.totalsByCadence), margin: calculation.margin, riskScore: calculation.riskScore, version: { increment: 1 }, lastActivity: new Date() } });
     await audit(tx, req, 'QUOTE_DRAFT_SNAPSHOT_SAVED', 'Quote', quote.id, 'Saved a new immutable draft calculation snapshot.', revision.id);
     return { quote: savedQuote, revisionId: revision.id, version: savedQuote.version };
   });
-  return ok(req, res, { ...updated, calculation: quoteCalculationDto({ inputs, products, policy, calculation }) });
+  return ok(req, res, { ...updated, calculation: quoteCalculationDto(prepared) });
 });
 
 app.post('/api/v1/quotations/:id/submit', authenticate, requireModule('quotations'), requireRole('REP'), requireCsrf, async (req: AuthRequest, res) => {
@@ -1159,10 +1205,10 @@ app.post('/api/v1/quotations/:id/submit', authenticate, requireModule('quotation
   if (quote.ownerId !== req.user!.id) return fail(req, res, 403, 'OWNER_REQUIRED', 'Only the quotation owner can submit this draft.');
   if (quote.version !== parsed.data.expectedVersion || quote.currentRevisionId !== parsed.data.revisionId) return fail(req, res, 409, 'STALE_VERSION', 'Refresh the quotation before submitting.');
   if (quote.stage !== 'DRAFT' || quote.currentRevision?.state !== 'DRAFT' || !quote.lines.length) return fail(req, res, 409, 'INVALID_STATE', 'Only a complete saved draft can be submitted.');
-  const prepared = await prepareQuoteCalculation(req.user!.organizationId, quote.customerTier, quote.lines.map((line) => ({ productId: line.productId, quantity: line.quantity, discount: Number(line.discount) })), Number(quote.orderDiscount));
+  const prepared = await prepareQuoteCalculation(req.user!.organizationId, quote.customerTier, quote.lines.map((line) => ({ productId: line.productId,variantId:line.variantId, quantity: line.quantity, discount: Number(line.discount) })), Number(quote.orderDiscount),quote.priceListId);
   const { inputs, products, policy, calculation } = prepared;
   const evaluation = evaluateRisk(calculation, policy);
-  const snapshot = inputs.map((line,index) => { const product=products.find((item)=>item.id===line.productId)!; const calculated=calculation.lines[index]!; return { productId: line.productId, name:product.name, sku:product.sku, category:product.category, description:product.description, quantity: line.quantity, unitPrice: line.unitPrice.toString(), unitCost: line.unitCost.toString(), taxRate: line.taxRate.toString(), cadence: line.cadence, discount: line.discount, effectiveDiscount: calculated.effectiveDiscount, allowedDiscount: line.allowedDiscount.toString(), gross:calculated.gross, net:calculated.net, tax:calculated.tax, lineCost:calculated.lineCost, excess:calculated.excess }; });
+  const snapshot = commercialSnapshot(prepared);
   const result = await db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "Quote" WHERE "id" = ${quote.id} FOR UPDATE`;
     const latest = await tx.quote.findUniqueOrThrow({ where: { id: quote.id }, include: { currentRevision: true } });
@@ -1170,7 +1216,7 @@ app.post('/api/v1/quotations/:id/submit', authenticate, requireModule('quotation
     const previous = await tx.approvalCase.findFirst({ where: { quoteId: quote.id }, orderBy: { cycle: 'desc' } });
     const cycle = (previous?.cycle ?? 0) + 1;
     await tx.quoteLine.deleteMany({ where: { quoteId: quote.id } });
-    await tx.quoteLine.createMany({ data: inputs.map((line) => ({ quoteId: quote.id, productId: line.productId, quantity: line.quantity, unitPrice: line.unitPrice, unitCost: line.unitCost, discount: line.discount, allowedDiscount: line.allowedDiscount })) });
+    await tx.quoteLine.createMany({ data: inputs.map((line) => ({ quoteId: quote.id, productId: line.productId,variantId:line.variantId??null, quantity: line.quantity, unitPrice: line.unitPrice, unitCost: line.unitCost, discount: line.discount, allowedDiscount: line.allowedDiscount })) });
     await tx.quoteRevision.update({ where: { id: parsed.data.revisionId }, data: { state: 'SUPERSEDED' } });
     const submittedRevision = await tx.quoteRevision.create({ data: {
       quoteId: quote.id, revisionNumber: latest.currentRevision.revisionNumber + 1, state: 'SUBMITTED', currency: latest.currentRevision.currency,
@@ -1313,7 +1359,7 @@ app.post('/api/v1/portal/requests', authenticate, requireRole('CUSTOMER'), requi
   return ok(req, res, result, result.replayed ? 200 : 201);
 });
 
-const portalQuotationInclude = { currentRevision: true, negotiation: { orderBy: { createdAt: 'asc' as const } }, order: { select: { id: true, number: true, state: true, revisionId: true } }, acceptance: true } satisfies Prisma.QuoteInclude;
+const portalQuotationInclude = { currentRevision: true, lines: { include: { product: true } }, negotiation: { orderBy: { createdAt: 'asc' as const } }, order: { select: { id: true, number: true, state: true, revisionId: true } }, acceptance: true } satisfies Prisma.QuoteInclude;
 
 app.get('/api/v1/portal/quotations', authenticate, requireRole('CUSTOMER'), async (req: AuthRequest, res) => {
   if (!req.user!.customerId) return fail(req, res, 403, 'FORBIDDEN', 'This portal account is not linked to a customer.');
@@ -1345,16 +1391,31 @@ app.post('/api/v1/portal/quotations/:id/proposals', authenticate, requireRole('C
   const parsed = portalProposalSchema.safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter a valid counter proposal.', parsed.error.flatten());
   const quoteId = routeParam(req, 'id');
+  const source=await db.quote.findFirst({where:{id:quoteId,organizationId:req.user!.organizationId,customerId:req.user!.customerId??'__none__'},include:{currentRevision:true,order:true,negotiation:{where:{kind:'PROPOSAL',state:'OPEN'}},lines:{include:{product:true}},approvalCases:{orderBy:{cycle:'desc'},take:1}}});
+  if(!source)throw new PortalError(404,'NOT_FOUND','Quotation not found.');
+  requireExactSentRevision(source,parsed.data);
+  if(source.negotiation.length)throw new PortalError(409,'PROPOSAL_ALREADY_OPEN','A counter proposal is already being processed.');
+  const prepared=await prepareQuoteCalculation(req.user!.organizationId,source.customerTier,source.lines.map(line=>({productId:line.productId,variantId:line.variantId,quantity:line.quantity,discount:Number(line.discount)})),parsed.data.counterDiscount,source.priceListId);
+  const {inputs,products,policy,calculation}=prepared;
+  const evaluation=evaluateRisk(calculation,policy);
+  const snapshot=commercialSnapshot(prepared);
   const proposal = await db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "Quote" WHERE "id" = ${quoteId} FOR UPDATE`;
-    const quote = await tx.quote.findFirst({ where: { id: quoteId, organizationId: req.user!.organizationId, customerId: req.user!.customerId ?? '__none__' }, include: { currentRevision: true, order: true, negotiation: { where: { kind: 'PROPOSAL', state: 'OPEN' } } } });
+    const quote = await tx.quote.findFirst({ where: { id: quoteId, organizationId: req.user!.organizationId, customerId: req.user!.customerId ?? '__none__' }, include: { currentRevision: true, order: true, negotiation: { where: { kind: 'PROPOSAL', state: 'OPEN' } },approvalCases:{orderBy:{cycle:'desc'},take:1} } });
     if (!quote) throw new PortalError(404, 'NOT_FOUND', 'Quotation not found.');
     requireExactSentRevision(quote, parsed.data);
-    if (quote.negotiation.length) throw new PortalError(409, 'PROPOSAL_ALREADY_OPEN', 'A counter proposal is already awaiting the representative.');
-    const record = await tx.negotiation.create({ data: { quoteId, revisionId: parsed.data.revisionId, author: req.user!.name, message: parsed.data.message, messageType: 'COUNTER_DISCOUNT', counterDiscount: parsed.data.counterDiscount, requestedDeliveryAt: parsed.data.requestedDeliveryAt ? new Date(parsed.data.requestedDeliveryAt) : null, kind: 'PROPOSAL' } });
-    await tx.quote.update({ where: { id: quoteId }, data: { stage: 'NEGOTIATION', version: { increment: 1 }, lastActivity: new Date() } });
-    await audit(tx, req, 'CUSTOMER_PROPOSED_CHANGE', 'Quote', quoteId, parsed.data.message, parsed.data.revisionId);
-    return record;
+    if (quote.negotiation.length) throw new PortalError(409, 'PROPOSAL_ALREADY_OPEN', 'A counter proposal is already being processed.');
+    await tx.quoteRevision.update({where:{id:quote.currentRevisionId!},data:{state:'SUPERSEDED'}});
+    const latest=await tx.quoteRevision.findFirst({where:{quoteId},orderBy:{revisionNumber:'desc'}});
+    const revision=await tx.quoteRevision.create({data:{quoteId,revisionNumber:(latest?.revisionNumber??0)+1,state:'SUBMITTED',currency:quote.currentRevision!.currency,validUntil:quote.currentRevision!.validUntil,promisedDeliveryAt:parsed.data.requestedDeliveryAt?new Date(parsed.data.requestedDeliveryAt):quote.currentRevision!.promisedDeliveryAt,terms:quote.currentRevision!.terms,orderDiscount:parsed.data.counterDiscount,subtotal:calculation.subtotal,taxTotal:calculation.taxTotal,total:calculation.total,margin:calculation.margin,riskScore:calculation.riskScore,totalsByCadence:asJson(calculation.totalsByCadence),linesSnapshot:asJson(snapshot),policySnapshot:asJson(evaluation),submittedById:quote.ownerId,termsHash:termsHash({source:parsed.data.revisionId,counterDiscount:parsed.data.counterDiscount,snapshot,calculation,nonce:crypto.randomUUID()})}});
+    await tx.quoteLine.deleteMany({where:{quoteId}});
+    await tx.quoteLine.createMany({data:inputs.map(line=>({quoteId,productId:line.productId,variantId:line.variantId??null,quantity:line.quantity,unitPrice:line.unitPrice,unitCost:line.unitCost,discount:line.discount,allowedDiscount:line.allowedDiscount}))});
+    const cycle=(quote.approvalCases[0]?.cycle??0)+1;
+    const approvalCase=await openCase(tx,{quoteId,revisionId:revision.id,policyId:policy.id,cycle,submittedById:quote.ownerId,evaluation});
+    const record = await tx.negotiation.create({ data: { quoteId, revisionId: parsed.data.revisionId, author: req.user!.name, message: parsed.data.message, messageType: 'COUNTER_DISCOUNT', counterDiscount: parsed.data.counterDiscount, requestedDeliveryAt: parsed.data.requestedDeliveryAt ? new Date(parsed.data.requestedDeliveryAt) : null, kind: 'PROPOSAL',state:'ADOPTED',respondedById:quote.ownerId,responseReason:'Automatically adopted and routed by customer negotiation policy.',respondedAt:new Date(),adoptedRevisionId:revision.id } });
+    const updated=await tx.quote.update({where:{id:quoteId},data:{currentRevisionId:revision.id,stage:evaluation.route==='NONE'?'APPROVED':'PENDING_APPROVAL',sentAt:null,orderDiscount:parsed.data.counterDiscount,total:calculation.total,taxTotal:calculation.taxTotal,totalsByCadence:asJson(calculation.totalsByCadence),margin:calculation.margin,riskScore:calculation.riskScore,version:{increment:1},lastActivity:new Date()}});
+    await audit(tx, req, 'CUSTOMER_PROPOSAL_AUTO_ROUTED', 'Quote', quoteId, parsed.data.message, revision.id);
+    return {proposal:record,quotation:updated,revisionId:revision.id,approvalCaseId:approvalCase.id,governanceRestarted:true};
   });
   return ok(req, res, proposal, 201);
 });
@@ -1382,10 +1443,10 @@ app.post('/api/v1/quotations/:id/proposals/:proposalId/respond', authenticate, r
   }
   const proposedDiscount = proposal.counterDiscount;
   if (proposedDiscount === null) return fail(req, res, 422, 'CONFIGURATION_REQUIRED', 'The proposal cannot be calculated.');
-  const prepared = await prepareQuoteCalculation(req.user!.organizationId, quote.customerTier, quote.lines.map((line) => ({ productId: line.productId, quantity: line.quantity, discount: Number(line.discount) })), Number(proposedDiscount));
+  const prepared = await prepareQuoteCalculation(req.user!.organizationId, quote.customerTier, quote.lines.map((line) => ({ productId: line.productId,variantId:line.variantId, quantity: line.quantity, discount: Number(line.discount) })), Number(proposedDiscount),quote.priceListId);
   const { inputs, products, policy, calculation } = prepared;
   const evaluation = evaluateRisk(calculation, policy);
-  const snapshot = inputs.map((line,index) => { const product=products.find((item)=>item.id===line.productId)!; const calculated=calculation.lines[index]!; return { productId: line.productId, name:product.name, sku:product.sku, category:product.category, description:product.description, quantity:line.quantity, unitPrice:line.unitPrice.toString(), unitCost:line.unitCost.toString(), taxRate:line.taxRate.toString(), cadence:line.cadence, discount:line.discount, effectiveDiscount:calculated.effectiveDiscount, allowedDiscount:line.allowedDiscount.toString(), gross:calculated.gross, net:calculated.net, tax:calculated.tax, lineCost:calculated.lineCost, excess:calculated.excess }; });
+  const snapshot = commercialSnapshot(prepared);
   const adopted = await db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "Quote" WHERE "id" = ${quote.id} FOR UPDATE`;
     const current = await tx.quote.findUniqueOrThrow({ where: { id: quote.id }, include: { currentRevision: true } });
@@ -1395,7 +1456,7 @@ app.post('/api/v1/quotations/:id/proposals/:proposalId/respond', authenticate, r
     const latest = await tx.quoteRevision.findFirst({ where: { quoteId: quote.id }, orderBy: { revisionNumber: 'desc' } });
     const revision = await tx.quoteRevision.create({ data: { quoteId: quote.id, revisionNumber: (latest?.revisionNumber ?? 0) + 1, state: 'DRAFT', currency:current.currentRevision!.currency, validUntil:current.currentRevision!.validUntil, promisedDeliveryAt:proposal.requestedDeliveryAt ?? current.currentRevision!.promisedDeliveryAt, terms:current.currentRevision!.terms, orderDiscount:proposedDiscount, subtotal:calculation.subtotal, taxTotal:calculation.taxTotal, total:calculation.total, margin:calculation.margin, riskScore:calculation.riskScore, totalsByCadence:asJson(calculation.totalsByCadence), linesSnapshot:asJson(snapshot), policySnapshot:asJson(evaluation), termsHash:termsHash({ source:proposal.revisionId, proposalId:proposal.id, counterDiscount:proposedDiscount.toString(), snapshot, calculation }) } });
     await tx.quoteLine.deleteMany({ where: { quoteId: quote.id } });
-    await tx.quoteLine.createMany({ data: inputs.map((line) => ({ quoteId: quote.id, productId: line.productId, quantity: line.quantity, unitPrice: line.unitPrice, unitCost: line.unitCost, discount: line.discount, allowedDiscount: line.allowedDiscount })) });
+    await tx.quoteLine.createMany({ data: inputs.map((line) => ({ quoteId: quote.id, productId: line.productId,variantId:line.variantId??null, quantity: line.quantity, unitPrice: line.unitPrice, unitCost: line.unitCost, discount: line.discount, allowedDiscount: line.allowedDiscount })) });
     const updated = await tx.quote.update({ where: { id: quote.id }, data: { currentRevisionId: revision.id, stage: 'DRAFT', sentAt: null, orderDiscount: proposedDiscount, total: calculation.total, taxTotal: calculation.taxTotal, totalsByCadence: asJson(calculation.totalsByCadence), margin: calculation.margin, riskScore: calculation.riskScore, version: { increment: 1 }, lastActivity: new Date() } });
     const record = await tx.negotiation.update({ where: { id: proposal.id }, data: { state: 'ADOPTED', respondedById:req.user!.id, responseReason:parsed.data.reason, respondedAt:new Date(), adoptedRevisionId:revision.id } });
     await audit(tx, req, 'CUSTOMER_PROPOSAL_ADOPTED', 'Quote', quote.id, parsed.data.reason, revision.id);
@@ -1450,6 +1511,14 @@ app.post('/api/v1/fulfillment/:orderId/consolidate', authenticate, requireModule
   return ok(req, res, result);
 });
 
+app.post('/api/v1/fulfillment/:orderId/ship', authenticate, requireModule('fulfillment'), requireRole('FINANCE', 'ADMIN'), requireCsrf, async (req:AuthRequest,res)=>{
+  const parsed=shipOrderSchema.safeParse(req.body);
+  if(!parsed.success)return fail(req,res,422,'VALIDATION_ERROR','Select allocated quantities, carrier, tracking number, and shipment date.',parsed.error.flatten());
+  const shippedAt=parsed.data.shippedAt?new Date(parsed.data.shippedAt):new Date();
+  const result=await db.$transaction(tx=>shipOrder(tx,{organizationId:req.user!.organizationId,actorId:req.user!.id,orderId:routeParam(req,'orderId'),lines:parsed.data.lines,carrier:parsed.data.carrier,trackingNumber:parsed.data.trackingNumber,shippedAt,idempotencyKey:idempotencyKey(req.headers['idempotency-key']),requestId:req.requestId}));
+  return ok(req,res,result,201);
+});
+
 const retiredQuoteFulfillmentRoute = (req: AuthRequest, res: Response) => fail(req, res, 410, 'ORDER_ID_REQUIRED', 'This legacy fulfillment write has been retired. Refresh and use the confirmed order ID.');
 app.post('/api/v1/warehouses/:id/restock', authenticate, requireModule('fulfillment'), requireRole('FINANCE', 'ADMIN'), requireCsrf, retiredQuoteFulfillmentRoute);
 app.post('/api/v1/fulfillment/:quoteId/allocate', authenticate, requireModule('fulfillment'), requireRole('FINANCE', 'ADMIN'), requireCsrf, retiredQuoteFulfillmentRoute);
@@ -1467,7 +1536,7 @@ app.patch('/api/v1/warehouses/:id', authenticate, requireModule('fulfillment'), 
 });
 
 app.get('/api/v1/fulfillment', authenticate, requireModule('fulfillment'), requireRole('REP', 'MANAGER', 'FINANCE', 'ADMIN'), async (req: AuthRequest, res) => {
-  const quotes = await db.quote.findMany({ where: { ...internalQuoteWhere(req.user!), stage: 'CONFIRMED', order: { is: { state: { notIn: ['FULFILLED', 'CANCELLED'] } } }, lines: { some: { product: { category: 'Hardware', recurring: false } } } }, include: { order: true, fulfillment: true }, orderBy: { updatedAt: 'desc' } });
+  const quotes = await db.quote.findMany({ where: { ...internalQuoteWhere(req.user!), stage: 'CONFIRMED', order: { is: { state: { notIn: ['SHIPPED', 'CANCELLED'] } } }, lines: { some: { product: { category: 'Hardware', recurring: false } } } }, include: { order: true, fulfillment: true }, orderBy: { updatedAt: 'desc' } });
   return ok(req, res, quotes.map((quote) => { const split = quote.fulfillment ? parseFulfillmentSplit(quote.fulfillment.split) : { split: [], backorders: [] }; return { quoteId: quote.id, orderId: quote.order?.id, orderNumber: quote.order?.number ?? quote.number, quoteNumber: quote.number, customer: quote.customer, status: quote.fulfillment?.state ?? 'SPLIT_PENDING', warehouses: [...new Set(split.split.map((row) => row.warehouseName))] }; }));
 });
 
@@ -1638,45 +1707,17 @@ app.post('/api/v1/subscriptions/:id/change', authenticate, requireModule('subscr
   return ok(req, res, { ...subscription, schedule: billingSchedule(subscription.nextBillAt, subscription.cadence) });
 });
 
+app.post('/api/v1/subscriptions/run-billing',authenticate,requireModule('subscriptions'),requireRole('ADMIN'),requireCsrf,async(req:AuthRequest,res)=>{
+  const parsed=z.object({asOf:z.string().datetime().optional()}).strict().safeParse(req.body??{});
+  if(!parsed.success)return fail(req,res,422,'VALIDATION_ERROR','Use a valid billing run date.',parsed.error.flatten());
+  const result=await db.$transaction(tx=>runRecurringBilling(tx,{organizationId:req.user!.organizationId,actorId:req.user!.id,now:parsed.data.asOf?new Date(parsed.data.asOf):new Date(),requestId:req.requestId}));
+  return ok(req,res,result);
+});
+
 app.post('/api/v1/orders/:id/invoices', authenticate, requireModule('invoices'), requireRole('FINANCE', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
   const parsed = z.object({ kind: z.literal('ONE_TIME').default('ONE_TIME'), dueAt: z.string().datetime().or(z.string().date()) }).strict().safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Choose an eligible billing type and due date.', parsed.error.flatten());
-  const orderId = routeParam(req, 'id');
-  const dueAt = new Date(parsed.data.dueAt);
-  if (Number.isNaN(dueAt.getTime())) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter a valid due date.');
-  const invoice = await db.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT "id" FROM "Order" WHERE "id" = ${orderId} FOR UPDATE`;
-    const order = await tx.order.findFirst({ where: { id: orderId, quote: { organizationId: req.user!.organizationId } }, include: { quote: true, customer: true, lines: true, invoices: { include: { payments: true, customerRecord: true, quote: { select: { id: true, number: true, stage: true } }, order: { include: { fulfillment: true } } } } } });
-    if (!order) throw new DomainError(404, 'NOT_FOUND', 'Confirmed order not found.');
-    if (!['CONFIRMED', 'PARTIALLY_FULFILLED', 'FULFILLED'].includes(order.state)) throw new DomainError(409, 'INVALID_STATE', 'Only an active confirmed order can be invoiced.');
-    const existing = order.invoices[0];
-    if (existing) return existing;
-    const oneTimeLines = order.lines.filter((line) => !line.recurring);
-    if (!oneTimeLines.length) throw new DomainError(422, 'NO_ELIGIBLE_CHARGES', 'This order has no unbilled one-time charges. Recurring charges come from the billing schedule.');
-    const inputs = oneTimeLines.map((line) => {
-      const snapshot = isRecord(line.snapshot) ? line.snapshot : {};
-      return {
-        quantity: line.quantity,
-        unitPrice: numeric(snapshot.unitPrice),
-        unitCost: numeric(snapshot.unitCost),
-        discount: numeric(snapshot.discount),
-        allowedDiscount: numeric(snapshot.discount),
-        taxRate: numeric(snapshot.taxRate),
-        cadence: 'One-time',
-      };
-    });
-    const orderDiscount = numeric(isRecord(oneTimeLines[0]?.snapshot) ? oneTimeLines[0]!.snapshot.orderDiscount : 0);
-    const calculation = calculateQuote(inputs, orderDiscount);
-    const lines = calculation.lines.map((line, index) => {
-      const source = oneTimeLines[index]!;
-      const snapshot = isRecord(source.snapshot) ? source.snapshot : {};
-      return { description: String(snapshot.description ?? 'Order charge'), productId: source.productId, cadence: 'One-time', quantity: line.quantity, unitPrice: line.unitPrice, discount: line.discount, net: line.net, tax: line.tax, amount: line.net + line.tax };
-    });
-    const created = await tx.invoice.create({ data: { organizationId: req.user!.organizationId, number: `INV-${order.number.replace(/^SO-/, '')}`, billingKey: `ORDER_MANUAL:${order.id}`, quoteId: order.quoteId, orderId: order.id, customer: order.customer.name, customerId: order.customerId, currency: order.currency, amount: calculation.total, dueAt, lines: asJson(lines) }, include: { payments: true, customerRecord: true, notes: true, quote: { select: { id: true, number: true, stage: true } }, order: { include: { fulfillment: true } } } });
-    await audit(tx, req, 'INVOICE_ISSUED', 'Invoice', created.id, `Issued from ${order.number}`, order.revisionId);
-    return created;
-  });
-  return ok(req, res, internalInvoiceDto(invoice), 201);
+  return fail(req, res, 410, 'SHIPMENT_REQUIRED', 'One-time order invoices are created only from an audited shipment. Use the Fulfillment Ship action.');
 });
 
 app.post('/api/v1/invoices', authenticate, requireModule('invoices'), requireRole('FINANCE', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
@@ -1697,6 +1738,7 @@ app.post('/api/v1/invoices', authenticate, requireModule('invoices'), requireRol
   const productIds = [...new Set(parsed.data.lines.map((line) => line.productId))];
   const products = await db.product.findMany({ where: { id: { in: productIds }, organizationId: req.user!.organizationId, active: true } });
   if (products.length !== productIds.length) return fail(req, res, 422, 'CONFIGURATION_REQUIRED', 'One or more products are unavailable.');
+  if(products.some(product=>!product.recurring&&product.category==='Hardware'))return fail(req,res,422,'SHIPMENT_REQUIRED','Hardware invoices are created from Fulfillment after the allocated goods are shipped.');
   const inputLines = parsed.data.lines.map((line) => {
     const product = products.find((item) => item.id === line.productId)!;
     const taxRate = parsed.data.gstMode === 'CATALOG' ? product.taxRate : new Prisma.Decimal(parsed.data.gstRate ?? 18);
@@ -1776,6 +1818,15 @@ app.get('/api/v1/deal-health', authenticate, requireModule('health'), requireRol
   return ok(req, res, { evaluation, items: alerts });
 });
 
+async function alertRecipient(alert:{resourceId:string;recipientId:string|null},escalate:boolean,organizationId:string){
+  if(!escalate&&alert.recipientId)return alert.recipientId;
+  const quote=await db.quote.findFirst({where:{id:alert.resourceId,organizationId},include:{team:{select:{managerId:true}}}});
+  if(!quote)return alert.recipientId;
+  if(escalate&&quote.team?.managerId)return quote.team.managerId;
+  if(!escalate)return quote.ownerId;
+  return (await db.user.findFirst({where:{organizationId,role:'ADMIN',status:'ACTIVE'},select:{id:true}}))?.id??quote.ownerId;
+}
+
 app.post('/api/v1/deal-health/:id/actions', authenticate, requireModule('health'), requireRole('REP', 'MANAGER', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
   const parsed = z.object({ action: z.enum(['NUDGE', 'ACKNOWLEDGE', 'RESOLVE']), reason: z.string().trim().min(5).max(240) }).strict().safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Choose an alert action and provide a reason.', parsed.error.flatten());
@@ -1783,16 +1834,18 @@ app.post('/api/v1/deal-health/:id/actions', authenticate, requireModule('health'
   const visibleQuoteIds = await db.quote.findMany({ where: { organizationId: req.user!.organizationId, AND: [quotationRecordScope(req.user!)] }, select: { id: true } });
   const existing = await db.alert.findFirst({ where: { id, organizationId: req.user!.organizationId, resourceId: { in: visibleQuoteIds.map((quote) => quote.id) } } });
   if (!existing) return fail(req, res, 404, 'NOT_FOUND', 'Alert not found.');
+  const recipientId=parsed.data.action==='NUDGE'?await alertRecipient(existing,false,req.user!.organizationId):null;
   const alert = await db.$transaction(async (tx) => {
     const data = parsed.data.action === 'NUDGE' ? { nudged: true } : parsed.data.action === 'ACKNOWLEDGE' ? { acknowledgedAt: new Date(), acknowledgedById: req.user!.id } : { resolved: true, resolvedAt: new Date() };
     const updated = await tx.alert.update({ where: { id }, data });
     await audit(tx, req, `ALERT_${parsed.data.action}D`, 'Alert', id, parsed.data.reason);
+    if(recipientId)await tx.notification.upsert({where:{dedupeKey:`alert:${id}:${parsed.data.action}:${recipientId}`},create:{organizationId:req.user!.organizationId,recipientId,title:`Deal health ${parsed.data.action.toLowerCase()}: ${existing.title}`,body:parsed.data.reason,resourceType:existing.resourceType,resourceId:existing.resourceId,dedupeKey:`alert:${id}:${parsed.data.action}:${recipientId}`},update:{body:parsed.data.reason,state:'UNREAD',readAt:null,createdAt:new Date()}});
     return updated;
   });
   return ok(req, res, alert);
 });
 
-const salesReportQuerySchema = z.object({ from: z.string().date().optional(), to: z.string().date().optional(), repId: z.string().uuid().optional(), status: z.enum(['CONFIRMED', 'PARTIALLY_FULFILLED', 'FULFILLED', 'CANCELLED']).optional(), productId: z.string().uuid().optional(), format: z.enum(['pdf', 'xls']).optional() }).strict();
+const salesReportQuerySchema = z.object({ from: z.string().date().optional(), to: z.string().date().optional(), repId: z.string().uuid().optional(), status: z.enum(['CONFIRMED','PARTIALLY_ALLOCATED','ALLOCATED','BACKORDER','PARTIALLY_SHIPPED','SHIPPED','CANCELLED']).optional(), productId: z.string().uuid().optional(), format: z.enum(['pdf', 'xlsx']).optional() }).strict();
 const reportFilters = (value: z.infer<typeof salesReportQuerySchema>) => ({ from: value.from ? new Date(`${value.from}T00:00:00.000Z`) : undefined, to: value.to ? new Date(`${value.to}T23:59:59.999Z`) : undefined, repId: value.repId, status: value.status, productId: value.productId });
 
 app.get('/api/v1/reports/sales', authenticate, requireModule('reports'), requireRole('REP', 'MANAGER', 'FINANCE', 'ADMIN'), async (req: AuthRequest, res) => {
@@ -1806,29 +1859,32 @@ app.get('/api/v1/reports/sales', authenticate, requireModule('reports'), require
 
 app.get('/api/v1/reports/sales/export', authenticate, requireModule('reports'), requireRole('REP', 'MANAGER', 'FINANCE', 'ADMIN'), async (req: AuthRequest, res) => {
   const parsed = salesReportQuerySchema.required({ format: true }).safeParse(req.query);
-  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Choose PDF or XLS and valid report filters.', parsed.error.flatten());
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Choose PDF or XLSX and valid report filters.', parsed.error.flatten());
   const filters = reportFilters(parsed.data);
   if (filters.from && filters.to && (filters.from > filters.to || filters.to.getTime() - filters.from.getTime() > 366 * 86_400_000)) return fail(req, res, 422, 'INVALID_PERIOD', 'Choose a report period of at most 366 days.');
   const report = await db.$transaction((tx) => aggregateSales(tx, req.user!.organizationId, quotationRecordScope(req.user!), filters));
   const extension = parsed.data.format;
-  res.setHeader('Content-Type', extension === 'pdf' ? 'application/pdf' : 'application/vnd.ms-excel; charset=utf-8');
+  res.setHeader('Content-Type', extension === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="dealos-sales-report.${extension}"`);
   res.setHeader('Cache-Control', 'private, no-store');
-  return res.status(200).send(extension === 'pdf' ? reportAsPdf(report) : reportAsXls(report));
+  return res.status(200).send(extension === 'pdf' ? reportAsPdf(report) : await reportAsXls(report));
 });
 
 app.post('/api/v1/alerts/:id/nudge', authenticate, requireModule('health'), requireRole('REP', 'MANAGER', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
   const existing = await db.alert.findFirst({ where: { id: routeParam(req, 'id'), organizationId: req.user!.organizationId } });
   if (!existing) return fail(req, res, 404, 'NOT_FOUND', 'Alert not found.');
-  const alert = await db.$transaction(async (tx) => { const updated = await tx.alert.update({ where: { id: existing.id }, data: { nudged: true } }); await audit(tx, req, 'ALERT_NUDGED', 'Alert', updated.id); return updated; });
+  const recipientId=await alertRecipient(existing,false,req.user!.organizationId);
+  const alert = await db.$transaction(async (tx) => { const updated = await tx.alert.update({ where: { id: existing.id }, data: { nudged: true } });if(recipientId)await tx.notification.upsert({where:{dedupeKey:`alert:${existing.id}:NUDGE:${recipientId}`},create:{organizationId:req.user!.organizationId,recipientId,title:`Deal needs attention: ${existing.title}`,body:existing.detail,resourceType:existing.resourceType,resourceId:existing.resourceId,dedupeKey:`alert:${existing.id}:NUDGE:${recipientId}`},update:{state:'UNREAD',readAt:null,createdAt:new Date()}}); await audit(tx, req, 'ALERT_NUDGED', 'Alert', updated.id); return updated; });
   return ok(req, res, alert);
 });
 
 app.post('/api/v1/alerts/:id/escalate', authenticate, requireModule('health'), requireRole('REP', 'MANAGER', 'ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
   const existing = await db.alert.findFirst({ where: { id: routeParam(req, 'id'), organizationId: req.user!.organizationId, resolved: false } });
   if (!existing) return fail(req, res, 404, 'NOT_FOUND', 'Active alert not found.');
+  const recipientId=await alertRecipient(existing,true,req.user!.organizationId);
   const alert = await db.$transaction(async (tx) => {
     const updated = await tx.alert.update({ where: { id: existing.id }, data: { nudged: true } });
+    if(recipientId)await tx.notification.upsert({where:{dedupeKey:`alert:${existing.id}:ESCALATE:${recipientId}`},create:{organizationId:req.user!.organizationId,recipientId,title:`Escalated deal risk: ${existing.title}`,body:existing.detail,resourceType:existing.resourceType,resourceId:existing.resourceId,dedupeKey:`alert:${existing.id}:ESCALATE:${recipientId}`},update:{state:'UNREAD',readAt:null,createdAt:new Date()}});
     await audit(tx, req, 'ALERT_ESCALATED', 'Alert', updated.id, `${updated.kind}:${updated.resourceId}`);
     return updated;
   });
@@ -1844,6 +1900,12 @@ app.post('/api/v1/alerts/:id/resolve', authenticate, requireModule('health'), re
     return updated;
   });
   return ok(req, res, alert);
+});
+
+app.post('/api/v1/notifications/:id/read',authenticate,requireCsrf,async(req:AuthRequest,res)=>{
+  const notification=await db.notification.findFirst({where:{id:routeParam(req,'id'),recipientId:req.user!.id,organizationId:req.user!.organizationId}});
+  if(!notification)return fail(req,res,404,'NOT_FOUND','Notification not found.');
+  const updated=await db.notification.update({where:{id:notification.id},data:{state:'READ',readAt:new Date()}});return ok(req,res,updated);
 });
 
 app.post('/api/v1/products', authenticate, requireModule('products'), requireRole('ADMIN'), requireCsrf, async (req: AuthRequest, res) => {
@@ -1888,11 +1950,52 @@ app.patch('/api/v1/products/:id', authenticate, requireModule('products'), requi
   return ok(req, res, product);
 });
 
+app.post('/api/v1/products/:id/variants',authenticate,requireModule('products'),requireRole('ADMIN'),requireCsrf,async(req:AuthRequest,res)=>{
+  const parsed=z.object({name:z.string().trim().min(1).max(120),sku:z.string().trim().min(2).max(80),attributes:z.record(z.string(),z.string()).default({}),priceDelta:z.number().default(0),costDelta:z.number().default(0),active:z.boolean().default(true)}).strict().safeParse(req.body);
+  if(!parsed.success)return fail(req,res,422,'VALIDATION_ERROR','Enter a variant name, SKU, attributes, and price/cost deltas.',parsed.error.flatten());
+  const product=await db.product.findFirst({where:{id:routeParam(req,'id'),organizationId:req.user!.organizationId}});
+  if(!product)return fail(req,res,404,'NOT_FOUND','Product not found.');
+  const variant=await db.$transaction(async tx=>{const created=await tx.productVariant.create({data:{...parsed.data,sku:parsed.data.sku.toUpperCase(),organizationId:req.user!.organizationId,productId:product.id,attributes:asJson(parsed.data.attributes)}});await audit(tx,req,'PRODUCT_VARIANT_CREATED','ProductVariant',created.id,`${product.name}: ${created.name}`);return created});
+  return ok(req,res,variant,201);
+});
+
+app.patch('/api/v1/products/:productId/variants/:variantId',authenticate,requireModule('products'),requireRole('ADMIN'),requireCsrf,async(req:AuthRequest,res)=>{
+  const parsed=z.object({name:z.string().trim().min(1).max(120).optional(),attributes:z.record(z.string(),z.string()).optional(),priceDelta:z.number().optional(),costDelta:z.number().optional(),active:z.boolean().optional()}).strict().safeParse(req.body);
+  if(!parsed.success)return fail(req,res,422,'VALIDATION_ERROR','Enter valid variant changes.',parsed.error.flatten());
+  const existing=await db.productVariant.findFirst({where:{id:routeParam(req,'variantId'),productId:routeParam(req,'productId'),organizationId:req.user!.organizationId}});
+  if(!existing)return fail(req,res,404,'NOT_FOUND','Product variant not found.');
+  const updated=await db.$transaction(async tx=>{const value=await tx.productVariant.update({where:{id:existing.id},data:{...parsed.data,...(parsed.data.attributes?{attributes:asJson(parsed.data.attributes)}:{})}});await audit(tx,req,'PRODUCT_VARIANT_UPDATED','ProductVariant',value.id);return value});
+  return ok(req,res,updated);
+});
+
+app.post('/api/v1/price-lists',authenticate,requireModule('products'),requireRole('ADMIN'),requireCsrf,async(req:AuthRequest,res)=>{
+  const parsed=z.object({name:z.string().trim().min(2).max(120),customerTier:z.string().trim().min(1).max(80).nullable().optional(),currency:z.string().trim().length(3).toUpperCase(),effectiveFrom:z.string().datetime().optional(),effectiveTo:z.string().datetime().nullable().optional(),active:z.boolean().default(true),items:z.array(z.object({productId:z.string().uuid(),variantId:z.string().uuid().nullable().optional(),unitPrice:z.number().positive()}).strict()).min(1).max(500)}).strict().safeParse(req.body);
+  if(!parsed.success)return fail(req,res,422,'VALIDATION_ERROR','Enter a valid price list and at least one priced product/variant.',parsed.error.flatten());
+  const productIds=[...new Set(parsed.data.items.map(item=>item.productId))];const variantIds=parsed.data.items.map(item=>item.variantId).filter((value):value is string=>Boolean(value));
+  const [products,variants]=await Promise.all([db.product.findMany({where:{id:{in:productIds},organizationId:req.user!.organizationId}}),variantIds.length?db.productVariant.findMany({where:{id:{in:variantIds},organizationId:req.user!.organizationId}}):[]]);
+  if(products.length!==productIds.length||variants.length!==new Set(variantIds).size||parsed.data.items.some(item=>item.variantId&&!variants.some(variant=>variant.id===item.variantId&&variant.productId===item.productId)))return fail(req,res,422,'CONFIGURATION_REQUIRED','Every price-list item must reference a product and optional variant from this workspace.');
+  const list=await db.$transaction(async tx=>{const created=await tx.priceList.create({data:{organizationId:req.user!.organizationId,name:parsed.data.name,customerTier:parsed.data.customerTier??null,currency:parsed.data.currency,active:parsed.data.active,effectiveFrom:parsed.data.effectiveFrom?new Date(parsed.data.effectiveFrom):new Date(),effectiveTo:parsed.data.effectiveTo?new Date(parsed.data.effectiveTo):null,items:{create:parsed.data.items.map(item=>({productId:item.productId,variantId:item.variantId??null,unitPrice:item.unitPrice}))}},include:{items:true}});await audit(tx,req,'PRICE_LIST_CREATED','PriceList',created.id);return created});
+  return ok(req,res,list,201);
+});
+
+app.put('/api/v1/price-lists/:id/items',authenticate,requireModule('products'),requireRole('ADMIN'),requireCsrf,async(req:AuthRequest,res)=>{
+  const parsed=z.object({items:z.array(z.object({productId:z.string().uuid(),variantId:z.string().uuid().nullable().optional(),unitPrice:z.number().positive()}).strict()).min(1).max(500),reason:z.string().trim().min(5).max(240)}).strict().safeParse(req.body);
+  if(!parsed.success)return fail(req,res,422,'VALIDATION_ERROR','Enter valid price-list items and a reason.',parsed.error.flatten());
+  const list=await db.priceList.findFirst({where:{id:routeParam(req,'id'),organizationId:req.user!.organizationId}});if(!list)return fail(req,res,404,'NOT_FOUND','Price list not found.');
+  const productIds=[...new Set(parsed.data.items.map(item=>item.productId))];const variantIds=[...new Set(parsed.data.items.map(item=>item.variantId).filter((id):id is string=>Boolean(id)))];
+  const [ownedProducts,ownedVariants]=await Promise.all([db.product.findMany({where:{id:{in:productIds},organizationId:req.user!.organizationId},select:{id:true}}),variantIds.length?db.productVariant.findMany({where:{id:{in:variantIds},organizationId:req.user!.organizationId},select:{id:true,productId:true}}):Promise.resolve([])]);
+  if(ownedProducts.length!==productIds.length||ownedVariants.length!==variantIds.length||parsed.data.items.some(item=>item.variantId&&!ownedVariants.some(variant=>variant.id===item.variantId&&variant.productId===item.productId)))return fail(req,res,422,'INVALID_PRICE_LIST_ITEM','Every item must reference an organization product and a matching variant.');
+  const updated=await db.$transaction(async tx=>{await tx.priceListItem.deleteMany({where:{priceListId:list.id}});await tx.priceListItem.createMany({data:parsed.data.items.map(item=>({priceListId:list.id,productId:item.productId,variantId:item.variantId??null,unitPrice:item.unitPrice}))});await audit(tx,req,'PRICE_LIST_PUBLISHED','PriceList',list.id,parsed.data.reason);return tx.priceList.findUniqueOrThrow({where:{id:list.id},include:{items:true}})});
+  return ok(req,res,updated);
+});
+
 app.patch('/api/v1/policies/:id', authenticate, requireModule('policies'), requireRole('ADMIN', 'MANAGER'), requireCsrf, async (req: AuthRequest, res) => {
   const parsed = discountPolicyUpdateSchema.safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter valid policy values and a change reason.', parsed.error.flatten());
   const existing = await db.discountPolicy.findFirst({ where: { id: routeParam(req, 'id'), organizationId: req.user!.organizationId } });
   if (!existing) return fail(req, res, 404, 'NOT_FOUND', 'Policy not found.');
+  const configuredReviewers=[parsed.data.managerReviewerId,parsed.data.financeReviewerId].filter((id):id is string=>Boolean(id));
+  if(configuredReviewers.length){const reviewers=await db.user.findMany({where:{id:{in:configuredReviewers},organizationId:req.user!.organizationId,status:'ACTIVE'},select:{id:true}});if(reviewers.length!==new Set(configuredReviewers).size)return fail(req,res,422,'INVALID_REVIEWER','Every configured reviewer must be an active user in this organization.');}
   const { reason, ...changes } = parsed.data;
   const policy = await db.$transaction(async (tx) => { const updated = await tx.discountPolicy.update({ where: { id: existing.id }, data: { ...changes, version: { increment: 1 }, publishedAt: new Date() } }); await audit(tx, req, 'POLICY_UPDATED', 'DiscountPolicy', updated.id, reason); return updated; });
   return ok(req, res, policy);
@@ -1931,6 +2034,7 @@ app.use((error: unknown, req: AuthRequest, res: Response, _next: NextFunction) =
   if (error instanceof OrderConfirmationError) return fail(req, res, error.status, error.code, error.message);
   if (error instanceof BillingError) return fail(req, res, error.status, error.code, error.message);
   if (error instanceof FulfillmentError) return fail(req, res, error.status, error.code, error.message, error.details);
+  if (error instanceof ShipmentError) return fail(req, res, error.status, error.code, error.message);
   if (error instanceof CustomerRelationshipError) return fail(req, res, error.status, error.code, error.message);
   if (error instanceof PortalRequestError) {
     if (error.retryAfter) res.setHeader('Retry-After', error.retryAfter);

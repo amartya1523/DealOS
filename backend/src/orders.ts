@@ -113,7 +113,7 @@ export async function confirmEligibleRevision(tx: Prisma.TransactionClient, inpu
   const billing = await createConfirmationBilling(tx, { organizationId: input.organizationId, actorId: input.actorId, requestId: input.requestId, confirmedAt: acceptance.acceptedAt, quote: { id: quote.id, number: quote.number, customer: quote.customer, customerId: quote.customerId }, revision: { id: input.revisionId, total: quote.currentRevision.total, currency: quote.currentRevision.currency }, order });
   await tx.quote.update({ where: { id: quote.id }, data: { stage: 'CONFIRMED', version: { increment: 1 }, lastActivity: new Date() } });
   await tx.auditEvent.create({ data: { organizationId: input.organizationId, actorId: input.actorId, action: 'CUSTOMER_ACCEPTED', resource: 'Quote', resourceId: quote.id, revisionId: input.revisionId, requestId: input.requestId } });
-  const body = { acceptanceId: acceptance.id, orderId: order.id, orderNumber: order.number, revisionId: input.revisionId, invoiceId: billing.invoice.id, subscriptionIds: billing.subscriptions.map((item) => item.id), state: 'CONFIRMED' };
+  const body = { acceptanceId: acceptance.id, orderId: order.id, orderNumber: order.number, revisionId: input.revisionId, invoiceId: billing.invoice?.id ?? null, recurringInvoiceIds: billing.invoices.map((item) => item.id), subscriptionIds: billing.subscriptions.map((item) => item.id), state: 'CONFIRMED', hardwareBillingState: 'AWAITING_SHIPMENT' };
   await tx.idempotencyRecord.create({ data: { actorId: input.actorId, operation, resourceKey: input.quoteId, key: input.idempotencyKey, payloadHash: fingerprint, responseStatus: 201, responseBody: asJson(body) } });
   return { ...body, replayed: false };
 }

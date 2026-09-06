@@ -18,6 +18,9 @@ export type GovernancePolicy = {
   financeThreshold: DecimalValue;
   aggregateDiscountLimit: DecimalValue;
   minimumMarginPercent: DecimalValue;
+  approvalSequence?: string[];
+  managerReviewerId?: string|null;
+  financeReviewerId?: string|null;
 };
 
 export type RiskFlag = {
@@ -84,6 +87,9 @@ export function evaluateRisk(calculation: GovernanceCalculation, policy: Governa
       financeThreshold,
       aggregateDiscountLimit,
       minimumMarginPercent,
+      approvalSequence: policy.approvalSequence ?? ['Sales Manager','Finance'],
+      managerReviewerId: policy.managerReviewerId ?? null,
+      financeReviewerId: policy.financeReviewerId ?? null,
     },
     components: {
       worstExcess: rounded(calculation.worstExcess),
@@ -95,19 +101,18 @@ export function evaluateRisk(calculation: GovernanceCalculation, policy: Governa
   };
 }
 
-export function approvalStepsForRoute(route: ApprovalRoute) {
+export function approvalStepsForRoute(route: ApprovalRoute, policy?:{approvalSequence?:string[];managerReviewerId?:string|null;financeReviewerId?:string|null}) {
   if (route === 'NONE') return [];
-  return [
-    { step: 'Sales Manager', sequence: 1, state: 'PENDING' as const },
-    ...(route === 'MANAGER_FINANCE' ? [{ step: 'Finance', sequence: 2, state: 'WAITING' as const }] : []),
-  ];
+  const manager={step:'Sales Manager',...(policy?.managerReviewerId?{reviewerId:policy.managerReviewerId}:{})};const finance={step:'Finance',...(policy?.financeReviewerId?{reviewerId:policy.financeReviewerId}:{})};
+  const ordered=route==='MANAGER'?[manager]:policy?.approvalSequence?.[0]==='Finance'?[finance,manager]:[manager,finance];
+  return ordered.map((step,index)=>({...step,sequence:index+1,state:index===0?'PENDING' as const:'WAITING' as const}));
 }
 
 export async function openCase(
   tx: Prisma.TransactionClient,
   input: { quoteId: string; revisionId: string; policyId: string; cycle: number; submittedById: string; evaluation: ReturnType<typeof evaluateRisk> },
 ) {
-  const steps = approvalStepsForRoute(input.evaluation.route);
+  const steps = approvalStepsForRoute(input.evaluation.route,input.evaluation.policy);
   return tx.approvalCase.create({
     data: {
       quoteId: input.quoteId,
@@ -129,12 +134,13 @@ export class GovernanceError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
 }
 
-export function validateDecisionContext(input:{expectedVersion:number;caseVersion:number;caseState:string;step:{step:string;state:string}|undefined;actor:{id:string;role:string};submittedById:string;ownerId:string;managerId:string|null}) {
+export function validateDecisionContext(input:{expectedVersion:number;caseVersion:number;caseState:string;step:{step:string;state:string;reviewerId?:string|null}|undefined;actor:{id:string;role:string};submittedById:string;ownerId:string;managerId:string|null}) {
   if (input.caseVersion !== input.expectedVersion) throw new GovernanceError(409, 'STALE_VERSION', 'Refresh this approval case before deciding.');
   if (input.caseState !== 'PENDING') throw new GovernanceError(409, 'INVALID_STATE', 'This approval case is no longer pending.');
   if (!input.step || input.step.state !== 'PENDING') throw new GovernanceError(409, 'APPROVAL_STEP_BLOCKED', 'The next approval step is not available.');
-  if (input.step.step === 'Sales Manager' && (input.actor.role !== 'MANAGER' || input.managerId !== input.actor.id)) throw new GovernanceError(403, 'FORBIDDEN', 'This Sales Manager step belongs to another team.');
-  if (input.step.step === 'Finance' && input.actor.role !== 'FINANCE') throw new GovernanceError(403, 'FORBIDDEN', 'Finance must complete this step.');
+  if(input.step.reviewerId&&input.step.reviewerId!==input.actor.id)throw new GovernanceError(403,'FORBIDDEN','This approval step is assigned to another reviewer.');
+  if (!input.step.reviewerId&&input.step.step === 'Sales Manager' && (input.actor.role !== 'MANAGER' || input.managerId !== input.actor.id)) throw new GovernanceError(403, 'FORBIDDEN', 'This Sales Manager step belongs to another team.');
+  if (!input.step.reviewerId&&input.step.step === 'Finance' && input.actor.role !== 'FINANCE') throw new GovernanceError(403, 'FORBIDDEN', 'Finance must complete this step.');
   if (input.submittedById === input.actor.id || input.ownerId === input.actor.id) throw new GovernanceError(409, 'SELF_APPROVAL_NOT_ALLOWED', 'The submitter cannot approve their own quotation.');
 }
 

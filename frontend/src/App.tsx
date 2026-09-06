@@ -1,788 +1,9706 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { AlertTriangle, ArrowRight, Bell, Boxes, CalendarClock, Check, ChevronLeft, ChevronRight, ClipboardCheck, Copy, Download, Eye, FileCheck, FilePlus2, FileText, HeartPulse, History, Inbox, IndianRupee, LayoutDashboard, LockKeyhole, LogOut, Mail, Menu, MessageSquare, Package, PackagePlus, Pencil, Plus, Receipt, RefreshCw, Search, Send, Settings2, ShieldCheck, ShoppingCart, Sparkles, Store, ThumbsDown, Trash2, UserRound, X } from 'lucide-react';
-import { Landing, AuthPage, CustomerAuthPage } from './Public';
-import { Brand } from './Brand';
-import { request, type Customer, type Invoice, type Product, type Quote, type Warehouse, type Workspace } from './api';
-import { CustomerQuotationRoom } from './features/portal/CustomerQuotationRoom';
-import { PlatformAdmin, SuperAdminLogin } from './PlatformAdmin';
-import { QuotationsPage } from './features/quotations/QuotationsPage';
-import { QuotationDetailPage } from './features/quotations/QuotationDetailPage';
-import { DealHealth } from './DealHealth';
-import { SalesReporting } from './SalesReporting';
-import { InvoiceDetailPage, InvoicesPage } from './features/invoices/InvoicesPage';
-import { CustomerRelationshipCard } from './features/customers/CustomerRelationshipCard';
-import { PortalAccessSection } from './features/customers/PortalAccessSection';
-import { PortalInvitationPage } from './features/portal/PortalInvitationPage';
-import { ApprovalDetailPage, ApprovalsPage } from './features/approvals/ApprovalsPage';
-import { DealAssistant } from './DealAssistant';
-import { PortalRequests } from './features/portal/PortalRequests';
-import { LeadsPage } from './features/quotations/LeadsPage';
-import { RfqHandlingSettings } from './features/customers/RfqHandlingSettings';
-import { SalesTeamManagement } from './features/access/SalesTeamManagement';
-import { payInvoiceWithRazorpay } from './razorpay';
-import { BusinessDirectoryPage, DirectoryProfileSettings, JoinRequestsPage } from './features/customers/BusinessDirectory';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  Bell,
+  Boxes,
+  CalendarClock,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardCheck,
+  Copy,
+  Download,
+  Eye,
+  FileCheck,
+  FilePlus2,
+  FileText,
+  HeartPulse,
+  History,
+  Inbox,
+  IndianRupee,
+  LayoutDashboard,
+  LockKeyhole,
+  LogOut,
+  Mail,
+  Menu,
+  MessageSquare,
+  Package,
+  PackagePlus,
+  Pencil,
+  Plus,
+  Receipt,
+  RefreshCw,
+  Search,
+  Send,
+  Settings2,
+  ShieldCheck,
+  ShoppingCart,
+  Sparkles,
+  Store,
+  ThumbsDown,
+  Trash2,
+  UserRound,
+  X,
+} from "lucide-react";
+import { Landing, AuthPage, CustomerAuthPage } from "./Public";
+import { Brand } from "./Brand";
+import {
+  request,
+  type Customer,
+  type Invoice,
+  type Product,
+  type Quote,
+  type Warehouse,
+  type Workspace,
+} from "./api";
+import { CustomerQuotationRoom } from "./features/portal/CustomerQuotationRoom";
+import { PlatformAdmin, SuperAdminLogin } from "./PlatformAdmin";
+import { QuotationsPage } from "./features/quotations/QuotationsPage";
+import { QuotationDetailPage } from "./features/quotations/QuotationDetailPage";
+import { DealHealth } from "./DealHealth";
+import { SalesReporting } from "./SalesReporting";
+import {
+  InvoiceDetailPage,
+  InvoicesPage,
+} from "./features/invoices/InvoicesPage";
+import { CustomerRelationshipCard } from "./features/customers/CustomerRelationshipCard";
+import { PortalAccessSection } from "./features/customers/PortalAccessSection";
+import { PortalInvitationPage } from "./features/portal/PortalInvitationPage";
+import {
+  ApprovalDetailPage,
+  ApprovalsPage,
+} from "./features/approvals/ApprovalsPage";
+import { DealAssistant } from "./DealAssistant";
+import { PortalRequests } from "./features/portal/PortalRequests";
+import { LeadsPage } from "./features/quotations/LeadsPage";
+import { RfqHandlingSettings } from "./features/customers/RfqHandlingSettings";
+import { SalesTeamManagement } from "./features/access/SalesTeamManagement";
+import { payInvoiceWithRazorpay } from "./razorpay";
+import {
+  BusinessDirectoryPage,
+  DirectoryProfileSettings,
+  JoinRequestsPage,
+} from "./features/customers/BusinessDirectory";
 
-type View = 'dashboard'|'leads'|'join-requests'|'quotations'|'quote'|'approvals'|'approval'|'fulfillment'|'fulfillment-detail'|'subscriptions'|'billing'|'portal'|'invoices'|'invoice'|'health'|'reports'|'products'|'product'|'customers'|'customer'|'policies'|'access';
-type WorkspaceUser = Workspace['user'];
-const money = (value:number|string) => new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0}).format(Number(value));
-const invoiceMoney = (value:number|string) => new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(value));
-const date = (value:string) => new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',year:'numeric'}).format(new Date(value));
-const label = (value:string) => value.replaceAll('_',' ').toLowerCase().replace(/\b\w/g,(c)=>c.toUpperCase());
-const quoteStatus = (quote:Pick<Quote,'stage'|'sentAt'>) => quote.stage==='APPROVED'&&quote.sentAt?'PENDING_CUSTOMER_ACCEPTANCE':quote.stage;
-const usesCompactSidebar=()=>window.matchMedia?.('(max-width: 760px)').matches??false;
-const generatedPassword=()=>{const random=crypto.getRandomValues(new Uint32Array(2));return `Deal-${random[0]!.toString(36).padStart(7,'0')}-${random[1]!.toString(36).padStart(7,'0')}!`};
+type View =
+  | "dashboard"
+  | "leads"
+  | "join-requests"
+  | "quotations"
+  | "quote"
+  | "approvals"
+  | "approval"
+  | "fulfillment"
+  | "fulfillment-detail"
+  | "subscriptions"
+  | "billing"
+  | "portal"
+  | "invoices"
+  | "invoice"
+  | "health"
+  | "reports"
+  | "products"
+  | "product"
+  | "customers"
+  | "customer"
+  | "policies"
+  | "access";
+type WorkspaceUser = Workspace["user"];
+const money = (value: number | string) =>
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(Number(value));
+const invoiceMoney = (value: number | string) =>
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(value));
+const date = (value: string) =>
+  new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(value));
+const label = (value: string) =>
+  value
+    .replaceAll("_", " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+const quoteStatus = (quote: Pick<Quote, "stage" | "sentAt">) =>
+  quote.stage === "APPROVED" && quote.sentAt
+    ? "PENDING_CUSTOMER_ACCEPTANCE"
+    : quote.stage;
+const usesCompactSidebar = () =>
+  window.matchMedia?.("(max-width: 760px)").matches ?? false;
+const generatedPassword = () => {
+  const random = crypto.getRandomValues(new Uint32Array(2));
+  return `Deal-${random[0]!.toString(36).padStart(7, "0")}-${random[1]!.toString(36).padStart(7, "0")}!`;
+};
 
-const nav:[View,string,ReactNode][] = [
-  ['dashboard','Overview',<LayoutDashboard/>],['leads','Portal leads',<Inbox/>],['join-requests','Join requests',<Mail/>],['quotations','Quotations',<FileText/>],['approvals','Approvals',<ClipboardCheck/>],['fulfillment','Fulfillment',<Boxes/>],['subscriptions','Subscriptions',<RefreshCw/>],['invoices','Invoices',<IndianRupee/>],['health','Deal health',<HeartPulse/>],['reports','Reports',<IndianRupee/>],['products','Products',<Package/>],['customers','Customers',<Store/>],['policies','Rules',<ShieldCheck/>],
-  ['access','User access',<UserRound/>],
+const nav: [View, string, ReactNode][] = [
+  ["dashboard", "Overview", <LayoutDashboard />],
+  ["leads", "Portal leads", <Inbox />],
+  ["join-requests", "Join requests", <Mail />],
+  ["quotations", "Quotations", <FileText />],
+  ["approvals", "Approvals", <ClipboardCheck />],
+  ["fulfillment", "Fulfillment", <Boxes />],
+  ["subscriptions", "Subscriptions", <RefreshCw />],
+  ["invoices", "Invoices", <IndianRupee />],
+  ["health", "Deal health", <HeartPulse />],
+  ["reports", "Reports", <IndianRupee />],
+  ["products", "Products", <Package />],
+  ["customers", "Customers", <Store />],
+  ["policies", "Rules", <ShieldCheck />],
+  ["access", "User access", <UserRound />],
 ];
-const viewModules:Partial<Record<View,string>>={dashboard:'dashboard',leads:'quotations','join-requests':'customers',quotations:'quotations',quote:'quotations',approvals:'approvals',approval:'approvals',fulfillment:'fulfillment','fulfillment-detail':'fulfillment',subscriptions:'subscriptions',billing:'subscriptions',invoices:'invoices',invoice:'invoices',health:'health',reports:'reports',products:'products',product:'products',customers:'customers',customer:'customers',policies:'policies'};
-function canAccessView(user:WorkspaceUser,view:View){
-  if(user.role==='CUSTOMER')return view==='portal';
-  if(view==='portal')return false;
-  if(view==='access')return user.role==='ADMIN';
-  if(view==='subscriptions'||view==='billing')return user.role==='ADMIN';
-  if((view==='approvals'||view==='approval')&&!['MANAGER','FINANCE'].includes(user.role))return false;
-  if(view==='leads'&&!['REP','MANAGER'].includes(user.role))return false;
-  if(view==='join-requests'&&!['MANAGER','ADMIN'].includes(user.role))return false;
-  if(view==='health'&&!['REP','MANAGER','ADMIN'].includes(user.role))return false;
-  const module=viewModules[view];
-  return Boolean(module&&(user.role==='ADMIN'||user.moduleAccess.includes(module)));
+const viewModules: Partial<Record<View, string>> = {
+  dashboard: "dashboard",
+  leads: "quotations",
+  "join-requests": "customers",
+  quotations: "quotations",
+  quote: "quotations",
+  approvals: "approvals",
+  approval: "approvals",
+  fulfillment: "fulfillment",
+  "fulfillment-detail": "fulfillment",
+  subscriptions: "subscriptions",
+  billing: "subscriptions",
+  invoices: "invoices",
+  invoice: "invoices",
+  health: "health",
+  reports: "reports",
+  products: "products",
+  product: "products",
+  customers: "customers",
+  customer: "customers",
+  policies: "policies",
+};
+function canAccessView(user: WorkspaceUser, view: View) {
+  if (user.role === "CUSTOMER") return view === "portal";
+  if (view === "portal") return false;
+  if (view === "access") return user.role === "ADMIN";
+  if (view === "subscriptions" || view === "billing")
+    return user.role === "ADMIN";
+  if (
+    (view === "approvals" || view === "approval") &&
+    !["MANAGER", "FINANCE"].includes(user.role)
+  )
+    return false;
+  if (view === "leads" && !["REP", "MANAGER"].includes(user.role)) return false;
+  if (view === "join-requests" && !["MANAGER", "ADMIN"].includes(user.role))
+    return false;
+  if (view === "health" && !["REP", "MANAGER", "ADMIN"].includes(user.role))
+    return false;
+  const module = viewModules[view];
+  return Boolean(
+    module && (user.role === "ADMIN" || user.moduleAccess.includes(module)),
+  );
 }
-const firstAccessibleView=(user:WorkspaceUser)=>nav.find(([id])=>canAccessView(user,id))?.[0]??null;
-const views = new Set<View>(['dashboard','leads','join-requests','quotations','quote','approvals','approval','fulfillment','fulfillment-detail','subscriptions','billing','portal','invoices','invoice','health','reports','products','product','customers','customer','policies','access']);
-const viewFromUrl=()=>{const value=new URLSearchParams(window.location.search).get('screen') as View|null;return value&&views.has(value)?value:'dashboard'};
-const recordFromUrl=()=>new URLSearchParams(window.location.search).get('record')??'';
+const firstAccessibleView = (user: WorkspaceUser) =>
+  nav.find(([id]) => canAccessView(user, id))?.[0] ?? null;
+const views = new Set<View>([
+  "dashboard",
+  "leads",
+  "join-requests",
+  "quotations",
+  "quote",
+  "approvals",
+  "approval",
+  "fulfillment",
+  "fulfillment-detail",
+  "subscriptions",
+  "billing",
+  "portal",
+  "invoices",
+  "invoice",
+  "health",
+  "reports",
+  "products",
+  "product",
+  "customers",
+  "customer",
+  "policies",
+  "access",
+]);
+const viewFromUrl = () => {
+  const value = new URLSearchParams(window.location.search).get(
+    "screen",
+  ) as View | null;
+  return value && views.has(value) ? value : "dashboard";
+};
+const recordFromUrl = () =>
+  new URLSearchParams(window.location.search).get("record") ?? "";
 
-export function App(){
-  const [route,setRoute]=useState(()=>window.location.pathname);
-  const [view,setView]=useState<View>(viewFromUrl);
-  const [selectedId,setSelectedId]=useState(recordFromUrl);
-  const [checking,setChecking]=useState(true);
-  const navigate=(path:string)=>{window.history.pushState({},'',path);setRoute(window.location.pathname);window.scrollTo(0,0)};
-  useEffect(()=>{const sync=()=>{setRoute(window.location.pathname);setView(viewFromUrl());setSelectedId(recordFromUrl())};window.addEventListener('popstate',sync);return()=>window.removeEventListener('popstate',sync)},[]);
-  useEffect(()=>{document.title=route==='/'?'DealOS — Less friction. More forward.':route==='/directory'?'Business directory — DealOS':route.startsWith('/customer')?'Customer Portal — DealOS':route==='/login/super-admin'?'Platform Owner — DealOS':route.includes('sign-up')||route==='/signup'?'Create your account — DealOS':route.includes('sign-in')||route==='/signin'?'Sign in — DealOS':'Workspace — DealOS'},[route]);
-  const [workspace,setWorkspace]=useState<Workspace|null>(null);
-  const workspaceId=workspace?.organization?.id;
-  const [sidebarCollapsed,setSidebarCollapsed]=useState(()=>window.localStorage.getItem('dealos.sidebar.collapsed')==='true');
-  const sidebarCollapseTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
-  const toastTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
-  const [busy,setBusy]=useState(false); const [error,setError]=useState(''); const [toast,setToast]=useState('');
-  const load=useCallback(async()=>{try{setError('');setWorkspace(await request<Workspace>('/workspace'));}catch(e){setWorkspace(null);setError(e instanceof Error?e.message:'Unable to load DealOS');}},[]);
-  useEffect(()=>{request('/auth/me').then(load).catch(()=>undefined).finally(()=>setChecking(false))},[load]);
-  useEffect(()=>{if(!workspace||route!=='/app'||workspace.user.role==='CUSTOMER'||(workspace.user.platformSuperAdmin&&!workspace.user.viewContext)||canAccessView(workspace.user,view))return;const fallback=firstAccessibleView(workspace.user);if(!fallback)return;const params=new URLSearchParams(window.location.search);params.set('screen',fallback);params.delete('record');params.delete('revision');window.history.replaceState({},'',`/app?${params}`);setSelectedId('');setView(fallback);},[route,view,workspace]);
-  useEffect(()=>{if(!workspaceId||route!=='/app')return;const timer=window.setInterval(()=>{if(document.visibilityState==='visible')void load()},30000);return()=>window.clearInterval(timer)},[workspaceId,route,load]);
-  useEffect(()=>{const refreshInvoice=(event:StorageEvent)=>{if(event.key==='dealos.invoice.updated')void load()};window.addEventListener('storage',refreshInvoice);return()=>window.removeEventListener('storage',refreshInvoice)},[load]);
-  useEffect(()=>()=>{if(sidebarCollapseTimer.current)clearTimeout(sidebarCollapseTimer.current);if(toastTimer.current)clearTimeout(toastTimer.current)},[]);
-  useEffect(()=>{ const context=(document as Document & {modelContext?:{registerTool:(tool:unknown,options?:{signal?:AbortSignal})=>void}}).modelContext; if(!context?.registerTool)return; const controller=new AbortController(); context.registerTool({name:'read_dealos_workspace',title:'Read DealOS workspace',description:'Return the current DealOS screen and visible aggregate counts without changing data.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true},execute:()=>({screen:view,counts:workspace?{quotes:workspace.quotes.length,pendingApprovals:workspace.quotes.flatMap(q=>q.approvals).filter(a=>a.state==='PENDING').length,alerts:workspace.alerts.filter(a=>!a.resolved).length}:null})},{signal:controller.signal}); return()=>controller.abort();},[view,workspace]);
-  const mutate=async(path:string,body:unknown,method='POST',message='Updated')=>{if(workspace?.user.viewContext?.readOnly){setError('View As mode is read-only. Exit the simulated context before making changes.');return false}try{setBusy(true);setError('');await request(path,{method,body:JSON.stringify(body)});await load();setToast(message);if(toastTimer.current)clearTimeout(toastTimer.current);toastTimer.current=setTimeout(()=>{setToast('');toastTimer.current=null},2400);return true}catch(e){setError(e instanceof Error?e.message:'Action failed');return false}finally{setBusy(false)}};
-  const mutateVoid=async(path:string,body:unknown,method?:string,message?:string)=>{await mutate(path,body,method,message)};
-  if(route==='/')return <><Landing/><DealAssistant/></>;
-  if(route==='/directory')return <BusinessDirectoryPage/>;
-  const portalInvitationToken=route.match(/^\/customer\/invitations\/([^/]+)$/)?.[1];
-  if(portalInvitationToken)return <PortalInvitationPage token={decodeURIComponent(portalInvitationToken)} onAccepted={async()=>{await load();navigate('/customer')}}/>;
-  if(['/sign-up','/signup'].includes(route))return <><AuthPage signup onSuccess={async()=>{await load();navigate('/app')}}/><DealAssistant/></>;
-  if(['/sign-in','/signin','/login'].includes(route))return <><AuthPage onSuccess={async()=>{await load();navigate('/app')}} error={error}/><DealAssistant/></>;
-  if(route==='/login/super-admin')return <><SuperAdminLogin onSuccess={async()=>{await load();navigate('/app')}}/><DealAssistant/></>;
-  if(['/customer','/customer/sign-in'].includes(route)){
-    if(checking)return <div className="customer-route-loading" role="status">Opening your secure deal room…</div>;
-    if(!workspace||workspace.user.role!=='CUSTOMER')return <><CustomerAuthPage signedInRole={workspace?.user.role} onSuccess={async()=>{await load();navigate('/customer')}}/><DealAssistant/></>;
-    return <><div className="app-shell customer-route-shell"><main className="portal-main"><section className="content"><CustomerPortalV2 data={workspace} mutate={mutate} reload={load} logout={async()=>{await request('/auth/logout',{method:'POST',body:'{}'});setWorkspace(null);navigate('/customer/sign-in')}}/></section></main>{busy&&<div className="busy"><RefreshCw/> Saving changes…</div>}{toast&&<div className="toast"><Check/>{toast}</div>}</div><DealAssistant workspace={workspace} screen="customer-portal" onChanged={load}/></>;
+export function App() {
+  const [route, setRoute] = useState(() => window.location.pathname);
+  const [view, setView] = useState<View>(viewFromUrl);
+  const [selectedId, setSelectedId] = useState(recordFromUrl);
+  const [checking, setChecking] = useState(true);
+  const navigate = (path: string) => {
+    window.history.pushState({}, "", path);
+    setRoute(window.location.pathname);
+    window.scrollTo(0, 0);
+  };
+  useEffect(() => {
+    const sync = () => {
+      setRoute(window.location.pathname);
+      setView(viewFromUrl());
+      setSelectedId(recordFromUrl());
+    };
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
+  useEffect(() => {
+    document.title =
+      route === "/"
+        ? "DealOS — Less friction. More forward."
+        : route === "/directory"
+          ? "Business directory — DealOS"
+          : route.startsWith("/customer")
+            ? "Customer Portal — DealOS"
+            : route === "/login/super-admin"
+              ? "Platform Owner — DealOS"
+              : route.includes("sign-up") || route === "/signup"
+                ? "Create your account — DealOS"
+                : route.includes("sign-in") || route === "/signin"
+                  ? "Sign in — DealOS"
+                  : "Workspace — DealOS";
+  }, [route]);
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const workspaceId = workspace?.organization?.id;
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => window.localStorage.getItem("dealos.sidebar.collapsed") === "true",
+  );
+  const sidebarCollapseTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
+  const load = useCallback(async () => {
+    try {
+      setError("");
+      setWorkspace(await request<Workspace>("/workspace"));
+    } catch (e) {
+      setWorkspace(null);
+      setError(e instanceof Error ? e.message : "Unable to load DealOS");
+    }
+  }, []);
+  useEffect(() => {
+    request("/auth/me")
+      .then(load)
+      .catch(() => undefined)
+      .finally(() => setChecking(false));
+  }, [load]);
+  useEffect(() => {
+    if (
+      !workspace ||
+      route !== "/app" ||
+      workspace.user.role === "CUSTOMER" ||
+      (workspace.user.platformSuperAdmin && !workspace.user.viewContext) ||
+      canAccessView(workspace.user, view)
+    )
+      return;
+    const fallback = firstAccessibleView(workspace.user);
+    if (!fallback) return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("screen", fallback);
+    params.delete("record");
+    params.delete("revision");
+    window.history.replaceState({}, "", `/app?${params}`);
+    setSelectedId("");
+    setView(fallback);
+  }, [route, view, workspace]);
+  useEffect(() => {
+    if (!workspaceId || route !== "/app") return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, [workspaceId, route, load]);
+  useEffect(() => {
+    const refreshInvoice = (event: StorageEvent) => {
+      if (event.key === "dealos.invoice.updated") void load();
+    };
+    window.addEventListener("storage", refreshInvoice);
+    return () => window.removeEventListener("storage", refreshInvoice);
+  }, [load]);
+  useEffect(
+    () => () => {
+      if (sidebarCollapseTimer.current)
+        clearTimeout(sidebarCollapseTimer.current);
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    },
+    [],
+  );
+  useEffect(() => {
+    const context = (
+      document as Document & {
+        modelContext?: {
+          registerTool: (
+            tool: unknown,
+            options?: { signal?: AbortSignal },
+          ) => void;
+        };
+      }
+    ).modelContext;
+    if (!context?.registerTool) return;
+    const controller = new AbortController();
+    context.registerTool(
+      {
+        name: "read_dealos_workspace",
+        title: "Read DealOS workspace",
+        description:
+          "Return the current DealOS screen and visible aggregate counts without changing data.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        },
+        annotations: { readOnlyHint: true },
+        execute: () => ({
+          screen: view,
+          counts: workspace
+            ? {
+                quotes: workspace.quotes.length,
+                pendingApprovals: workspace.quotes
+                  .flatMap((q) => q.approvals)
+                  .filter((a) => a.state === "PENDING").length,
+                alerts: workspace.alerts.filter((a) => !a.resolved).length,
+              }
+            : null,
+        }),
+      },
+      { signal: controller.signal },
+    );
+    return () => controller.abort();
+  }, [view, workspace]);
+  const mutate = async (
+    path: string,
+    body: unknown,
+    method = "POST",
+    message = "Updated",
+  ) => {
+    if (workspace?.user.viewContext?.readOnly) {
+      setError(
+        "View As mode is read-only. Exit the simulated context before making changes.",
+      );
+      return false;
+    }
+    try {
+      setBusy(true);
+      setError("");
+      await request(path, { method, body: JSON.stringify(body) });
+      await load();
+      setToast(message);
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => {
+        setToast("");
+        toastTimer.current = null;
+      }, 2400);
+      return true;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Action failed");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const mutateVoid = async (
+    path: string,
+    body: unknown,
+    method?: string,
+    message?: string,
+  ) => {
+    await mutate(path, body, method, message);
+  };
+  if (route === "/")
+    return (
+      <>
+        <Landing />
+        <DealAssistant />
+      </>
+    );
+  if (route === "/directory") return <BusinessDirectoryPage />;
+  const portalInvitationToken = route.match(
+    /^\/customer\/invitations\/([^/]+)$/,
+  )?.[1];
+  if (portalInvitationToken)
+    return (
+      <PortalInvitationPage
+        token={decodeURIComponent(portalInvitationToken)}
+        onAccepted={async () => {
+          await load();
+          navigate("/customer");
+        }}
+      />
+    );
+  if (["/sign-up", "/signup"].includes(route))
+    return (
+      <>
+        <AuthPage
+          signup
+          onSuccess={async () => {
+            await load();
+            navigate("/app");
+          }}
+        />
+        <DealAssistant />
+      </>
+    );
+  if (["/sign-in", "/signin", "/login"].includes(route))
+    return (
+      <>
+        <AuthPage
+          onSuccess={async () => {
+            await load();
+            navigate("/app");
+          }}
+          error={error}
+        />
+        <DealAssistant />
+      </>
+    );
+  if (route === "/login/super-admin")
+    return (
+      <>
+        <SuperAdminLogin
+          onSuccess={async () => {
+            await load();
+            navigate("/app");
+          }}
+        />
+        <DealAssistant />
+      </>
+    );
+  if (["/customer", "/customer/sign-in"].includes(route)) {
+    if (checking)
+      return (
+        <div className="customer-route-loading" role="status">
+          Opening your secure deal room…
+        </div>
+      );
+    if (!workspace || workspace.user.role !== "CUSTOMER")
+      return (
+        <>
+          <CustomerAuthPage
+            signedInRole={workspace?.user.role}
+            onSuccess={async () => {
+              await load();
+              navigate("/customer");
+            }}
+          />
+          <DealAssistant />
+        </>
+      );
+    return (
+      <>
+        <div className="app-shell customer-route-shell">
+          <main className="portal-main">
+            <section className="content">
+              <CustomerPortalV2
+                data={workspace}
+                mutate={mutate}
+                reload={load}
+                logout={async () => {
+                  await request("/auth/logout", { method: "POST", body: "{}" });
+                  setWorkspace(null);
+                  navigate("/customer/sign-in");
+                }}
+              />
+            </section>
+          </main>
+          {busy && (
+            <div className="busy">
+              <RefreshCw /> Saving changes…
+            </div>
+          )}
+          {toast && (
+            <div className="toast">
+              <Check />
+              {toast}
+            </div>
+          )}
+        </div>
+        <DealAssistant
+          workspace={workspace}
+          screen="customer-portal"
+          onChanged={load}
+        />
+      </>
+    );
   }
-  if(route!=='/app')return <><div className="not-found"><h1>This page took a wrong turn.</h1><a className="cta" href="/">Back to DealOS <ArrowRight/></a></div><DealAssistant/></>;
-  if(checking)return <div className="not-found" role="status">Opening your workspace…</div>;
-  if(!workspace)return <><AuthPage onSuccess={load} error={error}/><DealAssistant/></>;
-  const open=(next:View,id='',revisionId='')=>{const params=new URLSearchParams(window.location.search);params.set('screen',next);if(id)params.set('record',id);else params.delete('record');if(revisionId)params.set('revision',revisionId);else params.delete('revision');window.history.pushState({},'',`/app?${params}`);setSelectedId(id);setView(next);setError('');window.scrollTo(0,0)};
-  const setSidebarState=(collapsed:boolean)=>{setSidebarCollapsed(collapsed);window.localStorage.setItem('dealos.sidebar.collapsed',String(collapsed))};
-  const toggleSidebar=()=>setSidebarCollapsed(current=>{const next=!current;window.localStorage.setItem('dealos.sidebar.collapsed',String(next));return next});
-  const cancelSidebarAutoCollapse=()=>{if(sidebarCollapseTimer.current){clearTimeout(sidebarCollapseTimer.current);sidebarCollapseTimer.current=null}};
-  const scheduleSidebarAutoCollapse=()=>{if(sidebarCollapsed||usesCompactSidebar())return;cancelSidebarAutoCollapse();sidebarCollapseTimer.current=setTimeout(()=>{setSidebarState(true);sidebarCollapseTimer.current=null},2500)};
-  const activateSidebarLogo=()=>{if(usesCompactSidebar()){open('dashboard');return}cancelSidebarAutoCollapse();toggleSidebar()};
-  const logout=async()=>{const destination=workspace.user.actorType==='PLATFORM_OWNER'?'/login/super-admin':'/sign-in';await request('/auth/logout',{method:'POST',body:'{}'});setWorkspace(null);navigate(destination)};
-  if(workspace.user.platformSuperAdmin&&!workspace.user.viewContext)return <><PlatformAdmin logout={logout} onContextChanged={load}/><DealAssistant workspace={workspace} screen="platform-admin" onChanged={load}/></>;
-  const exitView=async()=>{await request('/platform/view-as/exit',{method:'POST',body:'{}'});await load()};
-  const customers=workspace.customers??[]; const quote=workspace.quotes.find(q=>q.id===selectedId)??workspace.quotes[0]; const invoice=workspace.invoices.find(i=>i.id===selectedId)??workspace.invoices[0]; const product=workspace.products.find(p=>p.id===selectedId)??workspace.products[0]; const customer=customers.find(c=>c.id===selectedId)??customers[0];
-  const content:Record<View,ReactNode>={
-    dashboard:<Dashboard data={workspace} open={open}/>, leads:<LeadsPage role={workspace.user.role} initialLeadId={selectedId} openQuote={(id,revisionId)=>open('quote',id,revisionId??'')}/>, 'join-requests':<JoinRequestsPage onCustomerCreated={load}/>, quotations:<QuotationsPage user={workspace.user} openQuote={(id,revisionId)=>open('quote',id,revisionId??'')} onCreated={async(id,revisionId)=>{await load();open('quote',id,revisionId??'')}}/>, quote:quote?<QuotationDetailPage quoteId={quote.id} onBack={()=>open('quotations')} onChanged={load}/>:<Empty text="Create a quotation to begin."/>, approvals:<ApprovalsPage onOpenCase={id=>open('approval',id)}/>, approval:selectedId?<ApprovalDetailPage caseId={selectedId} role={workspace.user.role} onBack={()=>open('approvals')} onChanged={load}/>:<Empty text="Select an approval case."/>, fulfillment:<Fulfillment data={workspace} open={open} mutate={mutate}/>, 'fulfillment-detail':<FulfillmentDetail quote={quote} warehouses={workspace.warehouses} mutate={mutate} role={workspace.user.role}/>, subscriptions:<Subscriptions data={workspace} open={open} mutate={mutate}/>, billing:<Billing subscription={workspace.subscriptions.find(s=>s.id===selectedId)??workspace.subscriptions[0]} mutate={mutate}/>, portal:<Portal quote={quote} mutate={mutate}/>, invoices:<InvoicesPage data={workspace} openInvoice={id=>open('invoice',id)} mutate={mutateVoid}/>, invoice:<InvoiceDetailPage invoice={invoice} quotes={workspace.quotes} audits={workspace.audits} role={workspace.user.role} readOnly={Boolean(workspace.user.viewContext)} mutate={mutateVoid} onBack={()=>open('invoices')} onOpenQuote={id=>open('quote',id)}/>, health:<DealHealth data={workspace} mutate={mutateVoid} open={open}/>, reports:<SalesReporting data={workspace} open={open}/>, products:<Products data={workspace} open={open} mutate={mutate}/>, product:<ProductDetail product={product} mutate={mutate}/>, customers:<Customers data={workspace} open={open} mutate={mutate}/>, customer:<CustomerDetailV2 customer={customer} open={open} mutate={mutate} role={workspace.user.role} onChanged={load}/>, policies:<AdvancedPolicies data={workspace} mutate={mutate} reload={load}/>, access:workspace.user.role==='ADMIN'?<AccessControl data={workspace} reload={load}/>:<Empty text="Administrator access is required."/>,
-  };
-  const portalMode=workspace.user.role==='CUSTOMER';
-  const visibleNav=nav.filter(([id])=>canAccessView(workspace.user,id));
-  const activeView=canAccessView(workspace.user,view)?view:firstAccessibleView(workspace.user);
-  return <><div className={`app-shell${sidebarCollapsed?' sidebar-collapsed':''}`}>
-    {workspace.user.viewContext&&<div className="view-as-banner"><Eye/><span><b>Read-only View As:</b> {workspace.user.viewContext.organizationName}{workspace.user.viewContext.simulatedUserId?' · simulated user context':''} · Real actor: {workspace.user.viewContext.realActor.name}</span><button onClick={exitView}>Exit View As <X/></button></div>}
-    {!portalMode&&<aside onMouseEnter={cancelSidebarAutoCollapse} onMouseLeave={scheduleSidebarAutoCollapse}><Brand href="/app" onActivate={activateSidebarLogo} ariaLabel={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'} expanded={!sidebarCollapsed}/><nav>{visibleNav.map(([id,text,icon])=><button key={id} aria-label={text} title={sidebarCollapsed?text:undefined} className={activeView===id||(activeView&&related(activeView,id))?'active':''} onClick={()=>open(id)}>{icon}<span>{text}</span>{id==='approvals'&&<em>{workspace.quotes.flatMap(q=>q.approvals).filter(a=>a.state==='PENDING').length}</em>}</button>)}</nav><div className="sidebar-foot"><div className="avatar">{workspace.user.name.split(' ').map(p=>p[0]).join('')}</div><div className="user-details"><b>{workspace.user.name}</b><small>{roleName(workspace.user.role)}</small></div><button aria-label="Log out" onClick={logout}><LogOut/></button></div></aside>}
-    <main className={portalMode?'portal-main':''}>{!portalMode&&<header className="workspace-header"><div className="workspace-title"><small>{workspace.organization.name}</small><h1>{activeView?title(activeView):'No modules assigned'}</h1></div>{activeView&&<WorkspaceCommandBar data={workspace} open={open}/>}</header>}{error&&<div className="error"><AlertTriangle/>{error}<button onClick={()=>setError('')}><X/></button></div>}<section className="content">{portalMode?<CustomerPortalV2 data={workspace} mutate={mutate} reload={load} logout={logout}/>:activeView?content[activeView]:<NoModuleAccess role={roleName(workspace.user.role)}/>}</section></main>
-    {busy&&<div className="busy"><RefreshCw/> Saving changes…</div>}{toast&&<div className="toast"><Check/>{toast}</div>}
-  </div><DealAssistant workspace={workspace} screen={activeView??'dashboard'} onChanged={load}/></>;
-}
-
-type GlobalResult={key:string;kind:string;title:string;detail:string;view:View;id?:string;searchText:string};
-
-function WorkspaceCommandBar({data,open}:{data:Workspace;open:(view:View,id?:string)=>void}){
-  const [query,setQuery]=useState('');
-  const [searchOpen,setSearchOpen]=useState(false);
-  const [notificationsOpen,setNotificationsOpen]=useState(false);
-  const [seenAt,setSeenAt]=useState(0);
-  const root=useRef<HTMLDivElement>(null);
-  const searchInput=useRef<HTMLInputElement>(null);
-  const quotes=canAccessView(data.user,'quotations')?(data.quotes??[]):[];
-  const approvalQuotes=canAccessView(data.user,'approvals')?(data.quotes??[]):[];
-  const invoices=canAccessView(data.user,'invoices')?(data.invoices??[]):[];
-  const customers=canAccessView(data.user,'customers')?(data.customers??[]):[];
-  const products=canAccessView(data.user,'products')?(data.products??[]):[];
-  const subscriptions=canAccessView(data.user,'subscriptions')?(data.subscriptions??[]):[];
-  const users=canAccessView(data.user,'access')?(data.users??[]):[];
-  const alerts=canAccessView(data.user,'health')?(data.alerts??[]):[];
-  const audits=data.audits??[];
-  const seenKey=`dealos.notifications.seen.${data.organization.id}.${data.user.id}`;
-  useEffect(()=>{setSeenAt(Number(window.localStorage.getItem(seenKey)??0))},[seenKey]);
-  useEffect(()=>{const close=(event:MouseEvent)=>{if(!root.current?.contains(event.target as Node)){setSearchOpen(false);setNotificationsOpen(false)}};const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'){setSearchOpen(false);setNotificationsOpen(false)}};document.addEventListener('mousedown',close);document.addEventListener('keydown',escape);return()=>{document.removeEventListener('mousedown',close);document.removeEventListener('keydown',escape)}},[]);
-  useEffect(()=>{const shortcut=(event:KeyboardEvent)=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='k'){event.preventDefault();searchInput.current?.focus();setSearchOpen(true);setNotificationsOpen(false)}};document.addEventListener('keydown',shortcut);return()=>document.removeEventListener('keydown',shortcut)},[]);
-  const results=useMemo<GlobalResult[]>(()=>[
-    ...quotes.map(item=>({key:`quote-${item.id}`,kind:'Quotation',title:item.number,detail:`${item.customer} · ${label(quoteStatus(item))}`,view:'quote' as View,id:item.id,searchText:`${item.number} ${item.customer} ${item.customerTier} ${item.stage}`})),
-    ...invoices.map(item=>({key:`invoice-${item.id}`,kind:'Invoice',title:item.number,detail:`${item.customer} · ${label(item.state)} · ${invoiceMoney(item.amount)}`,view:'invoice' as View,id:item.id,searchText:`${item.number} ${item.customer} ${item.state}`})),
-    ...customers.map(item=>({key:`customer-${item.id}`,kind:'Customer',title:item.name,detail:`${item.tier} tier${item.email?` · ${item.email}`:''}`,view:'customer' as View,id:item.id,searchText:`${item.name} ${item.email??''} ${item.phone??''} ${item.gstin??''} ${item.tier}`})),
-    ...products.map(item=>({key:`product-${item.id}`,kind:'Product',title:item.name,detail:`${item.sku} · ${item.category}`,view:'product' as View,id:item.id,searchText:`${item.name} ${item.sku} ${item.category} ${item.brand??''}`})),
-    ...subscriptions.map(item=>({key:`subscription-${item.id}`,kind:'Subscription',title:item.productName,detail:`${item.customer} · ${item.cadence}`,view:'billing' as View,id:item.id,searchText:`${item.productName} ${item.customer} ${item.cadence} ${item.state}`})),
-    ...users.map(item=>({key:`user-${item.id}`,kind:roleName(item.role),title:item.name,detail:`${item.email} · ${roleName(item.role)}`,view:'access' as View,searchText:`${item.name} ${item.email} ${item.loginId??''} ${item.role}`})),
-  ],[quotes,invoices,customers,products,subscriptions,users]);
-  const normalized=query.trim().toLowerCase();
-  const filtered=normalized?results.filter(item=>`${item.title} ${item.detail} ${item.searchText}`.toLowerCase().includes(normalized)).slice(0,8):[];
-  const notifications=useMemo(()=>{
-    const alertItems=alerts.map(item=>({key:`alert-${item.id}`,title:item.title,detail:item.detail,time:item.createdAt,unread:!item.resolved,view:'health' as View,id:item.resourceId,tone:item.severity.toLowerCase()}));
-    const approvalItems=approvalQuotes.flatMap(quote=>(quote.approvals??[]).filter(item=>item.state==='PENDING').map(item=>({key:`approval-${item.id}`,title:'Approval required',detail:`${quote.number} · ${quote.customer} · ${item.step}`,time:item.createdAt??quote.updatedAt,unread:true,view:'approval' as View,id:quote.id,tone:'warning'})));
-    const auditItems=audits.map(item=>({key:`audit-${item.id}`,title:label(item.action),detail:`${label(item.resource)}${item.reason?` · ${item.reason}`:''}`,time:item.createdAt,unread:true,view:notificationView(item.resource,data,item.resourceId),id:item.resourceId,tone:'neutral'})).filter(item=>canAccessView(data.user,item.view));
-    return [...alertItems,...approvalItems,...auditItems].sort((a,b)=>new Date(b.time).getTime()-new Date(a.time).getTime()).slice(0,12);
-  },[alerts,approvalQuotes,audits,data]);
-  const unread=notifications.filter(item=>item.unread&&new Date(item.time).getTime()>seenAt).length;
-  const choose=(item:GlobalResult)=>{open(item.view,item.id);setQuery('');setSearchOpen(false)};
-  const chooseNotification=(item:(typeof notifications)[number])=>{open(item.view,item.id);setNotificationsOpen(false)};
-  const markRead=()=>{const now=Date.now();window.localStorage.setItem(seenKey,String(now));setSeenAt(now)};
-  return <div className="workspace-command-bar" ref={root}>
-    <div className={`global-search${searchOpen?' open':''}`}>
-      <Search aria-hidden="true"/>
-      <input ref={searchInput} value={query} onFocus={()=>{setSearchOpen(true);setNotificationsOpen(false)}} onChange={event=>{setQuery(event.target.value);setSearchOpen(true)}} placeholder="Search invoices, quotes, customers…" aria-label="Search across workspace" aria-expanded={searchOpen}/>
-      <kbd>⌘ K</kbd>
-      {searchOpen&&<div className="command-dropdown search-results" role="listbox" aria-label="Global search results">
-        {!normalized?<div className="command-empty"><Search/><b>Search across your workspace</b><span>Try an invoice number, quotation, customer, product, or team member.</span></div>:filtered.length?filtered.map(item=><button key={item.key} role="option" aria-selected="false" onClick={()=>choose(item)}><ResultIcon kind={item.kind}/><span><em>{item.kind}</em><b>{item.title}</b><small>{item.detail}</small></span><ChevronRight/></button>):<div className="command-empty"><Search/><b>No results found</b><span>Check the spelling or try another keyword.</span></div>}
-        {normalized&&<footer>{filtered.length} {filtered.length===1?'result':'results'} found</footer>}
-      </div>}
-    </div>
-    <div className="notification-control">
-      <button className="notification-button" title="Notifications" aria-label={`Notifications${unread?` (${unread} unread)`:''}`} aria-expanded={notificationsOpen} onClick={()=>{setNotificationsOpen(current=>!current);setSearchOpen(false)}}><Bell/>{unread>0&&<em>{unread>9?'9+':unread}</em>}</button>
-      {notificationsOpen&&<div className="command-dropdown notification-dropdown">
-        <div className="notification-head"><span><b>Notifications</b><small>Updates from every module</small></span>{unread>0&&<button onClick={markRead}>Mark all as read</button>}</div>
-        <div className="notification-list">{notifications.length?notifications.map(item=><button key={item.key} onClick={()=>chooseNotification(item)}><i className={item.tone}/><span><b>{item.title}</b><small>{item.detail}</small><time>{relativeTime(item.time)}</time></span>{item.unread&&new Date(item.time).getTime()>seenAt&&<em aria-label="Unread"/>}</button>):<div className="command-empty"><Bell/><b>You're all caught up</b><span>New activity will appear here.</span></div>}</div>
-        <footer><button onClick={()=>{open('health');setNotificationsOpen(false)}}>View notification center <ArrowRight/></button></footer>
-      </div>}
-    </div>
-  </div>
-}
-
-function ResultIcon({kind}:{kind:string}){if(kind==='Invoice')return <Receipt/>;if(kind==='Quotation')return <FileText/>;if(kind==='Customer')return <Store/>;if(kind==='Product')return <Package/>;if(kind==='Subscription')return <RefreshCw/>;return <UserRound/>}
-function notificationView(resource:string,data:Workspace,id:string):View{const value=resource.toLowerCase();if((data.quotes??[]).some(item=>item.id===id)||value.includes('quote'))return 'quote';if((data.invoices??[]).some(item=>item.id===id)||value.includes('invoice'))return 'invoice';if((data.customers??[]).some(item=>item.id===id)||value.includes('customer'))return 'customer';if((data.products??[]).some(item=>item.id===id)||value.includes('product'))return 'product';if(value.includes('subscription'))return 'billing';if(value.includes('policy'))return 'policies';return 'dashboard'}
-function relativeTime(value:string){const timestamp=new Date(value).getTime();if(!Number.isFinite(timestamp))return 'Recently';const seconds=Math.max(0,Math.floor((Date.now()-timestamp)/1000));if(seconds<60)return 'Just now';const minutes=Math.floor(seconds/60);if(minutes<60)return `${minutes}m ago`;const hours=Math.floor(minutes/60);if(hours<24)return `${hours}h ago`;const days=Math.floor(hours/24);return days<7?`${days}d ago`:date(value)}
-
-function Dashboard({data,open}:{data:Workspace;open:(v:View,id?:string)=>void}){
-  const pending=data.quotes.flatMap(q=>q.approvals).filter(a=>a.state==='PENDING').length;
-  const customerPending=data.quotes.filter(q=>quoteStatus(q)==='PENDING_CUSTOMER_ACCEPTANCE').length;
-  const quotationAccess=canAccessView(data.user,'quotations');
-  const invoiceAccess=canAccessView(data.user,'invoices');
-  const healthAccess=canAccessView(data.user,'health');
-  const reportAccess=canAccessView(data.user,'reports');
-  const canCreateQuotation=quotationAccess&&['REP','MANAGER','ADMIN'].includes(data.user.role);
-  const canCreateInvoice=invoiceAccess&&['FINANCE','ADMIN'].includes(data.user.role);
-  const hasOperationalAccess=quotationAccess||invoiceAccess||healthAccess;
-  const openCreate=(view:'quotations'|'invoices',parameter:'newQuotation'|'newInvoice')=>{const params=new URLSearchParams(window.location.search);params.set(parameter,'1');window.history.replaceState({},'',`${window.location.pathname}?${params}`);open(view)};
-  const openAlert=(alert:Workspace['alerts'][number])=>alert.resourceType==='LEAD'?open('leads',alert.resourceId):alert.resourceType==='QUOTE'?open('quote',alert.resourceId):open('health');
-  return <>
-    {hasOperationalAccess?<div className="metric-grid">
-      {quotationAccess&&<Metric label="Pipeline value" value={money(data.quotes.reduce((sum,quote)=>sum+Number(quote.total),0))} note={`${data.quotes.length} active quotations`} tone="dark"/>}
-      {quotationAccess&&<Metric label="Pending approvals" value={String(pending+customerPending)} note={`${pending} internal · ${customerPending} customer acceptance`}/>}
-      {healthAccess&&<Metric label="At-risk deals" value={String(data.alerts.filter(alert=>!alert.resolved).length)} note="Across discounts and delivery" tone="warn"/>}
-      {invoiceAccess&&<Metric label="Open invoices" value={money(data.invoices.filter(invoice=>invoice.state!=='PAID').reduce((sum,invoice)=>sum+Number(invoice.amount)-Number(invoice.paidAmount),0))} note="Outstanding balance"/>}
-    </div>:<div className="empty"><LockKeyhole/><h2>Overview ready</h2><p>Your administrator can enable operational modules when you need them.</p></div>}
-    {(canCreateQuotation||canCreateInvoice||reportAccess)&&<div className="dashboard-actions" aria-label="Overview actions">{canCreateQuotation&&<button className="button primary" onClick={()=>openCreate('quotations','newQuotation')}><Plus/>New quotation</button>}{canCreateInvoice&&<button className="button ghost" onClick={()=>openCreate('invoices','newInvoice')}><FilePlus2/>Add Invoice</button>}{reportAccess&&<button className="button ghost" onClick={()=>open('reports')}><IndianRupee/>View reports</button>}</div>}
-    {(quotationAccess||healthAccess)&&<div className="two-col">{quotationAccess&&<Panel title="Recent deal activity" action={<button onClick={()=>open('quotations')}>View pipeline <ChevronRight/></button>}><DealTable quotes={data.quotes} open={open}/></Panel>}{healthAccess&&<Panel title="Attention queue"><div className="attention">{data.alerts.slice(0,3).map(alert=><button key={alert.id} onClick={()=>openAlert(alert)}><span className={`alert-dot ${alert.severity.toLowerCase()}`}/><span><b>{alert.title}</b><small>{alert.detail}</small></span><ChevronRight/></button>)}</div></Panel>}</div>}
-  </>;
-}
-function Quotations({data,open,mutate}:{data:Workspace;open:(v:View,id?:string)=>void;mutate:Function}){const[newOpen,setNewOpen]=useState(false);const create=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);await mutate('/quotations',{customer:f.get('customer'),customerTier:f.get('tier')},'POST','Quotation created');setNewOpen(false)};return <><div className="toolbar"><div className="search"><Search/><input placeholder="Search quotations"/></div><button className="button primary" onClick={()=>setNewOpen(true)}><Plus/>New quotation</button></div><div className="kanban">{['DRAFT','PENDING_APPROVAL','APPROVED','PENDING_CUSTOMER_ACCEPTANCE','NEGOTIATION','CONFIRMED'].map(stage=><div className="lane" key={stage}><div className="lane-title"><span>{label(stage)}</span><em>{data.quotes.filter(q=>quoteStatus(q)===stage).length}</em></div>{data.quotes.filter(q=>quoteStatus(q)===stage).map(q=><button className="deal-card" key={q.id} onClick={()=>open('quote',q.id)}><small>{q.number}</small><h3>{q.customer}</h3><b>{money(q.total)}</b><div><span>{q.customerTier}</span><span>{quoteStatus(q)==='PENDING_CUSTOMER_ACCEPTANCE'?'Waiting for customer':date(q.updatedAt)}</span></div></button>)}</div>)}</div>{newOpen&&<Modal title="New quotation" close={()=>setNewOpen(false)}><form onSubmit={create} className="form"><label>Customer<input name="customer" defaultValue="Vertex Systems" required/></label><label>Customer tier<select name="tier"><option>Gold</option><option>Silver</option><option>Bronze</option></select></label><button className="button primary">Create draft</button></form></Modal>}</>}
-type CommerceLine={productId:string;quantity:number;discount:number};
-const lineAmount=(product:Product|undefined,line:CommerceLine)=>{const price=Number(product?.price??0);const net=price*line.quantity*(1-line.discount/100);const tax=net*Number(product?.taxRate??0)/100;return {net,tax,total:net+tax}};
-type InvoiceTaxMode='EXCLUSIVE'|'INCLUSIVE';
-const invoiceLineAmount=(product:Product|undefined,line:CommerceLine,gstRate:number,gstMode:InvoiceTaxMode)=>{const listed=Number(product?.price??0)*line.quantity;const discounted=listed*(1-line.discount/100);const net=gstMode==='INCLUSIVE'?discounted/(1+gstRate/100):discounted;const tax=gstMode==='INCLUSIVE'?discounted-net:net*gstRate/100;return{listed,discount:listed-discounted,net,tax,total:net+tax}};
-const availableStock=(product:Product|undefined)=>product?.recurring?Number.MAX_SAFE_INTEGER:product?.stocks.reduce((sum,row)=>sum+row.onHand-row.reserved,0)??0;
-function ProductLineEditor({products,lines,setLines,readonly=false}:{products:Product[];lines:CommerceLine[];setLines:(fn:(value:CommerceLine[])=>CommerceLine[])=>void;readonly?:boolean}){const active=products.filter(p=>p.active);const fallback=active[0]?.id??'';const addLine=()=>fallback&&setLines(v=>[...v,{productId:fallback,quantity:1,discount:0}]);const update=(index:number,patch:Partial<CommerceLine>)=>setLines(v=>v.map((line,i)=>i===index?{...line,...patch}:line));const remove=(index:number)=>setLines(v=>v.filter((_,i)=>i!==index));const subtotal=lines.reduce((sum,line)=>sum+lineAmount(products.find(p=>p.id===line.productId),line).total,0);return <div className="catalog-line-editor">{lines.map((line,index)=>{const product=products.find(p=>p.id===line.productId);const amount=lineAmount(product,line);return <div className="catalog-line" key={`${line.productId}-${index}`}><label>Catalog product<select value={line.productId} disabled={readonly} onChange={e=>update(index,{productId:e.target.value})}>{active.map(p=><option key={p.id} value={p.id}>{p.name} · {p.sku} · {money(p.price)}</option>)}</select></label><div className="line-fields"><label>Qty<input type="number" min="1" value={line.quantity} disabled={readonly} onChange={e=>update(index,{quantity:Number(e.target.value)})}/></label><label>Discount %<input type="number" min="0" max="100" value={line.discount} disabled={readonly} onChange={e=>update(index,{discount:Number(e.target.value)})}/></label><label>GST<input value={`${product?.taxRate??0}%`} disabled/></label></div><div className="line-preview"><span><b>{product?.category??'Product'}</b><small>{product?.unit??'Unit'} · {product?.cadence??'One-time'}</small></span><strong>{money(amount.total)}</strong>{!readonly&&<button className="icon-button" type="button" aria-label="Remove line" onClick={()=>remove(index)} disabled={lines.length===1}><Trash2/></button>}</div></div>})}<div className="catalog-line-footer"><button type="button" className="button ghost" disabled={readonly||!fallback} onClick={addLine}><Plus/>Add synced catalog line</button><strong>{money(subtotal)}</strong></div>{!active.length&&<Empty text="Add an active product before creating invoice or quotation lines."/>}</div>}
-function QuoteDetail({quote,products,mutate}:{quote?:Quote;products:Product[];mutate:Function}){const[lines,setLines]=useState<CommerceLine[]>(()=>quote?.lines.map(l=>({productId:l.productId,quantity:l.quantity,discount:Number(l.discount)}))??[]);useEffect(()=>setLines(quote?.lines.map(l=>({productId:l.productId,quantity:l.quantity,discount:Number(l.discount)}))??[]),[quote?.id]);useEffect(()=>{const first=products.find(p=>p.active);if(quote?.stage==='DRAFT'&&!lines.length&&first)setLines([{productId:first.id,quantity:1,discount:0}])},[quote?.stage,products.length,lines.length]);if(!quote)return <Empty text="Create a quotation to begin."/>;const displayStage=quoteStatus(quote);const add=(product:Product)=>setLines(v=>v.some(l=>l.productId===product.id)?v:[...v,{productId:product.id,quantity:1,discount:0}]);const save=()=>mutate(`/quotations/${quote.id}/draft`,{version:quote.version,orderDiscount:Number(quote.orderDiscount),lines},'PUT','Draft saved');return <><div className="detail-head"><div><span className={`status ${displayStage.toLowerCase()}`}>{label(displayStage)}</span><h2>{quote.number} · {quote.customer}</h2><p>{quote.customerTier} customer · Version {quote.version}</p></div><div className="actions"><button className="button ghost" onClick={save} disabled={quote.stage!=='DRAFT'||!lines.length}>Save draft</button><button className="button primary" onClick={()=>mutate(`/quotations/${quote.id}/submit`,{},'POST','Submitted for approval')} disabled={quote.stage!=='DRAFT'}>Submit for approval</button>{quote.stage==='APPROVED'&&!quote.sentAt&&<button className="button primary" onClick={()=>mutate(`/quotations/${quote.id}/send`,{},'POST','Sent to customer portal')}>Send to customer</button>}</div></div>{displayStage==='PENDING_CUSTOMER_ACCEPTANCE'&&<div className="customer-acceptance-banner"><ShieldCheck/><span><b>Pending customer acceptance</b><small>This quotation is visible in the customer portal. It will stay pending for admins and employees until the customer clicks Accept.</small></span></div>}<div className="quote-layout"><Panel title="Commercial lines">{quote.stage==='DRAFT'?<ProductLineEditor products={products} lines={lines} setLines={setLines}/>:<div className="table-wrap"><table><thead><tr><th>Product</th><th>Qty</th><th>List price</th><th>Discount</th><th>Limit</th><th>Net</th></tr></thead><tbody>{lines.map((line,index)=>{const p=products.find(x=>x.id===line.productId);const persisted=quote.lines.find(x=>x.productId===line.productId);return <tr key={`${line.productId}-${index}`}><td><b>{p?.name}</b><small>{p?.category}{p?.cadence?` · ${p.cadence}`:''}</small></td><td>{line.quantity}</td><td>{money(p?.price??0)}</td><td>{line.discount}%</td><td>{persisted?`${persisted.allowedDiscount}%`:'-'}</td><td>{money(lineAmount(p,line).net)}</td></tr>})}</tbody></table></div>}<div className="totals"><span>Deal total <b>{money(quote.total)}</b></span><span>Margin <b>{money(quote.margin)}</b></span><span className={Number(quote.riskScore)>0?'risk':''}>Risk excess <b>{quote.riskScore} pts</b></span></div></Panel><Panel title="Synced catalog suggestions"><p className="muted">Products created in the Product module appear here after the workspace refresh.</p><div className="suggestions">{products.filter(p=>p.active&&!lines.some(l=>l.productId===p.id)).slice(0,3).map(p=><div key={p.id}><span className="product-icon"><Sparkles/></span><span><b>{p.name}</b><small>{p.sku} · +{money(Number(p.price)-Number(p.cost))} margin · {p.category}</small></span><button onClick={()=>add(p)} disabled={quote.stage!=='DRAFT'}>Add</button></div>)}</div></Panel></div></>}
-
-function Approvals({data,open}:{data:Workspace;open:(v:View,id?:string)=>void}){const[filter,setFilter]=useState<'PENDING'|'RETURNED'|'APPROVED'>('PENDING');const filters=['PENDING','RETURNED','APPROVED'] as const;const qs=data.quotes.filter(q=>{if(!q.approvals.length)return false;if(filter==='PENDING')return q.stage==='PENDING_APPROVAL'&&q.approvals.some(a=>a.state==='PENDING');if(filter==='RETURNED')return q.stage==='DRAFT'&&q.approvals.some(a=>a.state==='RETURNED');return ['APPROVED','NEGOTIATION','CONFIRMED'].includes(q.stage)&&q.approvals.some(a=>a.state==='APPROVED')});return <Panel title="Approval queue"><div className="filter-row" aria-label="Approval status filters">{filters.map(value=><button type="button" key={value} className={`chip ${filter===value?'active':''}`} aria-pressed={filter===value} onClick={()=>setFilter(value)}>{label(value)}</button>)}</div><div className="table-wrap"><table><thead><tr><th>Quotation</th><th>Customer</th><th>Risk</th><th>Current step</th><th>Status</th><th/></tr></thead><tbody>{qs.map(q=><tr key={q.id}><td><b>{q.number}</b></td><td>{q.customer}</td><td><span className="risk-pill">{q.riskScore} pts</span></td><td>{q.approvals.find(a=>a.state==='PENDING')?.step??'Complete'}</td><td><Status value={filter==='RETURNED'?'RETURNED':quoteStatus(q)}/></td><td><button onClick={()=>open('approval',q.id)}>Review <ChevronRight/></button></td></tr>)}{!qs.length&&<tr><td className="empty" colSpan={6}>No {filter.toLowerCase()} approvals.</td></tr>}</tbody></table></div></Panel>}
-function ApprovalDetail({quote,mutate,role}:{quote?:Quote;mutate:Function;role:string}){const[reason,setReason]=useState('Commercial terms reviewed against policy.');if(!quote)return <Empty text="No approval selected."/>;const current=quote.approvals.find(a=>a.state==='PENDING');const cards=quote.riskBreakdown?.cards??fallbackRiskCards(quote);return <><div className="detail-head"><div><span className="status warning">Approval review</span><h2>{quote.number} · {quote.customer}</h2><p>{quote.customerTier} account · {money(quote.total)}</p></div><div className="risk-score"><b>{quote.riskScore}</b><span>risk excess<br/>points</span></div></div><Panel title="Risk explanation"><div className="risk-explanation-grid">{cards.map(card=><article className={`risk-explanation-card ${card.tone}`} key={card.key}><span>{card.label}</span><b>{card.value}</b><p>{card.detail}</p></article>)}</div></Panel><Panel title="Why this quotation was flagged"><div className="table-wrap"><table><thead><tr><th>Line</th><th>Discount given</th><th>Limit allowed</th><th>Outcome</th></tr></thead><tbody>{quote.lines.map(l=><tr key={l.id}><td>{l.product.name}</td><td>{l.discount}%</td><td>{l.allowedDiscount}%</td><td>{Number(l.discount)>Number(l.allowedDiscount)?<span className="risk-pill">{Number(l.discount)-Number(l.allowedDiscount)} pts over</span>:<span className="good">Within policy</span>}</td></tr>)}</tbody></table></div><div className="explain"><AlertTriangle/>The highest line excess, blended value-weighted excess, order discount, margin, and policy threshold determine the review path.</div></Panel><ApprovalTrack items={approvalTrackItems(quote)}/><Panel title="Decision"><div className="decision"><label>Review reason<textarea value={reason} onChange={e=>setReason(e.target.value)}/></label><div className="actions"><button className="button primary" disabled={!current||!(role==='ADMIN'||(current.step==='Sales Manager'&&role==='MANAGER')||(current.step==='Finance'&&role==='FINANCE'))} onClick={()=>mutate(`/approvals/${current?.id}/decision`,{decision:'APPROVE',reason},'POST','Approval recorded')}>Approve</button><button className="button warn" disabled={!current} onClick={()=>mutate(`/approvals/${current?.id}/decision`,{decision:'RETURN',reason},'POST','Returned for revision')}>Return for revision</button><button className="button danger" disabled={!current} onClick={()=>mutate(`/approvals/${current?.id}/decision`,{decision:'REJECT',reason},'POST','Quotation rejected')}>Reject</button></div></div></Panel></>}
-function ApprovalTrack({items}:{items:Array<{key:string;label:string;state:string;note:string}>}){return <div className="approval-track" aria-label="Approval lifecycle">{items.map((item,index)=><div className={item.state.toLowerCase()} key={item.key}><i>{item.state==='APPROVED'?<Check/>:index+1}</i><span><b>{item.label}</b><small>{item.note}</small></span></div>)}</div>}
-function approvalTrackItems(quote:Quote){const step=(name:string)=>quote.approvals.find(approval=>approval.step===name);const submitted=quote.stage!=='DRAFT'||quote.approvals.length>0;const manager=step('Sales Manager');const finance=step('Finance');return[{key:'submitted',label:'Submitted',state:submitted?'APPROVED':'PENDING',note:submitted?'Submitted':'Draft'},{key:'manager',label:'Sales Manager',state:manager?.state??'NOT_REQUIRED',note:manager?label(manager.state):'Not required'},{key:'finance',label:'Finance',state:finance?.state??'NOT_REQUIRED',note:finance?label(finance.state):'Not required'},{key:'confirmed',label:'Confirmed',state:quote.stage==='CONFIRMED'?'APPROVED':'WAITING',note:quote.stage==='CONFIRMED'?'Confirmed':'Awaiting customer'}]}
-function fallbackRiskCards(quote:Quote){const orderDiscount=Number(quote.orderDiscount??0);const values=quote.lines.map(line=>{const gross=Number(line.unitPrice)*line.quantity;const effective=100-((100-Number(line.discount))*(100-orderDiscount))/100;const limit=Number(line.allowedDiscount);return{product:line.product.name,gross,effective,limit,excess:Math.max(0,effective-limit)}});const grossTotal=values.reduce((sum,line)=>sum+line.gross,0);const worst=values.sort((left,right)=>right.excess-left.excess)[0];const weighted=grossTotal?values.reduce((sum,line)=>sum+line.gross*line.excess,0)/grossTotal:0;const marginPercent=Number(quote.total)?Number(quote.margin)/Number(quote.total)*100:0;const steps=[...new Set(quote.approvals.map(approval=>approval.step))];return[{key:'worst-line-excess',label:'Worst individual line excess',value:`${Number((worst?.excess??0).toFixed(2))} pts`,detail:worst&&worst.excess>0?`${worst.product}: effective ${Number(worst.effective.toFixed(2))}% vs ${Number(worst.limit.toFixed(2))}% limit`:'No individual line exceeds its policy limit.',tone:(worst?.excess??0)>0?'warn':'ok'},{key:'weighted-excess',label:'Value-weighted excess',value:`${Number(weighted.toFixed(2))} pts`,detail:'Weighted by gross line value across the quotation.',tone:weighted>0?'warn':'ok'},{key:'order-discount',label:'Order discount',value:`${Number(orderDiscount.toFixed(2))}%`,detail:'Applied across the order after line discounts.',tone:orderDiscount>0?'warn':'ok'},{key:'margin-percentage',label:'Margin percentage',value:`${Number(marginPercent.toFixed(2))}%`,detail:'Calculated from available workspace totals.',tone:marginPercent<12?'danger':'ok'},{key:'approval-threshold',label:'Approval threshold and policy version',value:'Current policy',detail:'Refresh loads the exact persisted threshold and policy version for this revision.',tone:'neutral'},{key:'required-review',label:'Exact required review reason',value:steps.join(' + ')||'None',detail:steps.length?'Approval was routed by the stored pricing policy for this quotation.':'No manager or finance approval is required for this revision.',tone:steps.length?'danger':'ok'}] as const}
-function Fulfillment({data,open,mutate}:{data:Workspace;open:(v:View,id?:string)=>void;mutate:Function}){
-  const[receiptOpen,setReceiptOpen]=useState(false);const[settingsOpen,setSettingsOpen]=useState(false);const[selectedWarehouseId,setSelectedWarehouseId]=useState(data.warehouses[0]?.id??'');const canReceive=data.user.role==='ADMIN'||data.user.role==='FINANCE';
-  const orders=data.quotes.filter(q=>q.stage==='CONFIRMED'&&q.order?.state!=='FULFILLED'&&q.order?.state!=='CANCELLED'&&q.lines.some(line=>line.product.category==='Hardware'&&!line.product.recurring));
-  const stock=data.warehouses.filter(warehouse=>warehouse.active!==false).flatMap(warehouse=>warehouse.stocks.map(balance=>({warehouse,balance})));
-  const hardwareProducts=[...new Map([...data.products,...stock.map(row=>row.balance.product)].filter(product=>product.category==='Hardware'&&!product.recurring&&product.active).map(product=>[product.id,product])).values()];const selectedWarehouse=data.warehouses.find(warehouse=>warehouse.id===selectedWarehouseId)??data.warehouses[0];
-  const receive=async(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();const form=new FormData(event.currentTarget);await mutate(`/fulfillment/${form.get('orderId')}/receive`,{warehouseId:form.get('warehouseId'),productId:form.get('productId'),quantity:Number(form.get('quantity')),reference:form.get('reference')||undefined,reason:form.get('reason')},'POST','Stock receipt recorded and backorder checked');setReceiptOpen(false)};
-  const saveWarehouse=async(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();if(!selectedWarehouse)return;const form=new FormData(event.currentTarget);await mutate(`/warehouses/${selectedWarehouse.id}`,{name:form.get('name'),priority:Number(form.get('priority')),shippingCost:Number(form.get('shippingCost')),active:form.get('active')==='on',reason:form.get('reason')},'PATCH','Warehouse settings updated');setSettingsOpen(false)};
-  return <div className="fulfillment-workspace"><div className="fulfillment-intro fulfillment-list-head"><div><h2>Fulfillment and Stock <span>(List)</span></h2><p>Live stock per warehouse, plus every order that still needs a reservation.</p></div><div className="actions">{data.user.role==='ADMIN'&&<button className="button ghost" onClick={()=>setSettingsOpen(true)}><Settings2/>Warehouse settings</button>}{canReceive&&orders.length>0&&<button className="button ghost" onClick={()=>setReceiptOpen(true)}><Plus/>Record stock receipt</button>}</div></div><div className="table-wrap fulfillment-stock fulfillment-reference-table"><table><thead><tr><th>Warehouse</th><th>Product</th><th>In Stock</th><th>Reserved</th><th>Available</th></tr></thead><tbody>{stock.map(({warehouse,balance})=><tr key={`${warehouse.id}-${balance.product.id}`}><td>{warehouse.name}</td><td>{balance.product.name}</td><td>{balance.onHand}</td><td>{balance.reserved}</td><td>{balance.available}</td></tr>)}</tbody></table>{!stock.length&&<Empty text="No warehouse stock has been configured."/>}</div><h3 className="fulfillment-orders-title">Orders Awaiting Reservation</h3><div className="table-wrap fulfillment-orders fulfillment-reference-table"><table><thead><tr><th>Order</th><th>Customer</th><th>Status</th><th>Warehouses</th></tr></thead><tbody>{orders.map(q=>{const names=[...new Set(q.fulfillment?.split.split.map(row=>row.warehouseName)??[])];return <tr className="clickable-row" tabIndex={0} key={q.id} onClick={()=>open('fulfillment-detail',q.id)} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();open('fulfillment-detail',q.id)}}}><td>{q.order?.number??q.number}</td><td>{q.customer}</td><td>{label(q.fulfillment?.state??'SPLIT_PENDING')}</td><td>{names.length?names.join(' + '):'Awaiting allocation'}</td></tr>})}</tbody></table>{!orders.length&&<Empty text="No confirmed orders are awaiting a stock reservation."/>}</div><div className="fulfillment-hint">Click an order row to open its warehouse reservation detail.</div>{receiptOpen&&<Modal title="Record stock receipt" close={()=>setReceiptOpen(false)}><form className="form" onSubmit={receive}><label>Backordered order<select name="orderId" required>{orders.map(order=><option value={order.order?.id} key={order.id}>{order.order?.number??order.number} · {order.customer}</option>)}</select></label><label>Warehouse<select name="warehouseId" required>{data.warehouses.filter(warehouse=>warehouse.active!==false).map(warehouse=><option value={warehouse.id} key={warehouse.id}>{warehouse.name}</option>)}</select></label><label>Hardware product<select name="productId" required>{hardwareProducts.map(product=><option value={product.id} key={product.id}>{product.name}</option>)}</select></label><label>Quantity received<input name="quantity" type="number" min="1" required/></label><label>Receipt reference<input name="reference" maxLength={120} placeholder="PO or goods-receipt reference"/></label><label>Receipt reason<textarea name="reason" minLength={5} maxLength={240} required placeholder="Explain why stock is being received"/></label><button className="button primary">Record Receipt &amp; Check Backorder</button></form></Modal>}{settingsOpen&&selectedWarehouse&&<Modal title="Warehouse settings" close={()=>setSettingsOpen(false)} className="warehouse-settings-modal"><form className="form warehouse-settings-form" onSubmit={saveWarehouse} key={selectedWarehouse.id}><div className="warehouse-settings-summary"><span><Store/></span><div><b>{selectedWarehouse.name}</b><small>{selectedWarehouse.stocks.length} stocked {selectedWarehouse.stocks.length===1?'product':'products'} · Priority {selectedWarehouse.priority}</small></div><Status value={selectedWarehouse.active!==false?'ACTIVE':'DISABLED'}/></div><label>Warehouse to configure<select value={selectedWarehouse.id} onChange={event=>setSelectedWarehouseId(event.target.value)}>{data.warehouses.map(warehouse=><option value={warehouse.id} key={warehouse.id}>{warehouse.name}</option>)}</select></label><label>Warehouse name<input name="name" defaultValue={selectedWarehouse.name} required/></label><div className="warehouse-settings-grid"><label>Allocation priority<small>Lower numbers are considered first</small><input name="priority" type="number" min="1" defaultValue={selectedWarehouse.priority} required/></label><label>Base shipping cost<small>Applied once when this warehouse is used</small><span className="money-input"><b>₹</b><input name="shippingCost" aria-label="Base shipping cost" type="number" min="0" step="0.01" defaultValue={Number(selectedWarehouse.shippingCost)} required/></span></label></div><label className="warehouse-active-toggle"><span><b>Active warehouse</b><small>Inactive warehouses are excluded from new allocations.</small></span><input name="active" type="checkbox" defaultChecked={selectedWarehouse.active!==false}/><i aria-hidden="true"/></label><label>Reason for change<textarea name="reason" minLength={5} maxLength={240} required placeholder="Explain why these warehouse settings are changing"/></label><div className="warehouse-settings-actions"><button type="button" className="button ghost" onClick={()=>setSettingsOpen(false)}>Cancel</button><button className="button primary"><Check/>Save changes</button></div></form></Modal>}</div>
-}
-
-type FulfillmentPreview=NonNullable<Quote['fulfillment']>&{preview?:boolean};
-function FulfillmentDetail({quote,warehouses,mutate,role}:{quote?:Quote;warehouses:Warehouse[];mutate:Function;role:string}){
-  const [preview,setPreview]=useState<FulfillmentPreview|null>(null);
-  const [previewError,setPreviewError]=useState('');
-  const [manualOpen,setManualOpen]=useState(false);
-  const [consolidateOpen,setConsolidateOpen]=useState(false);
-  const [quantities,setQuantities]=useState<Record<string,number>>({});
-  const [reason,setReason]=useState('');
-  const [consolidationReason,setConsolidationReason]=useState('');
-  const orderId=quote?.order?.id;
-  useEffect(()=>{
-    let active=true;
-    setPreview(null);
-    setPreviewError('');
-    if(!orderId||quote?.stage!=='CONFIRMED')return()=>{active=false};
-    request<FulfillmentPreview>(`/fulfillment/${orderId}${quote.fulfillment?'':'/preview'}`).then(result=>active&&setPreview(result)).catch(error=>active&&setPreviewError(error instanceof Error?error.message:'Could not calculate the split'));
-    return()=>{active=false};
-  },[orderId,quote?.fulfillment,quote?.stage]);
-  if(!quote||!orderId)return <Empty text="No confirmed order selected."/>;
-  const fulfillment=preview??quote.fulfillment;
-  const canManage=role==='ADMIN'||role==='FINANCE';
-  const rows=fulfillment?.split.split??[];
-  const items=fulfillment?.items??[];
-  const warehouseRows=[...new Set(rows.map(row=>row.warehouseId??row.warehouseName))].map(key=>{
-    const grouped=rows.filter(row=>(row.warehouseId??row.warehouseName)===key);
-    const warehouse=warehouses.find(item=>item.id===grouped[0]?.warehouseId)||warehouses.find(item=>item.name===grouped[0]?.warehouseName);
-    return{key,name:grouped[0]?.warehouseName??'Warehouse',quantity:grouped.reduce((sum,row)=>sum+row.quantity,0),cost:warehouse?.shippingCost??0};
-  });
-  const acceptSuggested=()=>mutate(`/fulfillment/${orderId}/reserve`,{mode:'SUGGESTED',stockFingerprint:preview?.stockFingerprint,split:(preview?.split.split??[]).map(row=>({orderLineId:row.orderLineId,warehouseId:row.warehouseId,quantity:row.quantity}))},'POST','Suggested warehouse reservation accepted');
-  const submitManual=async(event:FormEvent)=>{
-    event.preventDefault();
-    const split=Object.entries(quantities).filter(([,quantity])=>quantity>0).map(([key,quantity])=>{const[orderLineId,warehouseId]=key.split(':');return{orderLineId,warehouseId,quantity}});
-    await mutate(`/fulfillment/${orderId}/reserve`,{mode:'MANUAL',split,reason},'POST','Manual warehouse reservation committed');
-    setManualOpen(false);
-  };
-  const submitConsolidation=async(event:FormEvent)=>{
-    event.preventDefault();
-    await mutate(`/fulfillment/${orderId}/consolidate`,{reason:consolidationReason},'POST','Remaining backorder consolidated');
-    setConsolidateOpen(false);
-    setConsolidationReason('');
-  };
-  return <>
-    <div className="fulfillment-reference-head"><h2>Fulfillment Detail: {quote.order?.number??quote.number} ({quote.customer})</h2><p>Live stock is checked again under database locks when this reservation is committed.</p></div>
-    <div className="consolidation-prompt reference-prompt"><span><b>Reservation status only</b><small>{fulfillment?.statusMeaning??'FULFILLED here means all hardware is reserved. Picking, dispatch, tracking, delivery, and on-hand consumption are not implemented yet.'}</small></span></div>
-    <div className="fulfillment-order-summary"><span><small>Reservation state</small><Status value={fulfillment?.state??'SPLIT_PENDING'}/></span><span><small>Customer</small><b>{quote.customer}</b></span>{items.map(item=><span key={item.orderLineId??item.productId}><small>{item.productName}</small><b>{item.orderedQuantity} ordered · {item.reservedQuantity??item.fulfilledQuantity} reserved · {item.backorderedQuantity} backordered</b></span>)}</div>
-    <div className="panel fulfillment-split-panel"><div className="table-wrap"><table><thead><tr><th>Warehouse</th><th>Qty Reserved</th><th>Planned Shipments</th><th>Estimated Cost</th></tr></thead><tbody>{warehouseRows.map(row=><tr key={row.key}><td>{row.name}</td><td>{row.quantity} units</td><td>1</td><td>{money(row.cost)}</td></tr>)}</tbody>{fulfillment&&<tfoot><tr><th>Total</th><th>{rows.reduce((sum,row)=>sum+row.quantity,0)} units</th><th>{fulfillment.shipmentCount}</th><th>{money(fulfillment.estimatedCost)}</th></tr></tfoot>}</table>{!fulfillment&&!previewError&&<div className="fulfillment-loading"><RefreshCw/>Calculating the suggested warehouse split…</div>}{previewError&&<div className="error"><AlertTriangle/>{previewError}</div>}{fulfillment&&!warehouseRows.length&&<Empty text="No hardware stock is available; committing the suggestion will persist the full shortage as a backorder."/>}</div></div>
-    {fulfillment?.split.backorders.length?<div className="consolidation-prompt reference-prompt"><span><b>{fulfillment.split.backorders.reduce((sum,row)=>sum+row.quantity,0)} units remain backordered.</b><small>{fulfillment.consolidationAvailable?'New stock is available. Consolidate the remaining quantity now.':'Record a warehouse receipt to recheck and reserve the remaining quantity.'}</small></span>{fulfillment.consolidationAvailable&&canManage&&<button className="button ghost" onClick={()=>setConsolidateOpen(true)}>Consolidate Remaining Backorder</button>}</div>:<div className="consolidation-prompt reference-prompt"><span>All ordered hardware is covered by active reservations. No physical shipment has been recorded.</span></div>}
-    <div className="fulfillment-reference-actions"><button className="button primary" onClick={acceptSuggested} disabled={!canManage||!!quote.fulfillment||!preview||!preview.preview}>Accept Suggested Split</button><button className="button ghost" onClick={()=>setManualOpen(true)} disabled={!canManage||!!quote.fulfillment||!preview||!preview.preview}>Manual Override</button></div>
-    {manualOpen&&<Modal title="Manual warehouse override" close={()=>setManualOpen(false)}><form className="form manual-allocation" onSubmit={submitManual}><p className="muted">Choose reserved quantities without exceeding order demand or live availability. The server revalidates all rows atomically.</p>{items.map(item=><fieldset key={item.orderLineId??item.productId}><legend>{item.productName} · {item.orderedQuantity} required</legend>{warehouses.map(warehouse=>{const balance=warehouse.stocks.find(stock=>stock.product.id===item.productId);const available=balance?.available??0;const key=`${item.orderLineId}:${warehouse.id}`;return <label key={warehouse.id}><span>{warehouse.name}<small>{available} available</small></span><input aria-label={`${item.productName} from ${warehouse.name}`} type="number" min="0" max={available} value={quantities[key]??0} onChange={event=>setQuantities(current=>({...current,[key]:Number(event.target.value)}))}/></label>})}</fieldset>)}<label>Override reason<textarea required minLength={5} maxLength={240} value={reason} onChange={event=>setReason(event.target.value)}/></label><button className="button primary" disabled={!Object.values(quantities).some(value=>value>0)||reason.trim().length<5}>Commit Manual Reservation</button></form></Modal>}
-    {consolidateOpen&&<Modal title="Consolidate remaining backorder" close={()=>setConsolidateOpen(false)}><form className="form" onSubmit={submitConsolidation}><p className="muted">The backend locks and rechecks current stock before adding any reservation.</p><label>Consolidation reason<textarea aria-label="Consolidation reason" required minLength={5} maxLength={240} value={consolidationReason} onChange={event=>setConsolidationReason(event.target.value)} placeholder="Reference the receipt or allocation decision"/></label><button className="button primary" disabled={consolidationReason.trim().length<5}>Consolidate Backorder</button></form></Modal>}
-  </>;
-}
-function Subscriptions({data,open,mutate}:{data:Workspace;open:(v:View,id?:string)=>void;mutate:Function}){
-  const[filter,setFilter]=useState<'ALL'|'ACTIVE'|'PAUSED'|'CANCELLED'>('ALL');
-  const[newPlanOpen,setNewPlanOpen]=useState(false);
-  const counts={ACTIVE:data.subscriptions.filter(subscription=>subscription.state==='ACTIVE').length,PAUSED:data.subscriptions.filter(subscription=>subscription.state==='PAUSED').length,CANCELLED:data.subscriptions.filter(subscription=>subscription.state==='CANCELLED').length};
-  const visible=filter==='ALL'?data.subscriptions:data.subscriptions.filter(subscription=>subscription.state===filter);
-  const createPlan=async(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();const form=new FormData(event.currentTarget);await mutate('/products',{name:String(form.get('name')),sku:String(form.get('sku')).toUpperCase(),category:'Subscriptions',description:String(form.get('description')),unit:'plan',price:Number(form.get('price')),cost:Number(form.get('cost')),taxRate:Number(form.get('taxRate')),recurring:true,cadence:String(form.get('cadence'))},'POST','Recurring plan created');setNewPlanOpen(false)};
-  return <>
-    <div className="subscription-intro"><div><h2>Subscriptions <span>(List)</span></h2><p>Every recurring plan across every customer, regardless of which order it came from.</p></div></div>
-    <div className="subscription-stats" aria-label="Subscription status filters">
-      {([['ACTIVE','Active'],['PAUSED','Paused'],['CANCELLED','Cancelled']] as const).map(([state,text])=><button key={state} className={`subscription-stat ${state.toLowerCase()} ${filter===state?'selected':''}`} aria-pressed={filter===state} onClick={()=>setFilter(current=>current===state?'ALL':state)}><b>{counts[state]}</b><span>{text}</span></button>)}
-    </div>
-    <div className="panel subscription-list-panel"><div className="table-wrap"><table><thead><tr><th>Customer</th><th>Plan</th><th>Cycle</th><th>Next bill</th><th>Status</th><th><span className="sr-only">Open</span></th></tr></thead><tbody>{visible.map(subscription=><tr className="subscription-row" key={subscription.id} tabIndex={0} onClick={()=>open('billing',subscription.id)} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();open('billing',subscription.id)}}}><td>{subscription.customer}</td><td><b>{subscription.productName}</b><small>{money(subscription.amount)} per {subscription.cadence.toLowerCase().replace('ly','')}</small></td><td>{subscription.cadence}</td><td>{subscription.state==='CANCELLED'?'—':date(subscription.nextBillAt)}</td><td><Status value={subscription.state}/></td><td><ChevronRight/></td></tr>)}</tbody></table>{visible.length===0&&<Empty text={`No ${filter==='ALL'?'':filter.toLowerCase()} subscriptions found.`}/>}</div></div>
-    <div className="subscription-hint"><RefreshCw/><span>Click a subscription row to open its billing detail and proration history.</span></div>
-    <button className="button subscription-new-plan" onClick={()=>setNewPlanOpen(true)}><Plus/>New Plan</button>
-    {newPlanOpen&&<Modal title="New recurring plan" close={()=>setNewPlanOpen(false)}><form className="form grid" onSubmit={createPlan}><label>Plan name<input name="name" required minLength={2} placeholder="Care Plan 2yr"/></label><label>Plan SKU<input name="sku" required minLength={2} placeholder="CARE-2Y"/></label><label>Billing cycle<select name="cadence" defaultValue="Monthly"><option>Monthly</option><option>Quarterly</option><option>Yearly</option></select></label><label>Recurring price<input name="price" type="number" min="0" step="0.01" required/></label><label>Recurring cost<input name="cost" type="number" min="0" step="0.01" required/></label><label>Tax rate (%)<input name="taxRate" type="number" min="0" max="100" step="0.01" defaultValue="18" required/></label><label className="full-span">Description<textarea name="description" required placeholder="What this recurring plan includes"/></label><button className="button primary full-span"><Plus/>Create plan</button></form></Modal>}
-  </>;
-}
-function Billing({subscription,mutate}:{subscription?:Workspace['subscriptions'][number];mutate:Function}){const[amount,setAmount]=useState(Number(subscription?.amount??0));const[reason,setReason]=useState('');useEffect(()=>{setAmount(Number(subscription?.amount??0));setReason('')},[subscription?.id]);if(!subscription)return <Empty text="No recurring subscription selected."/>;const schedule=subscription.schedule??[subscription.nextBillAt];const validReason=reason.trim().length>=5;const lifecycle=(action:'PAUSE'|'RESUME'|'CANCEL',message:string)=>mutate(`/subscriptions/${subscription.id}/change`,{expectedVersion:subscription.version,action,reason:reason.trim()},'POST',message);return <><div className="detail-head"><div><span className={`status ${subscription.state.toLowerCase()}`}>{label(subscription.state)}</span><h2>{subscription.customer} · {subscription.productName}</h2><p>{subscription.cadence} recurring plan · version {subscription.version}</p></div></div><div className="two-col"><Panel title="Recurring schedule"><div className="schedule">{schedule.map((billAt,i)=><div key={billAt}><span>{i===0?'Next billing':'Upcoming'}</span><b>{date(billAt)}</b><strong>{money(subscription.amount)}</strong></div>)}</div></Panel><Panel title="Modify subscription"><div className="form"><label>Recurring amount<input type="number" min="1" value={amount} disabled={subscription.state==='CANCELLED'} onChange={e=>setAmount(Number(e.target.value))}/></label><label>Reason for change<textarea value={reason} maxLength={240} onChange={event=>setReason(event.target.value)} placeholder="Explain the billing or lifecycle change"/></label><div className="actions"><button className="button primary" onClick={()=>mutate(`/subscriptions/${subscription.id}/change`,{expectedVersion:subscription.version,amount,reason:reason.trim()},'POST','Subscription updated')} disabled={!validReason||subscription.state==='CANCELLED'||amount===Number(subscription.amount)}>Apply change</button>{subscription.state==='ACTIVE'&&<button className="button warn" onClick={()=>lifecycle('PAUSE','Subscription paused')} disabled={!validReason}>Pause subscription</button>}{subscription.state==='PAUSED'&&<button className="button primary" onClick={()=>lifecycle('RESUME','Subscription resumed')} disabled={!validReason}>Resume subscription</button>}<button className="button danger" onClick={()=>lifecycle('CANCEL','Subscription cancelled')} disabled={!validReason||subscription.state==='CANCELLED'}>Cancel subscription</button></div><p className="muted">Changes affect future billing only and are retained below. Automated proration and credits are deferred until policy is confirmed.</p></div></Panel></div>{subscription.changes?.length?<Panel title="Subscription change history"><div className="customer-activity">{subscription.changes.map(change=><div key={change.id}><b>{label(change.kind)}</b><small>{date(change.effectiveAt)} · {change.reason}{change.kind==='AMOUNT_CHANGED'?` · ${money(change.previousAmount??0)} → ${money(change.newAmount??0)}`:''}</small></div>)}</div></Panel>:null}</>}
-
-function Portal({quote,mutate}:{quote?:Quote;mutate:Function}){const[message,setMessage]=useState('');const[counter,setCounter]=useState(0);if(!quote)return <Empty text="No quotation is available in your portal."/>;return <div className="portal-card"><div className="portal-title"><div className="brand"><span>D</span><strong>DealOS</strong></div><span className="status warning">{label(quote.stage)}</span></div><div className="portal-hero"><span className="eyebrow">Quotation {quote.number}</span><h2>{quote.customer}</h2><p>Review the commercial terms, ask a line-level question, or request a change.</p><strong>{money(quote.total)}</strong></div><div className="table-wrap"><table><thead><tr><th>Product</th><th>Quantity</th><th>Unit price</th><th>Discount</th><th>Net</th></tr></thead><tbody>{quote.lines.map(l=><tr key={l.id}><td><b>{l.product.name}</b><small>{l.product.description}</small></td><td>{l.quantity}</td><td>{money(l.unitPrice)}</td><td>{l.discount}%</td><td>{money(Number(l.unitPrice)*l.quantity*(1-Number(l.discount)/100))}</td></tr>)}</tbody></table></div><div className="portal-actions"><label>Comment or change request<textarea placeholder="Ask about a line or explain your request" value={message} onChange={e=>setMessage(e.target.value)}/></label><label>Counter discount (%)<input type="number" min="0" max="100" value={counter} onChange={e=>setCounter(Number(e.target.value))}/></label><div className="actions"><button className="button ghost" disabled={!message.trim()} onClick={()=>mutate(`/portal/quotations/${quote.id}/message`,counter>0?{message,counterDiscount:counter}:{message},'POST',counter>0?'Proposal sent':'Comment posted')}>Submit request</button><button className="button primary" disabled={quote.stage!=='APPROVED'} onClick={()=>mutate(`/portal/quotations/${quote.id}/confirm`,{},'POST','Quotation confirmed')}>Confirm quotation</button></div></div>{quote.stage!=='APPROVED'&&<div className="explain"><ShieldCheck/>Confirmation unlocks after the current terms complete approval.</div>}{quote.negotiation.length>0&&<Panel title="Discussion">{quote.negotiation.map(n=><div className="comment" key={n.id}><b>{n.author}</b><span>{n.message}</span><small>{date(n.createdAt)}{n.counterDiscount?` · ${n.counterDiscount}% proposed`:''}</small></div>)}</Panel>}</div>}
-function Invoices({data,open,mutate}:{data:Workspace;open:(v:View,id?:string)=>void;mutate:Function}){const[creating,setCreating]=useState(()=>new URLSearchParams(window.location.search).get('newInvoice')==='1');useEffect(()=>{const params=new URLSearchParams(window.location.search);if(creating)params.set('newInvoice','1');else params.delete('newInvoice');const suffix=params.toString();window.history.replaceState({},'',`${window.location.pathname}${suffix?`?${suffix}`:''}`)},[creating]);return <><div className="toolbar invoice-list-toolbar"><p className="muted">Customer invoices and their live payment status.</p><button className="button primary" onClick={()=>setCreating(true)}><Plus/>Create invoice</button></div><Panel title="Invoices"><div className="table-wrap"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Amount</th><th>Balance</th><th>Due date</th><th>Status</th><th/></tr></thead><tbody>{data.invoices.map(i=><tr key={i.id}><td><b>{i.number}</b></td><td>{i.customer}</td><td>{money(i.amount)}</td><td>{money(Number(i.amount)-Number(i.paidAmount))}</td><td>{date(i.dueAt)}</td><td><Status value={i.state}/></td><td><button onClick={()=>open('invoice',i.id)}>Open <ChevronRight/></button></td></tr>)}</tbody></table></div></Panel>{creating&&<CreateInvoiceModal data={data} mutate={mutate} close={()=>setCreating(false)}/>}</>}
-function InvoiceDetail({invoice,organizationName,mutate,onBack}:{invoice?:Invoice;organizationName:string;mutate:Function;onBack:()=>void}){
-  const outstanding=invoice?Math.max(0,Number(invoice.amount)-Number(invoice.paidAmount)):0;
-  const[amount,setAmount]=useState(outstanding);
-  const[ref,setRef]=useState('BANK-2026-');
-  useEffect(()=>setAmount(outstanding),[invoice?.id,outstanding]);
-  if(!invoice)return <Empty text="No invoice selected."/>;
-  const detailedLines=invoice.lines.some(line=>line.quantity!==undefined||line.unitPrice!==undefined||line.tax!==undefined);
-  const taxTotal=invoice.lines.reduce((sum,line)=>sum+Number(line.tax??0),0);
-  const subtotal=detailedLines?invoice.lines.reduce((sum,line)=>sum+Number(line.net??Number(line.amount)-Number(line.tax??0)),0):Number(invoice.amount);
-  const contact=[invoice.customerRecord?.contactPerson,invoice.customerRecord?.email,invoice.customerRecord?.phone?`${invoice.customerRecord.countryCode} ${invoice.customerRecord.phone}`:null].filter(Boolean);
-  const paymentValid=invoice.state!=='PAID'&&amount>0&&amount<=outstanding&&ref.trim().length>0;
-  const recordPayment=async(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();if(!paymentValid)return;await mutate(`/invoices/${invoice.id}/payments`,{amount,reference:ref.trim()},'POST','Payment recorded')};
-  return <div className="invoice-detail-workspace">
-    <div className="invoice-detail-toolbar">
-      <button type="button" className="invoice-back" onClick={onBack}><ChevronLeft/>All invoices</button>
-      <a className="button ghost" href={`/api/v1/invoices/${invoice.id}/pdf`} download><Download/>Download PDF</a>
-    </div>
-    <article className="invoice-document">
-      <header className="invoice-document-head">
-        <div className="invoice-issuer"><span><Receipt/></span><div><small>Issued by</small><h2>{organizationName}</h2><p>Professional tax invoice</p></div></div>
-        <div className="invoice-identity"><small>Invoice</small><h2>{invoice.number}</h2><Status value={invoice.state}/></div>
-      </header>
-      <div className="invoice-parties">
-        <section><small>Bill to</small><h3>{invoice.customer}</h3>{contact.length?<p>{contact.map((value,index)=><span key={index}>{value}</span>)}</p>:<p>Customer account</p>}</section>
-        <dl>
-          <div><dt>Due date</dt><dd>{date(invoice.dueAt)}</dd></div>
-          <div><dt>Invoice total</dt><dd>{invoiceMoney(invoice.amount)}</dd></div>
-          <div><dt>Amount paid</dt><dd>{invoiceMoney(invoice.paidAmount)}</dd></div>
-          <div className="balance"><dt>Balance due</dt><dd>{invoiceMoney(outstanding)}</dd></div>
-        </dl>
+  if (route !== "/app")
+    return (
+      <>
+        <div className="not-found">
+          <h1>This page took a wrong turn.</h1>
+          <a className="cta" href="/">
+            Back to DealOS <ArrowRight />
+          </a>
+        </div>
+        <DealAssistant />
+      </>
+    );
+  if (checking)
+    return (
+      <div className="not-found" role="status">
+        Opening your workspace…
       </div>
-      <div className="invoice-line-table table-wrap">
+    );
+  if (!workspace)
+    return (
+      <>
+        <AuthPage onSuccess={load} error={error} />
+        <DealAssistant />
+      </>
+    );
+  const open = (next: View, id = "", revisionId = "") => {
+    const params = new URLSearchParams(window.location.search);
+    params.set("screen", next);
+    if (id) params.set("record", id);
+    else params.delete("record");
+    if (revisionId) params.set("revision", revisionId);
+    else params.delete("revision");
+    window.history.pushState({}, "", `/app?${params}`);
+    setSelectedId(id);
+    setView(next);
+    setError("");
+    window.scrollTo(0, 0);
+  };
+  const setSidebarState = (collapsed: boolean) => {
+    setSidebarCollapsed(collapsed);
+    window.localStorage.setItem("dealos.sidebar.collapsed", String(collapsed));
+  };
+  const toggleSidebar = () =>
+    setSidebarCollapsed((current) => {
+      const next = !current;
+      window.localStorage.setItem("dealos.sidebar.collapsed", String(next));
+      return next;
+    });
+  const cancelSidebarAutoCollapse = () => {
+    if (sidebarCollapseTimer.current) {
+      clearTimeout(sidebarCollapseTimer.current);
+      sidebarCollapseTimer.current = null;
+    }
+  };
+  const scheduleSidebarAutoCollapse = () => {
+    if (sidebarCollapsed || usesCompactSidebar()) return;
+    cancelSidebarAutoCollapse();
+    sidebarCollapseTimer.current = setTimeout(() => {
+      setSidebarState(true);
+      sidebarCollapseTimer.current = null;
+    }, 2500);
+  };
+  const activateSidebarLogo = () => {
+    if (usesCompactSidebar()) {
+      open("dashboard");
+      return;
+    }
+    cancelSidebarAutoCollapse();
+    toggleSidebar();
+  };
+  const logout = async () => {
+    const destination =
+      workspace.user.actorType === "PLATFORM_OWNER"
+        ? "/login/super-admin"
+        : "/sign-in";
+    await request("/auth/logout", { method: "POST", body: "{}" });
+    setWorkspace(null);
+    navigate(destination);
+  };
+  if (workspace.user.platformSuperAdmin && !workspace.user.viewContext)
+    return (
+      <>
+        <PlatformAdmin logout={logout} onContextChanged={load} />
+        <DealAssistant
+          workspace={workspace}
+          screen="platform-admin"
+          onChanged={load}
+        />
+      </>
+    );
+  const exitView = async () => {
+    await request("/platform/view-as/exit", { method: "POST", body: "{}" });
+    await load();
+  };
+  const customers = workspace.customers ?? [];
+  const quote = selectedId
+    ? workspace.quotes.find((q) => q.id === selectedId)
+    : undefined;
+  const invoice = selectedId
+    ? workspace.invoices.find((i) => i.id === selectedId)
+    : undefined;
+  const product = selectedId
+    ? workspace.products.find((p) => p.id === selectedId)
+    : undefined;
+  const customer = selectedId
+    ? customers.find((c) => c.id === selectedId)
+    : undefined;
+  const content: Record<View, ReactNode> = {
+    dashboard: <Dashboard data={workspace} open={open} />,
+    leads: (
+      <LeadsPage
+        role={workspace.user.role}
+        initialLeadId={selectedId}
+        openQuote={(id, revisionId) => open("quote", id, revisionId ?? "")}
+      />
+    ),
+    "join-requests": <JoinRequestsPage onCustomerCreated={load} />,
+    quotations: (
+      <QuotationsPage
+        user={workspace.user}
+        openQuote={(id, revisionId) => open("quote", id, revisionId ?? "")}
+        onCreated={async (id, revisionId) => {
+          await load();
+          open("quote", id, revisionId ?? "");
+        }}
+      />
+    ),
+    quote: quote ? (
+      <QuotationDetailPage
+        quoteId={quote.id}
+        onBack={() => open("quotations")}
+        onChanged={load}
+      />
+    ) : (
+      <Empty text="Quotation not found or you do not have access." />
+    ),
+    approvals: <ApprovalsPage onOpenCase={(id) => open("approval", id)} />,
+    approval: selectedId ? (
+      <ApprovalDetailPage
+        caseId={selectedId}
+        role={workspace.user.role}
+        onBack={() => open("approvals")}
+        onChanged={load}
+      />
+    ) : (
+      <Empty text="Select an approval case." />
+    ),
+    fulfillment: <Fulfillment data={workspace} open={open} mutate={mutate} />,
+    "fulfillment-detail": (
+      <FulfillmentDetail
+        quote={quote}
+        warehouses={workspace.warehouses}
+        mutate={mutate}
+        role={workspace.user.role}
+      />
+    ),
+    subscriptions: (
+      <Subscriptions data={workspace} open={open} mutate={mutate} />
+    ),
+    billing: (
+      <Billing
+        subscription={
+          selectedId
+            ? workspace.subscriptions.find((s) => s.id === selectedId)
+            : undefined
+        }
+        mutate={mutate}
+      />
+    ),
+    portal: <Portal quote={quote} mutate={mutate} />,
+    invoices: (
+      <InvoicesPage
+        data={workspace}
+        openInvoice={(id) => open("invoice", id)}
+        mutate={mutateVoid}
+      />
+    ),
+    invoice: (
+      <InvoiceDetailPage
+        invoice={invoice}
+        quotes={workspace.quotes}
+        audits={workspace.audits}
+        role={workspace.user.role}
+        readOnly={Boolean(workspace.user.viewContext)}
+        mutate={mutateVoid}
+        onBack={() => open("invoices")}
+        onOpenQuote={(id) => open("quote", id)}
+      />
+    ),
+    health: <DealHealth data={workspace} mutate={mutateVoid} open={open} />,
+    reports: <SalesReporting data={workspace} open={open} />,
+    products: <Products data={workspace} open={open} mutate={mutate} />,
+    product: (
+      <ProductDetail
+        product={product}
+        mutate={mutate}
+        role={workspace.user.role}
+      />
+    ),
+    customers: <Customers data={workspace} open={open} mutate={mutate} />,
+    customer: (
+      <CustomerDetailV2
+        customer={customer}
+        open={open}
+        mutate={mutate}
+        role={workspace.user.role}
+        onChanged={load}
+      />
+    ),
+    policies: (
+      <AdvancedPolicies data={workspace} mutate={mutate} reload={load} />
+    ),
+    access:
+      workspace.user.role === "ADMIN" ? (
+        <AccessControl data={workspace} reload={load} />
+      ) : (
+        <Empty text="Administrator access is required." />
+      ),
+  };
+  const portalMode = workspace.user.role === "CUSTOMER";
+  const visibleNav = nav.filter(([id]) => canAccessView(workspace.user, id));
+  const activeView = canAccessView(workspace.user, view)
+    ? view
+    : firstAccessibleView(workspace.user);
+  return (
+    <>
+      <div
+        className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`}
+      >
+        {workspace.user.viewContext && (
+          <div className="view-as-banner">
+            <Eye />
+            <span>
+              <b>Read-only View As:</b>{" "}
+              {workspace.user.viewContext.organizationName}
+              {workspace.user.viewContext.simulatedUserId
+                ? " · simulated user context"
+                : ""}{" "}
+              · Real actor: {workspace.user.viewContext.realActor.name}
+            </span>
+            <button onClick={exitView}>
+              Exit View As <X />
+            </button>
+          </div>
+        )}
+        {!portalMode && (
+          <aside
+            onMouseEnter={cancelSidebarAutoCollapse}
+            onMouseLeave={scheduleSidebarAutoCollapse}
+          >
+            <Brand
+              href="/app"
+              onActivate={activateSidebarLogo}
+              ariaLabel={
+                sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
+              }
+              expanded={!sidebarCollapsed}
+            />
+            <nav>
+              {visibleNav.map(([id, text, icon]) => (
+                <button
+                  key={id}
+                  aria-label={text}
+                  title={sidebarCollapsed ? text : undefined}
+                  className={
+                    activeView === id || (activeView && related(activeView, id))
+                      ? "active"
+                      : ""
+                  }
+                  onClick={() => open(id)}
+                >
+                  {icon}
+                  <span>{text}</span>
+                  {id === "approvals" && (
+                    <em>
+                      {
+                        workspace.quotes
+                          .flatMap((q) => q.approvals)
+                          .filter((a) => a.state === "PENDING").length
+                      }
+                    </em>
+                  )}
+                </button>
+              ))}
+            </nav>
+            <div className="sidebar-foot">
+              <div className="avatar">
+                {workspace.user.name
+                  .split(" ")
+                  .map((p) => p[0])
+                  .join("")}
+              </div>
+              <div className="user-details">
+                <b>{workspace.user.name}</b>
+                <small>{roleName(workspace.user.role)}</small>
+              </div>
+              <button aria-label="Log out" onClick={logout}>
+                <LogOut />
+              </button>
+            </div>
+          </aside>
+        )}
+        <main className={portalMode ? "portal-main" : ""}>
+          {!portalMode && (
+            <header className="workspace-header">
+              <div className="workspace-title">
+                <small>{workspace.organization.name}</small>
+                <h1>
+                  {activeView ? title(activeView) : "No modules assigned"}
+                </h1>
+              </div>
+              {activeView && (
+                <WorkspaceCommandBar data={workspace} open={open} />
+              )}
+            </header>
+          )}
+          {error && (
+            <div className="error">
+              <AlertTriangle />
+              {error}
+              <button onClick={() => setError("")}>
+                <X />
+              </button>
+            </div>
+          )}
+          <section className="content">
+            {portalMode ? (
+              <CustomerPortalV2
+                data={workspace}
+                mutate={mutate}
+                reload={load}
+                logout={logout}
+              />
+            ) : activeView ? (
+              content[activeView]
+            ) : (
+              <NoModuleAccess role={roleName(workspace.user.role)} />
+            )}
+          </section>
+        </main>
+        {busy && (
+          <div className="busy">
+            <RefreshCw /> Saving changes…
+          </div>
+        )}
+        {toast && (
+          <div className="toast">
+            <Check />
+            {toast}
+          </div>
+        )}
+      </div>
+      <DealAssistant
+        workspace={workspace}
+        screen={activeView ?? "dashboard"}
+        onChanged={load}
+      />
+    </>
+  );
+}
+
+type GlobalResult = {
+  key: string;
+  kind: string;
+  title: string;
+  detail: string;
+  view: View;
+  id?: string;
+  searchText: string;
+};
+
+function WorkspaceCommandBar({
+  data,
+  open,
+}: {
+  data: Workspace;
+  open: (view: View, id?: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [seenAt, setSeenAt] = useState(0);
+  const root = useRef<HTMLDivElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const quotes = canAccessView(data.user, "quotations")
+    ? (data.quotes ?? [])
+    : [];
+  const approvalQuotes = canAccessView(data.user, "approvals")
+    ? (data.quotes ?? [])
+    : [];
+  const invoices = canAccessView(data.user, "invoices")
+    ? (data.invoices ?? [])
+    : [];
+  const customers = canAccessView(data.user, "customers")
+    ? (data.customers ?? [])
+    : [];
+  const products = canAccessView(data.user, "products")
+    ? (data.products ?? [])
+    : [];
+  const subscriptions = canAccessView(data.user, "subscriptions")
+    ? (data.subscriptions ?? [])
+    : [];
+  const users = canAccessView(data.user, "access") ? (data.users ?? []) : [];
+  const alerts = canAccessView(data.user, "health") ? (data.alerts ?? []) : [];
+  const audits = data.audits ?? [];
+  const persistedNotifications = data.notifications ?? [];
+  const seenKey = `dealos.notifications.seen.${data.organization.id}.${data.user.id}`;
+  useEffect(() => {
+    setSeenAt(Number(window.localStorage.getItem(seenKey) ?? 0));
+  }, [seenKey]);
+  useEffect(() => {
+    const close = (event: MouseEvent) => {
+      if (!root.current?.contains(event.target as Node)) {
+        setSearchOpen(false);
+        setNotificationsOpen(false);
+      }
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSearchOpen(false);
+        setNotificationsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", escape);
+    };
+  }, []);
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchInput.current?.focus();
+        setSearchOpen(true);
+        setNotificationsOpen(false);
+      }
+    };
+    document.addEventListener("keydown", shortcut);
+    return () => document.removeEventListener("keydown", shortcut);
+  }, []);
+  const results = useMemo<GlobalResult[]>(
+    () => [
+      ...quotes.map((item) => ({
+        key: `quote-${item.id}`,
+        kind: "Quotation",
+        title: item.number,
+        detail: `${item.customer} · ${label(quoteStatus(item))}`,
+        view: "quote" as View,
+        id: item.id,
+        searchText: `${item.number} ${item.customer} ${item.customerTier} ${item.stage}`,
+      })),
+      ...invoices.map((item) => ({
+        key: `invoice-${item.id}`,
+        kind: "Invoice",
+        title: item.number,
+        detail: `${item.customer} · ${label(item.state)} · ${invoiceMoney(item.amount)}`,
+        view: "invoice" as View,
+        id: item.id,
+        searchText: `${item.number} ${item.customer} ${item.state}`,
+      })),
+      ...customers.map((item) => ({
+        key: `customer-${item.id}`,
+        kind: "Customer",
+        title: item.name,
+        detail: `${item.tier} tier${item.email ? ` · ${item.email}` : ""}`,
+        view: "customer" as View,
+        id: item.id,
+        searchText: `${item.name} ${item.email ?? ""} ${item.phone ?? ""} ${item.gstin ?? ""} ${item.tier}`,
+      })),
+      ...products.map((item) => ({
+        key: `product-${item.id}`,
+        kind: "Product",
+        title: item.name,
+        detail: `${item.sku} · ${item.category}`,
+        view: "product" as View,
+        id: item.id,
+        searchText: `${item.name} ${item.sku} ${item.category} ${item.brand ?? ""}`,
+      })),
+      ...subscriptions.map((item) => ({
+        key: `subscription-${item.id}`,
+        kind: "Subscription",
+        title: item.productName,
+        detail: `${item.customer} · ${item.cadence}`,
+        view: "billing" as View,
+        id: item.id,
+        searchText: `${item.productName} ${item.customer} ${item.cadence} ${item.state}`,
+      })),
+      ...users.map((item) => ({
+        key: `user-${item.id}`,
+        kind: roleName(item.role),
+        title: item.name,
+        detail: `${item.email} · ${roleName(item.role)}`,
+        view: "access" as View,
+        searchText: `${item.name} ${item.email} ${item.loginId ?? ""} ${item.role}`,
+      })),
+    ],
+    [quotes, invoices, customers, products, subscriptions, users],
+  );
+  const normalized = query.trim().toLowerCase();
+  const filtered = normalized
+    ? results
+        .filter((item) =>
+          `${item.title} ${item.detail} ${item.searchText}`
+            .toLowerCase()
+            .includes(normalized),
+        )
+        .slice(0, 8)
+    : [];
+  const notifications = useMemo(() => {
+    const durableItems = persistedNotifications
+      .map((item) => ({
+        key: `notification-${item.id}`,
+        notificationId: item.id,
+        title: item.title,
+        detail: item.body,
+        time: item.createdAt,
+        unread: item.state === "UNREAD",
+        view: notificationView(item.resourceType, data, item.resourceId),
+        id: item.resourceId,
+        tone: "neutral",
+      }))
+      .filter((item) => canAccessView(data.user, item.view));
+    const alertItems = alerts.map((item) => ({
+      key: `alert-${item.id}`,
+      title: item.title,
+      detail: item.detail,
+      time: item.createdAt,
+      unread: !item.resolved,
+      view: "health" as View,
+      id: item.resourceId,
+      tone: item.severity.toLowerCase(),
+    }));
+    const approvalItems = approvalQuotes.flatMap((quote) =>
+      (quote.approvals ?? [])
+        .filter((item) => item.state === "PENDING")
+        .map((item) => ({
+          key: `approval-${item.id}`,
+          title: "Approval required",
+          detail: `${quote.number} · ${quote.customer} · ${item.step}`,
+          time: item.createdAt ?? quote.updatedAt,
+          unread: true,
+          view: "approval" as View,
+          id: quote.id,
+          tone: "warning",
+        })),
+    );
+    const auditItems = audits
+      .map((item) => ({
+        key: `audit-${item.id}`,
+        title: label(item.action),
+        detail: `${label(item.resource)}${item.reason ? ` · ${item.reason}` : ""}`,
+        time: item.createdAt,
+        unread: true,
+        view: notificationView(item.resource, data, item.resourceId),
+        id: item.resourceId,
+        tone: "neutral",
+      }))
+      .filter((item) => canAccessView(data.user, item.view));
+    return [...durableItems, ...alertItems, ...approvalItems, ...auditItems]
+      .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+      .slice(0, 12);
+  }, [persistedNotifications, alerts, approvalQuotes, audits, data]);
+  const unread = notifications.filter(
+    (item) => item.unread && new Date(item.time).getTime() > seenAt,
+  ).length;
+  const choose = (item: GlobalResult) => {
+    open(item.view, item.id);
+    setQuery("");
+    setSearchOpen(false);
+  };
+  const chooseNotification = (item: (typeof notifications)[number]) => {
+    if ("notificationId" in item)
+      void request(`/notifications/${item.notificationId}/read`, {
+        method: "POST",
+        body: "{}",
+      });
+    open(item.view, item.id);
+    setNotificationsOpen(false);
+  };
+  const markRead = () => {
+    const now = Date.now();
+    window.localStorage.setItem(seenKey, String(now));
+    setSeenAt(now);
+    void Promise.all(
+      persistedNotifications
+        .filter((item) => item.state === "UNREAD")
+        .map((item) =>
+          request(`/notifications/${item.id}/read`, {
+            method: "POST",
+            body: "{}",
+          }),
+        ),
+    );
+  };
+  return (
+    <div className="workspace-command-bar" ref={root}>
+      <div className={`global-search${searchOpen ? " open" : ""}`}>
+        <Search aria-hidden="true" />
+        <input
+          ref={searchInput}
+          value={query}
+          onFocus={() => {
+            setSearchOpen(true);
+            setNotificationsOpen(false);
+          }}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setSearchOpen(true);
+          }}
+          placeholder="Search invoices, quotes, customers…"
+          aria-label="Search across workspace"
+          aria-expanded={searchOpen}
+        />
+        <kbd>⌘ K</kbd>
+        {searchOpen && (
+          <div
+            className="command-dropdown search-results"
+            role="listbox"
+            aria-label="Global search results"
+          >
+            {!normalized ? (
+              <div className="command-empty">
+                <Search />
+                <b>Search across your workspace</b>
+                <span>
+                  Try an invoice number, quotation, customer, product, or team
+                  member.
+                </span>
+              </div>
+            ) : filtered.length ? (
+              filtered.map((item) => (
+                <button
+                  key={item.key}
+                  role="option"
+                  aria-selected="false"
+                  onClick={() => choose(item)}
+                >
+                  <ResultIcon kind={item.kind} />
+                  <span>
+                    <em>{item.kind}</em>
+                    <b>{item.title}</b>
+                    <small>{item.detail}</small>
+                  </span>
+                  <ChevronRight />
+                </button>
+              ))
+            ) : (
+              <div className="command-empty">
+                <Search />
+                <b>No results found</b>
+                <span>Check the spelling or try another keyword.</span>
+              </div>
+            )}
+            {normalized && (
+              <footer>
+                {filtered.length} {filtered.length === 1 ? "result" : "results"}{" "}
+                found
+              </footer>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="notification-control">
+        <button
+          className="notification-button"
+          title="Notifications"
+          aria-label={`Notifications${unread ? ` (${unread} unread)` : ""}`}
+          aria-expanded={notificationsOpen}
+          onClick={() => {
+            setNotificationsOpen((current) => !current);
+            setSearchOpen(false);
+          }}
+        >
+          <Bell />
+          {unread > 0 && <em>{unread > 9 ? "9+" : unread}</em>}
+        </button>
+        {notificationsOpen && (
+          <div className="command-dropdown notification-dropdown">
+            <div className="notification-head">
+              <span>
+                <b>Notifications</b>
+                <small>Updates from every module</small>
+              </span>
+              {unread > 0 && (
+                <button onClick={markRead}>Mark all as read</button>
+              )}
+            </div>
+            <div className="notification-list">
+              {notifications.length ? (
+                notifications.map((item) => (
+                  <button
+                    key={item.key}
+                    onClick={() => chooseNotification(item)}
+                  >
+                    <i className={item.tone} />
+                    <span>
+                      <b>{item.title}</b>
+                      <small>{item.detail}</small>
+                      <time>{relativeTime(item.time)}</time>
+                    </span>
+                    {item.unread && new Date(item.time).getTime() > seenAt && (
+                      <em aria-label="Unread" />
+                    )}
+                  </button>
+                ))
+              ) : (
+                <div className="command-empty">
+                  <Bell />
+                  <b>You're all caught up</b>
+                  <span>New activity will appear here.</span>
+                </div>
+              )}
+            </div>
+            <footer>
+              <button
+                onClick={() => {
+                  open("health");
+                  setNotificationsOpen(false);
+                }}
+              >
+                View notification center <ArrowRight />
+              </button>
+            </footer>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ResultIcon({ kind }: { kind: string }) {
+  if (kind === "Invoice") return <Receipt />;
+  if (kind === "Quotation") return <FileText />;
+  if (kind === "Customer") return <Store />;
+  if (kind === "Product") return <Package />;
+  if (kind === "Subscription") return <RefreshCw />;
+  return <UserRound />;
+}
+function notificationView(resource: string, data: Workspace, id: string): View {
+  const value = resource.toLowerCase();
+  if (
+    (data.quotes ?? []).some((item) => item.id === id) ||
+    value.includes("quote")
+  )
+    return "quote";
+  if (
+    (data.invoices ?? []).some((item) => item.id === id) ||
+    value.includes("invoice")
+  )
+    return "invoice";
+  if (
+    (data.customers ?? []).some((item) => item.id === id) ||
+    value.includes("customer")
+  )
+    return "customer";
+  if (
+    (data.products ?? []).some((item) => item.id === id) ||
+    value.includes("product")
+  )
+    return "product";
+  if (value.includes("subscription")) return "billing";
+  if (value.includes("policy")) return "policies";
+  return "dashboard";
+}
+function relativeTime(value: string) {
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return "Recently";
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return "Just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return days < 7 ? `${days}d ago` : date(value);
+}
+
+function Dashboard({
+  data,
+  open,
+}: {
+  data: Workspace;
+  open: (v: View, id?: string) => void;
+}) {
+  const pending = data.quotes
+    .flatMap((q) => q.approvals)
+    .filter((a) => a.state === "PENDING").length;
+  const customerPending = data.quotes.filter(
+    (q) => quoteStatus(q) === "PENDING_CUSTOMER_ACCEPTANCE",
+  ).length;
+  const quotationAccess = canAccessView(data.user, "quotations");
+  const invoiceAccess = canAccessView(data.user, "invoices");
+  const healthAccess = canAccessView(data.user, "health");
+  const reportAccess = canAccessView(data.user, "reports");
+  const canCreateQuotation =
+    quotationAccess && ["REP", "MANAGER", "ADMIN"].includes(data.user.role);
+  const canCreateInvoice =
+    invoiceAccess && ["FINANCE", "ADMIN"].includes(data.user.role);
+  const hasOperationalAccess = quotationAccess || invoiceAccess || healthAccess;
+  const openCreate = (
+    view: "quotations" | "invoices",
+    parameter: "newQuotation" | "newInvoice",
+  ) => {
+    const params = new URLSearchParams(window.location.search);
+    params.set(parameter, "1");
+    window.history.replaceState(
+      {},
+      "",
+      `${window.location.pathname}?${params}`,
+    );
+    open(view);
+  };
+  const openAlert = (alert: Workspace["alerts"][number]) =>
+    alert.resourceType === "LEAD"
+      ? open("leads", alert.resourceId)
+      : alert.resourceType === "QUOTE"
+        ? open("quote", alert.resourceId)
+        : open("health");
+  return (
+    <>
+      {hasOperationalAccess ? (
+        <div className="metric-grid">
+          {quotationAccess && (
+            <Metric
+              label="Pipeline value"
+              value={money(
+                data.quotes.reduce(
+                  (sum, quote) => sum + Number(quote.total),
+                  0,
+                ),
+              )}
+              note={`${data.quotes.length} active quotations`}
+              tone="dark"
+            />
+          )}
+          {quotationAccess && (
+            <Metric
+              label="Pending approvals"
+              value={String(pending + customerPending)}
+              note={`${pending} internal · ${customerPending} customer acceptance`}
+            />
+          )}
+          {healthAccess && (
+            <Metric
+              label="At-risk deals"
+              value={String(
+                data.alerts.filter((alert) => !alert.resolved).length,
+              )}
+              note="Across discounts and delivery"
+              tone="warn"
+            />
+          )}
+          {invoiceAccess && (
+            <Metric
+              label="Open invoices"
+              value={money(
+                data.invoices
+                  .filter((invoice) => invoice.state !== "PAID")
+                  .reduce(
+                    (sum, invoice) =>
+                      sum + Number(invoice.amount) - Number(invoice.paidAmount),
+                    0,
+                  ),
+              )}
+              note="Outstanding balance"
+            />
+          )}
+        </div>
+      ) : (
+        <div className="empty">
+          <LockKeyhole />
+          <h2>Overview ready</h2>
+          <p>
+            Your administrator can enable operational modules when you need
+            them.
+          </p>
+        </div>
+      )}
+      {(canCreateQuotation || canCreateInvoice || reportAccess) && (
+        <div className="dashboard-actions" aria-label="Overview actions">
+          {canCreateQuotation && (
+            <button
+              className="button primary"
+              onClick={() => openCreate("quotations", "newQuotation")}
+            >
+              <Plus />
+              New quotation
+            </button>
+          )}
+          {canCreateInvoice && (
+            <button
+              className="button ghost"
+              onClick={() => openCreate("invoices", "newInvoice")}
+            >
+              <FilePlus2 />
+              Add Invoice
+            </button>
+          )}
+          {reportAccess && (
+            <button className="button ghost" onClick={() => open("reports")}>
+              <IndianRupee />
+              View reports
+            </button>
+          )}
+        </div>
+      )}
+      {(quotationAccess || healthAccess) && (
+        <div className="two-col">
+          {quotationAccess && (
+            <Panel
+              title="Recent deal activity"
+              action={
+                <button onClick={() => open("quotations")}>
+                  View pipeline <ChevronRight />
+                </button>
+              }
+            >
+              <DealTable quotes={data.quotes} open={open} />
+            </Panel>
+          )}
+          {healthAccess && (
+            <Panel title="Attention queue">
+              <div className="attention">
+                {data.alerts.slice(0, 3).map((alert) => (
+                  <button key={alert.id} onClick={() => openAlert(alert)}>
+                    <span
+                      className={`alert-dot ${alert.severity.toLowerCase()}`}
+                    />
+                    <span>
+                      <b>{alert.title}</b>
+                      <small>{alert.detail}</small>
+                    </span>
+                    <ChevronRight />
+                  </button>
+                ))}
+              </div>
+            </Panel>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+function Quotations({
+  data,
+  open,
+  mutate,
+}: {
+  data: Workspace;
+  open: (v: View, id?: string) => void;
+  mutate: Function;
+}) {
+  const [newOpen, setNewOpen] = useState(false);
+  const create = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    await mutate(
+      "/quotations",
+      { customer: f.get("customer"), customerTier: f.get("tier") },
+      "POST",
+      "Quotation created",
+    );
+    setNewOpen(false);
+  };
+  return (
+    <>
+      <div className="toolbar">
+        <div className="search">
+          <Search />
+          <input placeholder="Search quotations" />
+        </div>
+        <button className="button primary" onClick={() => setNewOpen(true)}>
+          <Plus />
+          New quotation
+        </button>
+      </div>
+      <div className="kanban">
+        {[
+          "DRAFT",
+          "PENDING_APPROVAL",
+          "APPROVED",
+          "PENDING_CUSTOMER_ACCEPTANCE",
+          "NEGOTIATION",
+          "CONFIRMED",
+        ].map((stage) => (
+          <div className="lane" key={stage}>
+            <div className="lane-title">
+              <span>{label(stage)}</span>
+              <em>
+                {data.quotes.filter((q) => quoteStatus(q) === stage).length}
+              </em>
+            </div>
+            {data.quotes
+              .filter((q) => quoteStatus(q) === stage)
+              .map((q) => (
+                <button
+                  className="deal-card"
+                  key={q.id}
+                  onClick={() => open("quote", q.id)}
+                >
+                  <small>{q.number}</small>
+                  <h3>{q.customer}</h3>
+                  <b>{money(q.total)}</b>
+                  <div>
+                    <span>{q.customerTier}</span>
+                    <span>
+                      {quoteStatus(q) === "PENDING_CUSTOMER_ACCEPTANCE"
+                        ? "Waiting for customer"
+                        : date(q.updatedAt)}
+                    </span>
+                  </div>
+                </button>
+              ))}
+          </div>
+        ))}
+      </div>
+      {newOpen && (
+        <Modal title="New quotation" close={() => setNewOpen(false)}>
+          <form onSubmit={create} className="form">
+            <label>
+              Customer
+              <input name="customer" defaultValue="Vertex Systems" required />
+            </label>
+            <label>
+              Customer tier
+              <select name="tier">
+                <option>Gold</option>
+                <option>Silver</option>
+                <option>Bronze</option>
+              </select>
+            </label>
+            <button className="button primary">Create draft</button>
+          </form>
+        </Modal>
+      )}
+    </>
+  );
+}
+type CommerceLine = { productId: string; quantity: number; discount: number };
+const lineAmount = (product: Product | undefined, line: CommerceLine) => {
+  const price = Number(product?.price ?? 0);
+  const net = price * line.quantity * (1 - line.discount / 100);
+  const tax = (net * Number(product?.taxRate ?? 0)) / 100;
+  return { net, tax, total: net + tax };
+};
+type InvoiceTaxMode = "EXCLUSIVE" | "INCLUSIVE";
+const invoiceLineAmount = (
+  product: Product | undefined,
+  line: CommerceLine,
+  gstRate: number,
+  gstMode: InvoiceTaxMode,
+) => {
+  const listed = Number(product?.price ?? 0) * line.quantity;
+  const discounted = listed * (1 - line.discount / 100);
+  const net =
+    gstMode === "INCLUSIVE" ? discounted / (1 + gstRate / 100) : discounted;
+  const tax =
+    gstMode === "INCLUSIVE" ? discounted - net : (net * gstRate) / 100;
+  return { listed, discount: listed - discounted, net, tax, total: net + tax };
+};
+const availableStock = (product: Product | undefined) =>
+  product?.recurring
+    ? Number.MAX_SAFE_INTEGER
+    : (product?.stocks.reduce(
+        (sum, row) => sum + row.onHand - row.reserved,
+        0,
+      ) ?? 0);
+function ProductLineEditor({
+  products,
+  lines,
+  setLines,
+  readonly = false,
+}: {
+  products: Product[];
+  lines: CommerceLine[];
+  setLines: (fn: (value: CommerceLine[]) => CommerceLine[]) => void;
+  readonly?: boolean;
+}) {
+  const active = products.filter((p) => p.active);
+  const fallback = active[0]?.id ?? "";
+  const addLine = () =>
+    fallback &&
+    setLines((v) => [...v, { productId: fallback, quantity: 1, discount: 0 }]);
+  const update = (index: number, patch: Partial<CommerceLine>) =>
+    setLines((v) =>
+      v.map((line, i) => (i === index ? { ...line, ...patch } : line)),
+    );
+  const remove = (index: number) =>
+    setLines((v) => v.filter((_, i) => i !== index));
+  const subtotal = lines.reduce(
+    (sum, line) =>
+      sum +
+      lineAmount(
+        products.find((p) => p.id === line.productId),
+        line,
+      ).total,
+    0,
+  );
+  return (
+    <div className="catalog-line-editor">
+      {lines.map((line, index) => {
+        const product = products.find((p) => p.id === line.productId);
+        const amount = lineAmount(product, line);
+        return (
+          <div className="catalog-line" key={`${line.productId}-${index}`}>
+            <label>
+              Catalog product
+              <select
+                value={line.productId}
+                disabled={readonly}
+                onChange={(e) => update(index, { productId: e.target.value })}
+              >
+                {active.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} · {p.sku} · {money(p.price)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="line-fields">
+              <label>
+                Qty
+                <input
+                  type="number"
+                  min="1"
+                  value={line.quantity}
+                  disabled={readonly}
+                  onChange={(e) =>
+                    update(index, { quantity: Number(e.target.value) })
+                  }
+                />
+              </label>
+              <label>
+                Discount %
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={line.discount}
+                  disabled={readonly}
+                  onChange={(e) =>
+                    update(index, { discount: Number(e.target.value) })
+                  }
+                />
+              </label>
+              <label>
+                GST
+                <input value={`${product?.taxRate ?? 0}%`} disabled />
+              </label>
+            </div>
+            <div className="line-preview">
+              <span>
+                <b>{product?.category ?? "Product"}</b>
+                <small>
+                  {product?.unit ?? "Unit"} · {product?.cadence ?? "One-time"}
+                </small>
+              </span>
+              <strong>{money(amount.total)}</strong>
+              {!readonly && (
+                <button
+                  className="icon-button"
+                  type="button"
+                  aria-label="Remove line"
+                  onClick={() => remove(index)}
+                  disabled={lines.length === 1}
+                >
+                  <Trash2 />
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      <div className="catalog-line-footer">
+        <button
+          type="button"
+          className="button ghost"
+          disabled={readonly || !fallback}
+          onClick={addLine}
+        >
+          <Plus />
+          Add synced catalog line
+        </button>
+        <strong>{money(subtotal)}</strong>
+      </div>
+      {!active.length && (
+        <Empty text="Add an active product before creating invoice or quotation lines." />
+      )}
+    </div>
+  );
+}
+function QuoteDetail({
+  quote,
+  products,
+  mutate,
+}: {
+  quote?: Quote;
+  products: Product[];
+  mutate: Function;
+}) {
+  const [lines, setLines] = useState<CommerceLine[]>(
+    () =>
+      quote?.lines.map((l) => ({
+        productId: l.productId,
+        quantity: l.quantity,
+        discount: Number(l.discount),
+      })) ?? [],
+  );
+  useEffect(
+    () =>
+      setLines(
+        quote?.lines.map((l) => ({
+          productId: l.productId,
+          quantity: l.quantity,
+          discount: Number(l.discount),
+        })) ?? [],
+      ),
+    [quote?.id],
+  );
+  useEffect(() => {
+    const first = products.find((p) => p.active);
+    if (quote?.stage === "DRAFT" && !lines.length && first)
+      setLines([{ productId: first.id, quantity: 1, discount: 0 }]);
+  }, [quote?.stage, products.length, lines.length]);
+  if (!quote) return <Empty text="Create a quotation to begin." />;
+  const displayStage = quoteStatus(quote);
+  const add = (product: Product) =>
+    setLines((v) =>
+      v.some((l) => l.productId === product.id)
+        ? v
+        : [...v, { productId: product.id, quantity: 1, discount: 0 }],
+    );
+  const save = () =>
+    mutate(
+      `/quotations/${quote.id}/draft`,
+      {
+        version: quote.version,
+        orderDiscount: Number(quote.orderDiscount),
+        lines,
+      },
+      "PUT",
+      "Draft saved",
+    );
+  return (
+    <>
+      <div className="detail-head">
+        <div>
+          <span className={`status ${displayStage.toLowerCase()}`}>
+            {label(displayStage)}
+          </span>
+          <h2>
+            {quote.number} · {quote.customer}
+          </h2>
+          <p>
+            {quote.customerTier} customer · Version {quote.version}
+          </p>
+        </div>
+        <div className="actions">
+          <button
+            className="button ghost"
+            onClick={save}
+            disabled={quote.stage !== "DRAFT" || !lines.length}
+          >
+            Save draft
+          </button>
+          <button
+            className="button primary"
+            onClick={() =>
+              mutate(
+                `/quotations/${quote.id}/submit`,
+                {},
+                "POST",
+                "Submitted for approval",
+              )
+            }
+            disabled={quote.stage !== "DRAFT"}
+          >
+            Submit for approval
+          </button>
+          {quote.stage === "APPROVED" && !quote.sentAt && (
+            <button
+              className="button primary"
+              onClick={() =>
+                mutate(
+                  `/quotations/${quote.id}/send`,
+                  {},
+                  "POST",
+                  "Sent to customer portal",
+                )
+              }
+            >
+              Send to customer
+            </button>
+          )}
+        </div>
+      </div>
+      {displayStage === "PENDING_CUSTOMER_ACCEPTANCE" && (
+        <div className="customer-acceptance-banner">
+          <ShieldCheck />
+          <span>
+            <b>Pending customer acceptance</b>
+            <small>
+              This quotation is visible in the customer portal. It will stay
+              pending for admins and employees until the customer clicks Accept.
+            </small>
+          </span>
+        </div>
+      )}
+      <div className="quote-layout">
+        <Panel title="Commercial lines">
+          {quote.stage === "DRAFT" ? (
+            <ProductLineEditor
+              products={products}
+              lines={lines}
+              setLines={setLines}
+            />
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Qty</th>
+                    <th>List price</th>
+                    <th>Discount</th>
+                    <th>Limit</th>
+                    <th>Net</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lines.map((line, index) => {
+                    const p = products.find((x) => x.id === line.productId);
+                    const persisted = quote.lines.find(
+                      (x) => x.productId === line.productId,
+                    );
+                    return (
+                      <tr key={`${line.productId}-${index}`}>
+                        <td>
+                          <b>{p?.name}</b>
+                          <small>
+                            {p?.category}
+                            {p?.cadence ? ` · ${p.cadence}` : ""}
+                          </small>
+                        </td>
+                        <td>{line.quantity}</td>
+                        <td>{money(p?.price ?? 0)}</td>
+                        <td>{line.discount}%</td>
+                        <td>
+                          {persisted ? `${persisted.allowedDiscount}%` : "-"}
+                        </td>
+                        <td>{money(lineAmount(p, line).net)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="totals">
+            <span>
+              Deal total <b>{money(quote.total)}</b>
+            </span>
+            <span>
+              Margin <b>{money(quote.margin)}</b>
+            </span>
+            <span className={Number(quote.riskScore) > 0 ? "risk" : ""}>
+              Risk excess <b>{quote.riskScore} pts</b>
+            </span>
+          </div>
+        </Panel>
+        <Panel title="Synced catalog suggestions">
+          <p className="muted">
+            Products created in the Product module appear here after the
+            workspace refresh.
+          </p>
+          <div className="suggestions">
+            {products
+              .filter(
+                (p) => p.active && !lines.some((l) => l.productId === p.id),
+              )
+              .slice(0, 3)
+              .map((p) => (
+                <div key={p.id}>
+                  <span className="product-icon">
+                    <Sparkles />
+                  </span>
+                  <span>
+                    <b>{p.name}</b>
+                    <small>
+                      {p.sku} · +{money(Number(p.price) - Number(p.cost))}{" "}
+                      margin · {p.category}
+                    </small>
+                  </span>
+                  <button
+                    onClick={() => add(p)}
+                    disabled={quote.stage !== "DRAFT"}
+                  >
+                    Add
+                  </button>
+                </div>
+              ))}
+          </div>
+        </Panel>
+      </div>
+    </>
+  );
+}
+
+function Approvals({
+  data,
+  open,
+}: {
+  data: Workspace;
+  open: (v: View, id?: string) => void;
+}) {
+  const [filter, setFilter] = useState<"PENDING" | "RETURNED" | "APPROVED">(
+    "PENDING",
+  );
+  const filters = ["PENDING", "RETURNED", "APPROVED"] as const;
+  const qs = data.quotes.filter((q) => {
+    if (!q.approvals.length) return false;
+    if (filter === "PENDING")
+      return (
+        q.stage === "PENDING_APPROVAL" &&
+        q.approvals.some((a) => a.state === "PENDING")
+      );
+    if (filter === "RETURNED")
+      return (
+        q.stage === "DRAFT" && q.approvals.some((a) => a.state === "RETURNED")
+      );
+    return (
+      ["APPROVED", "NEGOTIATION", "CONFIRMED"].includes(q.stage) &&
+      q.approvals.some((a) => a.state === "APPROVED")
+    );
+  });
+  return (
+    <Panel title="Approval queue">
+      <div className="filter-row" aria-label="Approval status filters">
+        {filters.map((value) => (
+          <button
+            type="button"
+            key={value}
+            className={`chip ${filter === value ? "active" : ""}`}
+            aria-pressed={filter === value}
+            onClick={() => setFilter(value)}
+          >
+            {label(value)}
+          </button>
+        ))}
+      </div>
+      <div className="table-wrap">
         <table>
-          <thead><tr><th>#</th><th>Item description</th><th>Qty</th><th>Rate</th><th>Discount</th><th>GST</th><th>Amount</th></tr></thead>
-          <tbody>{invoice.lines.map((line,index)=><tr key={`${line.productId??'line'}-${index}`}><td>{String(index+1).padStart(2,'0')}</td><td><b>{line.description}</b>{line.cadence&&<small>{line.cadence}</small>}</td><td>{line.quantity??'—'}</td><td>{line.unitPrice!==undefined?invoiceMoney(line.unitPrice):'—'}</td><td>{line.discount!==undefined?`${Number(line.discount)}%`:'—'}</td><td>{line.tax!==undefined?invoiceMoney(line.tax):'—'}</td><td><b>{invoiceMoney(line.amount)}</b></td></tr>)}</tbody>
+          <thead>
+            <tr>
+              <th>Quotation</th>
+              <th>Customer</th>
+              <th>Risk</th>
+              <th>Current step</th>
+              <th>Status</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {qs.map((q) => (
+              <tr key={q.id}>
+                <td>
+                  <b>{q.number}</b>
+                </td>
+                <td>{q.customer}</td>
+                <td>
+                  <span className="risk-pill">{q.riskScore} pts</span>
+                </td>
+                <td>
+                  {q.approvals.find((a) => a.state === "PENDING")?.step ??
+                    "Complete"}
+                </td>
+                <td>
+                  <Status
+                    value={filter === "RETURNED" ? "RETURNED" : quoteStatus(q)}
+                  />
+                </td>
+                <td>
+                  <button onClick={() => open("approval", q.id)}>
+                    Review <ChevronRight />
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {!qs.length && (
+              <tr>
+                <td className="empty" colSpan={6}>
+                  No {filter.toLowerCase()} approvals.
+                </td>
+              </tr>
+            )}
+          </tbody>
         </table>
       </div>
-      <div className="invoice-document-summary">
-        <p>Thank you for your business.<span>Payment references are recorded as settlement evidence and do not initiate a bank transfer.</span></p>
-        <dl>
-          <div><dt>Subtotal</dt><dd>{invoiceMoney(subtotal)}</dd></div>
-          {detailedLines&&<div><dt>GST</dt><dd>{invoiceMoney(taxTotal)}</dd></div>}
-          <div className="total"><dt>Total</dt><dd>{invoiceMoney(invoice.amount)}</dd></div>
-          <div><dt>Paid</dt><dd>− {invoiceMoney(invoice.paidAmount)}</dd></div>
-          <div className="due"><dt>Balance due</dt><dd>{invoiceMoney(outstanding)}</dd></div>
-        </dl>
+    </Panel>
+  );
+}
+function ApprovalDetail({
+  quote,
+  mutate,
+  role,
+}: {
+  quote?: Quote;
+  mutate: Function;
+  role: string;
+}) {
+  const [reason, setReason] = useState(
+    "Commercial terms reviewed against policy.",
+  );
+  if (!quote) return <Empty text="No approval selected." />;
+  const current = quote.approvals.find((a) => a.state === "PENDING");
+  const cards = quote.riskBreakdown?.cards ?? fallbackRiskCards(quote);
+  return (
+    <>
+      <div className="detail-head">
+        <div>
+          <span className="status warning">Approval review</span>
+          <h2>
+            {quote.number} · {quote.customer}
+          </h2>
+          <p>
+            {quote.customerTier} account · {money(quote.total)}
+          </p>
+        </div>
+        <div className="risk-score">
+          <b>{quote.riskScore}</b>
+          <span>
+            risk excess
+            <br />
+            points
+          </span>
+        </div>
+      </div>
+      <Panel title="Risk explanation">
+        <div className="risk-explanation-grid">
+          {cards.map((card) => (
+            <article
+              className={`risk-explanation-card ${card.tone}`}
+              key={card.key}
+            >
+              <span>{card.label}</span>
+              <b>{card.value}</b>
+              <p>{card.detail}</p>
+            </article>
+          ))}
+        </div>
+      </Panel>
+      <Panel title="Why this quotation was flagged">
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Line</th>
+                <th>Discount given</th>
+                <th>Limit allowed</th>
+                <th>Outcome</th>
+              </tr>
+            </thead>
+            <tbody>
+              {quote.lines.map((l) => (
+                <tr key={l.id}>
+                  <td>{l.product.name}</td>
+                  <td>{l.discount}%</td>
+                  <td>{l.allowedDiscount}%</td>
+                  <td>
+                    {Number(l.discount) > Number(l.allowedDiscount) ? (
+                      <span className="risk-pill">
+                        {Number(l.discount) - Number(l.allowedDiscount)} pts
+                        over
+                      </span>
+                    ) : (
+                      <span className="good">Within policy</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="explain">
+          <AlertTriangle />
+          The highest line excess, blended value-weighted excess, order
+          discount, margin, and policy threshold determine the review path.
+        </div>
+      </Panel>
+      <ApprovalTrack items={approvalTrackItems(quote)} />
+      <Panel title="Decision">
+        <div className="decision">
+          <label>
+            Review reason
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </label>
+          <div className="actions">
+            <button
+              className="button primary"
+              disabled={
+                !current ||
+                !(
+                  role === "ADMIN" ||
+                  (current.step === "Sales Manager" && role === "MANAGER") ||
+                  (current.step === "Finance" && role === "FINANCE")
+                )
+              }
+              onClick={() =>
+                mutate(
+                  `/approvals/${current?.id}/decision`,
+                  { decision: "APPROVE", reason },
+                  "POST",
+                  "Approval recorded",
+                )
+              }
+            >
+              Approve
+            </button>
+            <button
+              className="button warn"
+              disabled={!current}
+              onClick={() =>
+                mutate(
+                  `/approvals/${current?.id}/decision`,
+                  { decision: "RETURN", reason },
+                  "POST",
+                  "Returned for revision",
+                )
+              }
+            >
+              Return for revision
+            </button>
+            <button
+              className="button danger"
+              disabled={!current}
+              onClick={() =>
+                mutate(
+                  `/approvals/${current?.id}/decision`,
+                  { decision: "REJECT", reason },
+                  "POST",
+                  "Quotation rejected",
+                )
+              }
+            >
+              Reject
+            </button>
+          </div>
+        </div>
+      </Panel>
+    </>
+  );
+}
+function ApprovalTrack({
+  items,
+}: {
+  items: Array<{ key: string; label: string; state: string; note: string }>;
+}) {
+  return (
+    <div className="approval-track" aria-label="Approval lifecycle">
+      {items.map((item, index) => (
+        <div className={item.state.toLowerCase()} key={item.key}>
+          <i>{item.state === "APPROVED" ? <Check /> : index + 1}</i>
+          <span>
+            <b>{item.label}</b>
+            <small>{item.note}</small>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+function approvalTrackItems(quote: Quote) {
+  const step = (name: string) =>
+    quote.approvals.find((approval) => approval.step === name);
+  const submitted = quote.stage !== "DRAFT" || quote.approvals.length > 0;
+  const manager = step("Sales Manager");
+  const finance = step("Finance");
+  return [
+    {
+      key: "submitted",
+      label: "Submitted",
+      state: submitted ? "APPROVED" : "PENDING",
+      note: submitted ? "Submitted" : "Draft",
+    },
+    {
+      key: "manager",
+      label: "Sales Manager",
+      state: manager?.state ?? "NOT_REQUIRED",
+      note: manager ? label(manager.state) : "Not required",
+    },
+    {
+      key: "finance",
+      label: "Finance",
+      state: finance?.state ?? "NOT_REQUIRED",
+      note: finance ? label(finance.state) : "Not required",
+    },
+    {
+      key: "confirmed",
+      label: "Confirmed",
+      state: quote.stage === "CONFIRMED" ? "APPROVED" : "WAITING",
+      note: quote.stage === "CONFIRMED" ? "Confirmed" : "Awaiting customer",
+    },
+  ];
+}
+function fallbackRiskCards(quote: Quote) {
+  const orderDiscount = Number(quote.orderDiscount ?? 0);
+  const values = quote.lines.map((line) => {
+    const gross = Number(line.unitPrice) * line.quantity;
+    const effective =
+      100 - ((100 - Number(line.discount)) * (100 - orderDiscount)) / 100;
+    const limit = Number(line.allowedDiscount);
+    return {
+      product: line.product.name,
+      gross,
+      effective,
+      limit,
+      excess: Math.max(0, effective - limit),
+    };
+  });
+  const grossTotal = values.reduce((sum, line) => sum + line.gross, 0);
+  const worst = values.sort((left, right) => right.excess - left.excess)[0];
+  const weighted = grossTotal
+    ? values.reduce((sum, line) => sum + line.gross * line.excess, 0) /
+      grossTotal
+    : 0;
+  const marginPercent = Number(quote.total)
+    ? (Number(quote.margin) / Number(quote.total)) * 100
+    : 0;
+  const steps = [...new Set(quote.approvals.map((approval) => approval.step))];
+  return [
+    {
+      key: "worst-line-excess",
+      label: "Worst individual line excess",
+      value: `${Number((worst?.excess ?? 0).toFixed(2))} pts`,
+      detail:
+        worst && worst.excess > 0
+          ? `${worst.product}: effective ${Number(worst.effective.toFixed(2))}% vs ${Number(worst.limit.toFixed(2))}% limit`
+          : "No individual line exceeds its policy limit.",
+      tone: (worst?.excess ?? 0) > 0 ? "warn" : "ok",
+    },
+    {
+      key: "weighted-excess",
+      label: "Value-weighted excess",
+      value: `${Number(weighted.toFixed(2))} pts`,
+      detail: "Weighted by gross line value across the quotation.",
+      tone: weighted > 0 ? "warn" : "ok",
+    },
+    {
+      key: "order-discount",
+      label: "Order discount",
+      value: `${Number(orderDiscount.toFixed(2))}%`,
+      detail: "Applied across the order after line discounts.",
+      tone: orderDiscount > 0 ? "warn" : "ok",
+    },
+    {
+      key: "margin-percentage",
+      label: "Margin percentage",
+      value: `${Number(marginPercent.toFixed(2))}%`,
+      detail: "Calculated from available workspace totals.",
+      tone: marginPercent < 12 ? "danger" : "ok",
+    },
+    {
+      key: "approval-threshold",
+      label: "Approval threshold and policy version",
+      value: "Current policy",
+      detail:
+        "Refresh loads the exact persisted threshold and policy version for this revision.",
+      tone: "neutral",
+    },
+    {
+      key: "required-review",
+      label: "Exact required review reason",
+      value: steps.join(" + ") || "None",
+      detail: steps.length
+        ? "Approval was routed by the stored pricing policy for this quotation."
+        : "No manager or finance approval is required for this revision.",
+      tone: steps.length ? "danger" : "ok",
+    },
+  ] as const;
+}
+function Fulfillment({
+  data,
+  open,
+  mutate,
+}: {
+  data: Workspace;
+  open: (v: View, id?: string) => void;
+  mutate: Function;
+}) {
+  const [receiptOpen, setReceiptOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState(
+    data.warehouses[0]?.id ?? "",
+  );
+  const canReceive = ["ADMIN", "FINANCE"].includes(data.user.role);
+  const orders = data.quotes.filter(
+    (q) =>
+      q.stage === "CONFIRMED" &&
+      !["SHIPPED", "CANCELLED"].includes(q.order?.state ?? "") &&
+      q.lines.some(
+        (line) =>
+          line.product.category === "Hardware" && !line.product.recurring,
+      ),
+  );
+  const stock = data.warehouses
+    .filter((warehouse) => warehouse.active !== false)
+    .flatMap((warehouse) =>
+      warehouse.stocks.map((balance) => ({ warehouse, balance })),
+    );
+  const hardwareProducts = [
+    ...new Map(
+      [...data.products, ...stock.map((row) => row.balance.product)]
+        .filter(
+          (product) =>
+            product.category === "Hardware" &&
+            !product.recurring &&
+            product.active,
+        )
+        .map((product) => [product.id, product]),
+    ).values(),
+  ];
+  const selectedWarehouse =
+    data.warehouses.find((warehouse) => warehouse.id === selectedWarehouseId) ??
+    data.warehouses[0];
+  const receive = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await mutate(
+      `/fulfillment/${form.get("orderId")}/receive`,
+      {
+        warehouseId: form.get("warehouseId"),
+        productId: form.get("productId"),
+        quantity: Number(form.get("quantity")),
+        reference: form.get("reference") || undefined,
+        reason: form.get("reason"),
+      },
+      "POST",
+      "Stock receipt recorded and backorder checked",
+    );
+    setReceiptOpen(false);
+  };
+  const saveWarehouse = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedWarehouse) return;
+    const form = new FormData(event.currentTarget);
+    await mutate(
+      `/warehouses/${selectedWarehouse.id}`,
+      {
+        name: form.get("name"),
+        priority: Number(form.get("priority")),
+        shippingCost: Number(form.get("shippingCost")),
+        active: form.get("active") === "on",
+        reason: form.get("reason"),
+      },
+      "PATCH",
+      "Warehouse settings updated",
+    );
+    setSettingsOpen(false);
+  };
+  return (
+    <div className="fulfillment-workspace">
+      <div className="fulfillment-intro fulfillment-list-head">
+        <div>
+          <h2>
+            Fulfillment and Stock <span>(List)</span>
+          </h2>
+          <p>
+            Live stock plus every confirmed hardware order awaiting allocation
+            or shipment.
+          </p>
+        </div>
+        <div className="actions">
+          {data.user.role === "ADMIN" && (
+            <button
+              className="button ghost"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings2 />
+              Warehouse settings
+            </button>
+          )}
+          {canReceive && orders.length > 0 && (
+            <button
+              className="button ghost"
+              onClick={() => setReceiptOpen(true)}
+            >
+              <Plus />
+              Record stock receipt
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="table-wrap fulfillment-stock fulfillment-reference-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Warehouse</th>
+              <th>Product</th>
+              <th>In Stock</th>
+              <th>Reserved</th>
+              <th>Available</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stock.map(({ warehouse, balance }) => (
+              <tr key={`${warehouse.id}-${balance.product.id}`}>
+                <td>{warehouse.name}</td>
+                <td>{balance.product.name}</td>
+                <td>{balance.onHand}</td>
+                <td>{balance.reserved}</td>
+                <td>{balance.available}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!stock.length && (
+          <Empty text="No warehouse stock has been configured." />
+        )}
+      </div>
+      <h3 className="fulfillment-orders-title">
+        Orders Awaiting Allocation or Shipment
+      </h3>
+      <div className="table-wrap fulfillment-orders fulfillment-reference-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Customer</th>
+              <th>Status</th>
+              <th>Warehouses</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orders.map((q) => {
+              const names = [
+                ...new Set(
+                  q.fulfillment?.split.split.map((row) => row.warehouseName) ??
+                    [],
+                ),
+              ];
+              return (
+                <tr
+                  className="clickable-row"
+                  tabIndex={0}
+                  key={q.id}
+                  onClick={() => open("fulfillment-detail", q.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      open("fulfillment-detail", q.id);
+                    }
+                  }}
+                >
+                  <td>{q.order?.number ?? q.number}</td>
+                  <td>{q.customer}</td>
+                  <td>
+                    {label(
+                      q.order?.state ?? q.fulfillment?.state ?? "SPLIT_PENDING",
+                    )}
+                  </td>
+                  <td>
+                    {names.length ? names.join(" + ") : "Awaiting allocation"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {!orders.length && (
+          <Empty text="No confirmed hardware orders are awaiting fulfillment." />
+        )}
+      </div>
+      <div className="fulfillment-hint">
+        Click an order row to allocate or ship it.
+      </div>
+      {receiptOpen && (
+        <Modal title="Record stock receipt" close={() => setReceiptOpen(false)}>
+          <form className="form" onSubmit={receive}>
+            <label>
+              Backordered order
+              <select name="orderId" required>
+                {orders.map((order) => (
+                  <option value={order.order?.id} key={order.id}>
+                    {order.order?.number ?? order.number} · {order.customer}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Warehouse
+              <select name="warehouseId" required>
+                {data.warehouses
+                  .filter((warehouse) => warehouse.active !== false)
+                  .map((warehouse) => (
+                    <option value={warehouse.id} key={warehouse.id}>
+                      {warehouse.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label>
+              Hardware product
+              <select name="productId" required>
+                {hardwareProducts.map((product) => (
+                  <option value={product.id} key={product.id}>
+                    {product.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Quantity received
+              <input name="quantity" type="number" min="1" required />
+            </label>
+            <label>
+              Receipt reference
+              <input name="reference" maxLength={120} />
+            </label>
+            <label>
+              Receipt reason
+              <textarea name="reason" minLength={5} maxLength={240} required />
+            </label>
+            <button className="button primary">
+              Record Receipt &amp; Check Backorder
+            </button>
+          </form>
+        </Modal>
+      )}
+      {settingsOpen && selectedWarehouse && (
+        <Modal title="Warehouse settings" close={() => setSettingsOpen(false)}>
+          <form
+            className="form"
+            onSubmit={saveWarehouse}
+            key={selectedWarehouse.id}
+          >
+            <div className="warehouse-settings-summary">
+              <span>
+                <Store />
+              </span>
+              <div>
+                <b>{selectedWarehouse.name}</b>
+                <small>
+                  {selectedWarehouse.stocks.length} stocked{" "}
+                  {selectedWarehouse.stocks.length === 1
+                    ? "product"
+                    : "products"}{" "}
+                  · Priority {selectedWarehouse.priority}
+                </small>
+              </div>
+            </div>
+            <label>
+              Warehouse
+              <select
+                value={selectedWarehouse.id}
+                onChange={(event) => setSelectedWarehouseId(event.target.value)}
+              >
+                {data.warehouses.map((warehouse) => (
+                  <option value={warehouse.id} key={warehouse.id}>
+                    {warehouse.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Name
+              <input
+                name="name"
+                defaultValue={selectedWarehouse.name}
+                required
+              />
+            </label>
+            <label>
+              Priority
+              <input
+                name="priority"
+                type="number"
+                min="1"
+                defaultValue={selectedWarehouse.priority}
+                required
+              />
+            </label>
+            <label>
+              Base shipping cost
+              <input
+                aria-label="Base shipping cost"
+                name="shippingCost"
+                type="number"
+                min="0"
+                step="0.01"
+                defaultValue={Number(selectedWarehouse.shippingCost)}
+                required
+              />
+            </label>
+            <label>
+              <input
+                aria-label="Active warehouse"
+                name="active"
+                type="checkbox"
+                defaultChecked={selectedWarehouse.active !== false}
+              />{" "}
+              Active warehouse
+            </label>
+            <label>
+              Reason
+              <textarea name="reason" minLength={5} maxLength={240} required />
+            </label>
+            <div className="actions">
+              <button
+                type="button"
+                className="button ghost"
+                onClick={() => setSettingsOpen(false)}
+              >
+                Cancel
+              </button>
+              <button className="button primary">Save changes</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+type FulfillmentPreview = NonNullable<Quote["fulfillment"]> & {
+  preview?: boolean;
+};
+function FulfillmentDetail({
+  quote,
+  warehouses,
+  mutate,
+  role,
+}: {
+  quote?: Quote;
+  warehouses: Warehouse[];
+  mutate: Function;
+  role: string;
+}) {
+  const [preview, setPreview] = useState<FulfillmentPreview | null>(null);
+  const [previewError, setPreviewError] = useState("");
+  const [manualOpen, setManualOpen] = useState(false);
+  const [consolidateOpen, setConsolidateOpen] = useState(false);
+  const [shipOpen, setShipOpen] = useState(false);
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [reason, setReason] = useState("");
+  const [consolidationReason, setConsolidationReason] = useState("");
+  const orderId = quote?.order?.id;
+  useEffect(() => {
+    let active = true;
+    setPreview(null);
+    setPreviewError("");
+    if (!orderId || quote?.stage !== "CONFIRMED")
+      return () => {
+        active = false;
+      };
+    request<FulfillmentPreview>(
+      `/fulfillment/${orderId}${quote.fulfillment ? "" : "/preview"}`,
+    )
+      .then((result) => active && setPreview(result))
+      .catch(
+        (error) =>
+          active &&
+          setPreviewError(
+            error instanceof Error
+              ? error.message
+              : "Could not calculate the split",
+          ),
+      );
+    return () => {
+      active = false;
+    };
+  }, [orderId, quote?.fulfillment, quote?.stage]);
+  if (!quote || !orderId) return <Empty text="No confirmed order selected." />;
+  const fulfillment = preview ?? quote.fulfillment;
+  const canManage = role === "ADMIN" || role === "FINANCE";
+  const rows = fulfillment?.split.split ?? [];
+  const items = fulfillment?.items ?? [];
+  const warehouseRows = [
+    ...new Set(rows.map((row) => row.warehouseId ?? row.warehouseName)),
+  ].map((key) => {
+    const grouped = rows.filter(
+      (row) => (row.warehouseId ?? row.warehouseName) === key,
+    );
+    const warehouse =
+      warehouses.find((item) => item.id === grouped[0]?.warehouseId) ||
+      warehouses.find((item) => item.name === grouped[0]?.warehouseName);
+    return {
+      key,
+      name: grouped[0]?.warehouseName ?? "Warehouse",
+      quantity: grouped.reduce((sum, row) => sum + row.quantity, 0),
+      cost: warehouse?.shippingCost ?? 0,
+    };
+  });
+  const acceptSuggested = () =>
+    mutate(
+      `/fulfillment/${orderId}/reserve`,
+      {
+        mode: "SUGGESTED",
+        stockFingerprint: preview?.stockFingerprint,
+        split: (preview?.split.split ?? []).map((row) => ({
+          orderLineId: row.orderLineId,
+          warehouseId: row.warehouseId,
+          quantity: row.quantity,
+        })),
+      },
+      "POST",
+      "Suggested warehouse reservation accepted",
+    );
+  const submitManual = async (event: FormEvent) => {
+    event.preventDefault();
+    const split = Object.entries(quantities)
+      .filter(([, quantity]) => quantity > 0)
+      .map(([key, quantity]) => {
+        const [orderLineId, warehouseId] = key.split(":");
+        return { orderLineId, warehouseId, quantity };
+      });
+    await mutate(
+      `/fulfillment/${orderId}/reserve`,
+      { mode: "MANUAL", split, reason },
+      "POST",
+      "Manual warehouse reservation committed",
+    );
+    setManualOpen(false);
+  };
+  const submitConsolidation = async (event: FormEvent) => {
+    event.preventDefault();
+    await mutate(
+      `/fulfillment/${orderId}/consolidate`,
+      { reason: consolidationReason },
+      "POST",
+      "Remaining backorder consolidated",
+    );
+    setConsolidateOpen(false);
+    setConsolidationReason("");
+  };
+  const submitShipment = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const lines = items
+      .map((item) => ({
+        orderLineId: item.orderLineId!,
+        quantity: Number(form.get(`ship-${item.orderLineId}`) ?? 0),
+      }))
+      .filter((item) => item.quantity > 0);
+    await mutate(
+      `/fulfillment/${orderId}/ship`,
+      {
+        lines,
+        carrier: form.get("carrier"),
+        trackingNumber: form.get("trackingNumber"),
+        shippedAt: new Date(String(form.get("shippedAt"))).toISOString(),
+      },
+      "POST",
+      "Shipment recorded and invoice issued",
+    );
+    setShipOpen(false);
+  };
+  return (
+    <>
+      <div className="fulfillment-reference-head">
+        <h2>
+          Fulfillment Detail: {quote.order?.number ?? quote.number} (
+          {quote.customer})
+        </h2>
+        <p>
+          Live stock is checked again under database locks when this reservation
+          is committed.
+        </p>
+      </div>
+      <div className="consolidation-prompt reference-prompt">
+        <span>
+          <b>Allocation and dispatch are separate</b>
+          <small>
+            {fulfillment?.statusMeaning ??
+              "ALLOCATED means stock is reserved; SHIPPED means stock left the warehouse and its invoice was issued."}
+          </small>
+        </span>
+      </div>
+      <div className="fulfillment-order-summary">
+        <span>
+          <small>Reservation state</small>
+          <Status value={fulfillment?.state ?? "SPLIT_PENDING"} />
+        </span>
+        <span>
+          <small>Customer</small>
+          <b>{quote.customer}</b>
+        </span>
+        {items.map((item) => (
+          <span key={item.orderLineId ?? item.productId}>
+            <small>{item.productName}</small>
+            <b>
+              {item.orderedQuantity} ordered ·{" "}
+              {item.reservedQuantity ?? item.fulfilledQuantity} reserved ·{" "}
+              {item.backorderedQuantity} backordered
+            </b>
+          </span>
+        ))}
+      </div>
+      <div className="panel fulfillment-split-panel">
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Warehouse</th>
+                <th>Qty Reserved</th>
+                <th>Planned Shipments</th>
+                <th>Estimated Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {warehouseRows.map((row) => (
+                <tr key={row.key}>
+                  <td>{row.name}</td>
+                  <td>{row.quantity} units</td>
+                  <td>1</td>
+                  <td>{money(row.cost)}</td>
+                </tr>
+              ))}
+            </tbody>
+            {fulfillment && (
+              <tfoot>
+                <tr>
+                  <th>Total</th>
+                  <th>
+                    {rows.reduce((sum, row) => sum + row.quantity, 0)} units
+                  </th>
+                  <th>{fulfillment.shipmentCount}</th>
+                  <th>{money(fulfillment.estimatedCost)}</th>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+          {!fulfillment && !previewError && (
+            <div className="fulfillment-loading">
+              <RefreshCw />
+              Calculating the suggested warehouse split…
+            </div>
+          )}
+          {previewError && (
+            <div className="error">
+              <AlertTriangle />
+              {previewError}
+            </div>
+          )}
+          {fulfillment && !warehouseRows.length && (
+            <Empty text="No hardware stock is available; committing the suggestion will persist the full shortage as a backorder." />
+          )}
+        </div>
+      </div>
+      {fulfillment?.split.backorders.length ? (
+        <div className="consolidation-prompt reference-prompt">
+          <span>
+            <b>
+              {fulfillment.split.backorders.reduce(
+                (sum, row) => sum + row.quantity,
+                0,
+              )}{" "}
+              units remain backordered.
+            </b>
+            <small>
+              {fulfillment.consolidationAvailable
+                ? "New stock is available. Consolidate the remaining quantity now."
+                : "Record a warehouse receipt to recheck and reserve the remaining quantity."}
+            </small>
+          </span>
+          {fulfillment.consolidationAvailable && canManage && (
+            <button
+              className="button ghost"
+              onClick={() => setConsolidateOpen(true)}
+            >
+              Consolidate Remaining Backorder
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="consolidation-prompt reference-prompt">
+          <span>Allocated hardware is ready for an audited shipment.</span>
+        </div>
+      )}
+      <div className="fulfillment-reference-actions">
+        <button
+          className="button primary"
+          onClick={acceptSuggested}
+          disabled={
+            !canManage || !!quote.fulfillment || !preview || !preview.preview
+          }
+        >
+          Accept Suggested Split
+        </button>
+        <button
+          className="button ghost"
+          onClick={() => setManualOpen(true)}
+          disabled={
+            !canManage || !!quote.fulfillment || !preview || !preview.preview
+          }
+        >
+          Manual Override
+        </button>
+        <button
+          className="button primary"
+          onClick={() => setShipOpen(true)}
+          disabled={
+            !canManage ||
+            !fulfillment ||
+            !items.some(
+              (item) =>
+                (item.reservedQuantity ?? 0) -
+                  (item.shippedQuantity ?? item.fulfilledQuantity ?? 0) >
+                0,
+            )
+          }
+        >
+          Ship Allocated Goods
+        </button>
+      </div>
+      {manualOpen && (
+        <Modal
+          title="Manual warehouse override"
+          close={() => setManualOpen(false)}
+        >
+          <form className="form manual-allocation" onSubmit={submitManual}>
+            <p className="muted">
+              Choose reserved quantities without exceeding order demand or live
+              availability. The server revalidates all rows atomically.
+            </p>
+            {items.map((item) => (
+              <fieldset key={item.orderLineId ?? item.productId}>
+                <legend>
+                  {item.productName} · {item.orderedQuantity} required
+                </legend>
+                {warehouses.map((warehouse) => {
+                  const balance = warehouse.stocks.find(
+                    (stock) => stock.product.id === item.productId,
+                  );
+                  const available = balance?.available ?? 0;
+                  const key = `${item.orderLineId}:${warehouse.id}`;
+                  return (
+                    <label key={warehouse.id}>
+                      <span>
+                        {warehouse.name}
+                        <small>{available} available</small>
+                      </span>
+                      <input
+                        aria-label={`${item.productName} from ${warehouse.name}`}
+                        type="number"
+                        min="0"
+                        max={available}
+                        value={quantities[key] ?? 0}
+                        onChange={(event) =>
+                          setQuantities((current) => ({
+                            ...current,
+                            [key]: Number(event.target.value),
+                          }))
+                        }
+                      />
+                    </label>
+                  );
+                })}
+              </fieldset>
+            ))}
+            <label>
+              Override reason
+              <textarea
+                required
+                minLength={5}
+                maxLength={240}
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+              />
+            </label>
+            <button
+              className="button primary"
+              disabled={
+                !Object.values(quantities).some((value) => value > 0) ||
+                reason.trim().length < 5
+              }
+            >
+              Commit Manual Reservation
+            </button>
+          </form>
+        </Modal>
+      )}
+      {consolidateOpen && (
+        <Modal
+          title="Consolidate remaining backorder"
+          close={() => setConsolidateOpen(false)}
+        >
+          <form className="form" onSubmit={submitConsolidation}>
+            <p className="muted">
+              The backend locks and rechecks current stock before adding any
+              reservation.
+            </p>
+            <label>
+              Consolidation reason
+              <textarea
+                aria-label="Consolidation reason"
+                required
+                minLength={5}
+                maxLength={240}
+                value={consolidationReason}
+                onChange={(event) => setConsolidationReason(event.target.value)}
+                placeholder="Reference the receipt or allocation decision"
+              />
+            </label>
+            <button
+              className="button primary"
+              disabled={consolidationReason.trim().length < 5}
+            >
+              Consolidate Backorder
+            </button>
+          </form>
+        </Modal>
+      )}
+      {shipOpen && (
+        <Modal title="Ship allocated goods" close={() => setShipOpen(false)}>
+          <form className="form" onSubmit={submitShipment}>
+            <p className="muted">
+              Dispatch reduces on-hand and reserved stock. A one-time invoice is
+              issued for exactly these shipped quantities.
+            </p>
+            {items.map((item) => {
+              const remaining = Math.max(
+                0,
+                (item.reservedQuantity ?? 0) -
+                  (item.shippedQuantity ?? item.fulfilledQuantity ?? 0),
+              );
+              return remaining > 0 ? (
+                <label key={item.orderLineId}>
+                  {item.productName}
+                  <small>{remaining} allocated and unshipped</small>
+                  <input
+                    name={`ship-${item.orderLineId}`}
+                    type="number"
+                    min="0"
+                    max={remaining}
+                    defaultValue={remaining}
+                  />
+                </label>
+              ) : null;
+            })}
+            <label>
+              Carrier
+              <input
+                name="carrier"
+                required
+                minLength={2}
+                placeholder="Blue Dart"
+              />
+            </label>
+            <label>
+              Tracking number
+              <input
+                name="trackingNumber"
+                required
+                minLength={2}
+                placeholder="AWB / consignment number"
+              />
+            </label>
+            <label>
+              Shipped at
+              <input
+                name="shippedAt"
+                type="datetime-local"
+                required
+                defaultValue={new Date(
+                  Date.now() - new Date().getTimezoneOffset() * 60000,
+                )
+                  .toISOString()
+                  .slice(0, 16)}
+              />
+            </label>
+            <button className="button primary">
+              Confirm Shipment &amp; Issue Invoice
+            </button>
+          </form>
+        </Modal>
+      )}
+    </>
+  );
+}
+function Subscriptions({
+  data,
+  open,
+  mutate,
+}: {
+  data: Workspace;
+  open: (v: View, id?: string) => void;
+  mutate: Function;
+}) {
+  const [filter, setFilter] = useState<
+    "ALL" | "ACTIVE" | "PAUSED" | "CANCELLED"
+  >("ALL");
+  const [newPlanOpen, setNewPlanOpen] = useState(false);
+  const counts = {
+    ACTIVE: data.subscriptions.filter(
+      (subscription) => subscription.state === "ACTIVE",
+    ).length,
+    PAUSED: data.subscriptions.filter(
+      (subscription) => subscription.state === "PAUSED",
+    ).length,
+    CANCELLED: data.subscriptions.filter(
+      (subscription) => subscription.state === "CANCELLED",
+    ).length,
+  };
+  const visible =
+    filter === "ALL"
+      ? data.subscriptions
+      : data.subscriptions.filter(
+          (subscription) => subscription.state === filter,
+        );
+  const createPlan = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await mutate(
+      "/products",
+      {
+        name: String(form.get("name")),
+        sku: String(form.get("sku")).toUpperCase(),
+        category: "Subscriptions",
+        description: String(form.get("description")),
+        unit: "plan",
+        price: Number(form.get("price")),
+        cost: Number(form.get("cost")),
+        taxRate: Number(form.get("taxRate")),
+        recurring: true,
+        cadence: String(form.get("cadence")),
+      },
+      "POST",
+      "Recurring plan created",
+    );
+    setNewPlanOpen(false);
+  };
+  return (
+    <>
+      <div className="subscription-intro">
+        <div>
+          <h2>
+            Subscriptions <span>(List)</span>
+          </h2>
+          <p>
+            Every recurring plan across every customer, regardless of which
+            order it came from.
+          </p>
+        </div>
+      </div>
+      <div
+        className="subscription-stats"
+        aria-label="Subscription status filters"
+      >
+        {(
+          [
+            ["ACTIVE", "Active"],
+            ["PAUSED", "Paused"],
+            ["CANCELLED", "Cancelled"],
+          ] as const
+        ).map(([state, text]) => (
+          <button
+            key={state}
+            className={`subscription-stat ${state.toLowerCase()} ${filter === state ? "selected" : ""}`}
+            aria-pressed={filter === state}
+            onClick={() =>
+              setFilter((current) => (current === state ? "ALL" : state))
+            }
+          >
+            <b>{counts[state]}</b>
+            <span>{text}</span>
+          </button>
+        ))}
+      </div>
+      <div className="panel subscription-list-panel">
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Customer</th>
+                <th>Plan</th>
+                <th>Cycle</th>
+                <th>Next bill</th>
+                <th>Status</th>
+                <th>
+                  <span className="sr-only">Open</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((subscription) => (
+                <tr
+                  className="subscription-row"
+                  key={subscription.id}
+                  tabIndex={0}
+                  onClick={() => open("billing", subscription.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      open("billing", subscription.id);
+                    }
+                  }}
+                >
+                  <td>{subscription.customer}</td>
+                  <td>
+                    <b>{subscription.productName}</b>
+                    <small>
+                      {money(subscription.amount)} per{" "}
+                      {subscription.cadence.toLowerCase().replace("ly", "")}
+                    </small>
+                  </td>
+                  <td>{subscription.cadence}</td>
+                  <td>
+                    {subscription.state === "CANCELLED"
+                      ? "—"
+                      : date(subscription.nextBillAt)}
+                  </td>
+                  <td>
+                    <Status value={subscription.state} />
+                  </td>
+                  <td>
+                    <ChevronRight />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {visible.length === 0 && (
+            <Empty
+              text={`No ${filter === "ALL" ? "" : filter.toLowerCase()} subscriptions found.`}
+            />
+          )}
+        </div>
+      </div>
+      <div className="subscription-hint">
+        <RefreshCw />
+        <span>
+          Click a subscription row to open its billing detail and proration
+          history.
+        </span>
+      </div>
+      <button
+        className="button subscription-new-plan"
+        onClick={() => setNewPlanOpen(true)}
+      >
+        <Plus />
+        New Plan
+      </button>
+      {newPlanOpen && (
+        <Modal title="New recurring plan" close={() => setNewPlanOpen(false)}>
+          <form className="form grid" onSubmit={createPlan}>
+            <label>
+              Plan name
+              <input
+                name="name"
+                required
+                minLength={2}
+                placeholder="Care Plan 2yr"
+              />
+            </label>
+            <label>
+              Plan SKU
+              <input name="sku" required minLength={2} placeholder="CARE-2Y" />
+            </label>
+            <label>
+              Billing cycle
+              <select name="cadence" defaultValue="Monthly">
+                <option>Monthly</option>
+                <option>Quarterly</option>
+                <option>Yearly</option>
+              </select>
+            </label>
+            <label>
+              Recurring price
+              <input name="price" type="number" min="0" step="0.01" required />
+            </label>
+            <label>
+              Recurring cost
+              <input name="cost" type="number" min="0" step="0.01" required />
+            </label>
+            <label>
+              Tax rate (%)
+              <input
+                name="taxRate"
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                defaultValue="18"
+                required
+              />
+            </label>
+            <label className="full-span">
+              Description
+              <textarea
+                name="description"
+                required
+                placeholder="What this recurring plan includes"
+              />
+            </label>
+            <button className="button primary full-span">
+              <Plus />
+              Create plan
+            </button>
+          </form>
+        </Modal>
+      )}
+    </>
+  );
+}
+function Billing({
+  subscription,
+  mutate,
+}: {
+  subscription?: Workspace["subscriptions"][number];
+  mutate: Function;
+}) {
+  const [amount, setAmount] = useState(Number(subscription?.amount ?? 0));
+  const [reason, setReason] = useState("");
+  useEffect(() => {
+    setAmount(Number(subscription?.amount ?? 0));
+    setReason("");
+  }, [subscription?.id]);
+  if (!subscription)
+    return <Empty text="Subscription not found or you do not have access." />;
+  const schedule = subscription.schedule ?? [subscription.nextBillAt];
+  const validReason = reason.trim().length >= 5;
+  const lifecycle = (action: "PAUSE" | "RESUME" | "CANCEL", message: string) =>
+    mutate(
+      `/subscriptions/${subscription.id}/change`,
+      { expectedVersion: subscription.version, action, reason: reason.trim() },
+      "POST",
+      message,
+    );
+  return (
+    <>
+      <div className="detail-head">
+        <div>
+          <span className={`status ${subscription.state.toLowerCase()}`}>
+            {label(subscription.state)}
+          </span>
+          <h2>
+            {subscription.customer} · {subscription.productName}
+          </h2>
+          <p>
+            {subscription.cadence} recurring plan · version{" "}
+            {subscription.version}
+          </p>
+        </div>
+      </div>
+      <div className="two-col">
+        <Panel title="Recurring schedule">
+          <div className="schedule">
+            {schedule.map((billAt, i) => (
+              <div key={billAt}>
+                <span>{i === 0 ? "Next billing" : "Upcoming"}</span>
+                <b>{date(billAt)}</b>
+                <strong>{money(subscription.amount)}</strong>
+              </div>
+            ))}
+          </div>
+        </Panel>
+        <Panel title="Modify subscription">
+          <div className="form">
+            <label>
+              Recurring amount
+              <input
+                type="number"
+                min="1"
+                value={amount}
+                disabled={subscription.state === "CANCELLED"}
+                onChange={(e) => setAmount(Number(e.target.value))}
+              />
+            </label>
+            <label>
+              Reason for change
+              <textarea
+                value={reason}
+                maxLength={240}
+                onChange={(event) => setReason(event.target.value)}
+                placeholder="Explain the billing or lifecycle change"
+              />
+            </label>
+            <div className="actions">
+              <button
+                className="button primary"
+                onClick={() =>
+                  mutate(
+                    `/subscriptions/${subscription.id}/change`,
+                    {
+                      expectedVersion: subscription.version,
+                      amount,
+                      reason: reason.trim(),
+                    },
+                    "POST",
+                    "Subscription updated",
+                  )
+                }
+                disabled={
+                  !validReason ||
+                  subscription.state === "CANCELLED" ||
+                  amount === Number(subscription.amount)
+                }
+              >
+                Apply change
+              </button>
+              {subscription.state === "ACTIVE" && (
+                <button
+                  className="button warn"
+                  onClick={() => lifecycle("PAUSE", "Subscription paused")}
+                  disabled={!validReason}
+                >
+                  Pause subscription
+                </button>
+              )}
+              {subscription.state === "PAUSED" && (
+                <button
+                  className="button primary"
+                  onClick={() => lifecycle("RESUME", "Subscription resumed")}
+                  disabled={!validReason}
+                >
+                  Resume subscription
+                </button>
+              )}
+              <button
+                className="button danger"
+                onClick={() => lifecycle("CANCEL", "Subscription cancelled")}
+                disabled={!validReason || subscription.state === "CANCELLED"}
+              >
+                Cancel subscription
+              </button>
+            </div>
+            <p className="muted">
+              Amount changes are prorated inside the active billing period.
+              Negative adjustments create an auditable credit note; future
+              periods use the new amount.
+            </p>
+          </div>
+        </Panel>
+      </div>
+      {subscription.changes?.length ? (
+        <Panel title="Subscription change history">
+          <div className="customer-activity">
+            {subscription.changes.map((change) => (
+              <div key={change.id}>
+                <b>{label(change.kind)}</b>
+                <small>
+                  {date(change.effectiveAt)} · {change.reason}
+                  {change.kind === "AMOUNT_CHANGED"
+                    ? ` · ${money(change.previousAmount ?? 0)} → ${money(change.newAmount ?? 0)}`
+                    : ""}
+                </small>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
+    </>
+  );
+}
+
+function Portal({ quote, mutate }: { quote?: Quote; mutate: Function }) {
+  const [message, setMessage] = useState("");
+  const [counter, setCounter] = useState(0);
+  if (!quote) return <Empty text="No quotation is available in your portal." />;
+  return (
+    <div className="portal-card">
+      <div className="portal-title">
+        <div className="brand">
+          <span>D</span>
+          <strong>DealOS</strong>
+        </div>
+        <span className="status warning">{label(quote.stage)}</span>
+      </div>
+      <div className="portal-hero">
+        <span className="eyebrow">Quotation {quote.number}</span>
+        <h2>{quote.customer}</h2>
+        <p>
+          Review the commercial terms, ask a line-level question, or request a
+          change.
+        </p>
+        <strong>{money(quote.total)}</strong>
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Quantity</th>
+              <th>Unit price</th>
+              <th>Discount</th>
+              <th>Net</th>
+            </tr>
+          </thead>
+          <tbody>
+            {quote.lines.map((l) => (
+              <tr key={l.id}>
+                <td>
+                  <b>{l.product.name}</b>
+                  <small>{l.product.description}</small>
+                </td>
+                <td>{l.quantity}</td>
+                <td>{money(l.unitPrice)}</td>
+                <td>{l.discount}%</td>
+                <td>
+                  {money(
+                    Number(l.unitPrice) *
+                      l.quantity *
+                      (1 - Number(l.discount) / 100),
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="portal-actions">
+        <label>
+          Comment or change request
+          <textarea
+            placeholder="Ask about a line or explain your request"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+          />
+        </label>
+        <label>
+          Counter discount (%)
+          <input
+            type="number"
+            min="0"
+            max="100"
+            value={counter}
+            onChange={(e) => setCounter(Number(e.target.value))}
+          />
+        </label>
+        <div className="actions">
+          <button
+            className="button ghost"
+            disabled={!message.trim()}
+            onClick={() =>
+              mutate(
+                `/portal/quotations/${quote.id}/message`,
+                counter > 0
+                  ? { message, counterDiscount: counter }
+                  : { message },
+                "POST",
+                counter > 0 ? "Proposal sent" : "Comment posted",
+              )
+            }
+          >
+            Submit request
+          </button>
+          <button
+            className="button primary"
+            disabled={quote.stage !== "APPROVED"}
+            onClick={() =>
+              mutate(
+                `/portal/quotations/${quote.id}/confirm`,
+                {},
+                "POST",
+                "Quotation confirmed",
+              )
+            }
+          >
+            Confirm quotation
+          </button>
+        </div>
+      </div>
+      {quote.stage !== "APPROVED" && (
+        <div className="explain">
+          <ShieldCheck />
+          Confirmation unlocks after the current terms complete approval.
+        </div>
+      )}
+      {quote.negotiation.length > 0 && (
+        <Panel title="Discussion">
+          {quote.negotiation.map((n) => (
+            <div className="comment" key={n.id}>
+              <b>{n.author}</b>
+              <span>{n.message}</span>
+              <small>
+                {date(n.createdAt)}
+                {n.counterDiscount ? ` · ${n.counterDiscount}% proposed` : ""}
+              </small>
+            </div>
+          ))}
+        </Panel>
+      )}
+    </div>
+  );
+}
+function Invoices({
+  data,
+  open,
+  mutate,
+}: {
+  data: Workspace;
+  open: (v: View, id?: string) => void;
+  mutate: Function;
+}) {
+  const [creating, setCreating] = useState(
+    () => new URLSearchParams(window.location.search).get("newInvoice") === "1",
+  );
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (creating) params.set("newInvoice", "1");
+    else params.delete("newInvoice");
+    const suffix = params.toString();
+    window.history.replaceState(
+      {},
+      "",
+      `${window.location.pathname}${suffix ? `?${suffix}` : ""}`,
+    );
+  }, [creating]);
+  return (
+    <>
+      <div className="toolbar invoice-list-toolbar">
+        <p className="muted">
+          Customer invoices and their live payment status.
+        </p>
+        <button className="button primary" onClick={() => setCreating(true)}>
+          <Plus />
+          Create invoice
+        </button>
+      </div>
+      <Panel title="Invoices">
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Invoice</th>
+                <th>Customer</th>
+                <th>Amount</th>
+                <th>Balance</th>
+                <th>Due date</th>
+                <th>Status</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {data.invoices.map((i) => (
+                <tr key={i.id}>
+                  <td>
+                    <b>{i.number}</b>
+                  </td>
+                  <td>{i.customer}</td>
+                  <td>{money(i.amount)}</td>
+                  <td>{money(Number(i.amount) - Number(i.paidAmount))}</td>
+                  <td>{date(i.dueAt)}</td>
+                  <td>
+                    <Status value={i.state} />
+                  </td>
+                  <td>
+                    <button onClick={() => open("invoice", i.id)}>
+                      Open <ChevronRight />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+      {creating && (
+        <CreateInvoiceModal
+          data={data}
+          mutate={mutate}
+          close={() => setCreating(false)}
+        />
+      )}
+    </>
+  );
+}
+function InvoiceDetail({
+  invoice,
+  organizationName,
+  mutate,
+  onBack,
+}: {
+  invoice?: Invoice;
+  organizationName: string;
+  mutate: Function;
+  onBack: () => void;
+}) {
+  const outstanding = invoice
+    ? Math.max(0, Number(invoice.amount) - Number(invoice.paidAmount))
+    : 0;
+  const [amount, setAmount] = useState(outstanding);
+  const [ref, setRef] = useState("BANK-2026-");
+  useEffect(() => setAmount(outstanding), [invoice?.id, outstanding]);
+  if (!invoice) return <Empty text="No invoice selected." />;
+  const detailedLines = invoice.lines.some(
+    (line) =>
+      line.quantity !== undefined ||
+      line.unitPrice !== undefined ||
+      line.tax !== undefined,
+  );
+  const taxTotal = invoice.lines.reduce(
+    (sum, line) => sum + Number(line.tax ?? 0),
+    0,
+  );
+  const subtotal = detailedLines
+    ? invoice.lines.reduce(
+        (sum, line) =>
+          sum + Number(line.net ?? Number(line.amount) - Number(line.tax ?? 0)),
+        0,
+      )
+    : Number(invoice.amount);
+  const contact = [
+    invoice.customerRecord?.contactPerson,
+    invoice.customerRecord?.email,
+    invoice.customerRecord?.phone
+      ? `${invoice.customerRecord.countryCode} ${invoice.customerRecord.phone}`
+      : null,
+  ].filter(Boolean);
+  const paymentValid =
+    invoice.state !== "PAID" &&
+    amount > 0 &&
+    amount <= outstanding &&
+    ref.trim().length > 0;
+  const recordPayment = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!paymentValid) return;
+    await mutate(
+      `/invoices/${invoice.id}/payments`,
+      { amount, reference: ref.trim() },
+      "POST",
+      "Payment recorded",
+    );
+  };
+  return (
+    <div className="invoice-detail-workspace">
+      <div className="invoice-detail-toolbar">
+        <button type="button" className="invoice-back" onClick={onBack}>
+          <ChevronLeft />
+          All invoices
+        </button>
+        <a
+          className="button ghost"
+          href={`/api/v1/invoices/${invoice.id}/pdf`}
+          download
+        >
+          <Download />
+          Download PDF
+        </a>
+      </div>
+      <article className="invoice-document">
+        <header className="invoice-document-head">
+          <div className="invoice-issuer">
+            <span>
+              <Receipt />
+            </span>
+            <div>
+              <small>Issued by</small>
+              <h2>{organizationName}</h2>
+              <p>Professional tax invoice</p>
+            </div>
+          </div>
+          <div className="invoice-identity">
+            <small>Invoice</small>
+            <h2>{invoice.number}</h2>
+            <Status value={invoice.state} />
+          </div>
+        </header>
+        <div className="invoice-parties">
+          <section>
+            <small>Bill to</small>
+            <h3>{invoice.customer}</h3>
+            {contact.length ? (
+              <p>
+                {contact.map((value, index) => (
+                  <span key={index}>{value}</span>
+                ))}
+              </p>
+            ) : (
+              <p>Customer account</p>
+            )}
+          </section>
+          <dl>
+            <div>
+              <dt>Due date</dt>
+              <dd>{date(invoice.dueAt)}</dd>
+            </div>
+            <div>
+              <dt>Invoice total</dt>
+              <dd>{invoiceMoney(invoice.amount)}</dd>
+            </div>
+            <div>
+              <dt>Amount paid</dt>
+              <dd>{invoiceMoney(invoice.paidAmount)}</dd>
+            </div>
+            <div className="balance">
+              <dt>Balance due</dt>
+              <dd>{invoiceMoney(outstanding)}</dd>
+            </div>
+          </dl>
+        </div>
+        <div className="invoice-line-table table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Item description</th>
+                <th>Qty</th>
+                <th>Rate</th>
+                <th>Discount</th>
+                <th>GST</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoice.lines.map((line, index) => (
+                <tr key={`${line.productId ?? "line"}-${index}`}>
+                  <td>{String(index + 1).padStart(2, "0")}</td>
+                  <td>
+                    <b>{line.description}</b>
+                    {line.cadence && <small>{line.cadence}</small>}
+                  </td>
+                  <td>{line.quantity ?? "—"}</td>
+                  <td>
+                    {line.unitPrice !== undefined
+                      ? invoiceMoney(line.unitPrice)
+                      : "—"}
+                  </td>
+                  <td>
+                    {line.discount !== undefined
+                      ? `${Number(line.discount)}%`
+                      : "—"}
+                  </td>
+                  <td>
+                    {line.tax !== undefined ? invoiceMoney(line.tax) : "—"}
+                  </td>
+                  <td>
+                    <b>{invoiceMoney(line.amount)}</b>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="invoice-document-summary">
+          <p>
+            Thank you for your business.
+            <span>
+              Payment references are recorded as settlement evidence and do not
+              initiate a bank transfer.
+            </span>
+          </p>
+          <dl>
+            <div>
+              <dt>Subtotal</dt>
+              <dd>{invoiceMoney(subtotal)}</dd>
+            </div>
+            {detailedLines && (
+              <div>
+                <dt>GST</dt>
+                <dd>{invoiceMoney(taxTotal)}</dd>
+              </div>
+            )}
+            <div className="total">
+              <dt>Total</dt>
+              <dd>{invoiceMoney(invoice.amount)}</dd>
+            </div>
+            <div>
+              <dt>Paid</dt>
+              <dd>− {invoiceMoney(invoice.paidAmount)}</dd>
+            </div>
+            <div className="due">
+              <dt>Balance due</dt>
+              <dd>{invoiceMoney(outstanding)}</dd>
+            </div>
+          </dl>
+        </div>
+      </article>
+      <div className="invoice-settlement-grid">
+        <section className="invoice-payment-history">
+          <div className="invoice-section-title">
+            <div>
+              <small>Settlement history</small>
+              <h3>Payments</h3>
+            </div>
+            <span>{invoice.payments.length} recorded</span>
+          </div>
+          {invoice.payments.length ? (
+            <div className="payment-list">
+              {invoice.payments.map((payment) => (
+                <div key={payment.id}>
+                  <span>
+                    <Check />
+                    <b>{payment.reference || "Payment received"}</b>
+                    <small>{date(payment.paidAt)}</small>
+                  </span>
+                  <strong>{invoiceMoney(payment.amount)}</strong>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="invoice-empty-payment">
+              <Receipt />
+              <span>
+                <b>No payments recorded</b>
+                <small>The invoice balance is still outstanding.</small>
+              </span>
+            </div>
+          )}
+        </section>
+        <form className="invoice-payment-card" onSubmit={recordPayment}>
+          <div className="invoice-section-title">
+            <div>
+              <small>Settlement action</small>
+              <h3>Record payment</h3>
+            </div>
+            <span>{invoiceMoney(outstanding)} due</span>
+          </div>
+          <div className="invoice-payment-fields">
+            <label>
+              Amount received
+              <input
+                aria-label="Amount received"
+                type="number"
+                min="0.01"
+                step="0.01"
+                max={outstanding}
+                value={amount}
+                disabled={invoice.state === "PAID"}
+                onChange={(event) => setAmount(Number(event.target.value))}
+              />
+            </label>
+            <label>
+              Bank reference
+              <input
+                value={ref}
+                disabled={invoice.state === "PAID"}
+                onChange={(event) => setRef(event.target.value)}
+                placeholder="Transaction or bank reference"
+              />
+            </label>
+          </div>
+          <button className="button primary" disabled={!paymentValid}>
+            <Check />
+            {invoice.state === "PAID" ? "Invoice paid" : "Record payment"}
+          </button>
+          <p>
+            Records verified settlement evidence only. It does not initiate a
+            bank transfer.
+          </p>
+        </form>
+      </div>
+    </div>
+  );
+}
+function Products({
+  data,
+  mutate,
+}: {
+  data: Workspace;
+  open: (v: View, id?: string) => void;
+  mutate: Function;
+}) {
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<Product | null>(null);
+  const [query, setQuery] = useState("");
+  const active = data.products.filter((p) => p.active);
+  const categories = new Set(data.products.map((p) => p.category));
+  const available = (product: Product) =>
+    product.stocks.reduce((sum, row) => sum + row.onHand - row.reserved, 0);
+  const stock = data.products.reduce(
+    (sum, product) => sum + (product.recurring ? 0 : available(product)),
+    0,
+  );
+  const stockState = (product: Product) =>
+    product.recurring
+      ? "NOT_TRACKED"
+      : available(product) > 0
+        ? "IN_STOCK"
+        : "OUT_OF_STOCK";
+  const filtered = data.products.filter((p) =>
+    [p.name, p.sku, p.category, p.description]
+      .join(" ")
+      .toLowerCase()
+      .includes(query.toLowerCase()),
+  );
+  const canManage = data.user.role === "ADMIN";
+  return (
+    <div className="product-module">
+      <div className="product-command">
+        <div>
+          <span className="eyebrow">Catalog control</span>
+          <p>
+            Create products once, then reuse them in quotations, invoices,
+            stock, and customer documents.
+          </p>
+        </div>
+        {canManage && (
+          <button className="button primary" onClick={() => setCreating(true)}>
+            <Plus />
+            Create Product
+          </button>
+        )}
+      </div>
+      <div className="product-stat-grid">
+        <Metric
+          label="Active products"
+          value={String(active.length)}
+          note="Ready for quotations and invoices"
+        />
+        <Metric
+          label="Categories"
+          value={String(categories.size)}
+          note="Grouped catalog families"
+        />
+        <Metric
+          label="Available stock"
+          value={String(stock)}
+          note="Across linked warehouses"
+        />
+      </div>
+      <section className="product-catalog-card">
+        <div className="product-catalog-head">
+          <div>
+            <h3>Catalog Items</h3>
+            <p>
+              {filtered.length} visible item{filtered.length === 1 ? "" : "s"}
+            </p>
+          </div>
+          <div className="search">
+            <Search />
+            <input
+              placeholder="Search by product, SKU, or category"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Category</th>
+                <th>SKU</th>
+                <th>Price</th>
+                <th>Cost</th>
+                <th>Tax</th>
+                <th>Stock</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((product) => {
+                const state = stockState(product);
+                return (
+                  <tr key={product.id}>
+                    <td>
+                      <b>{product.name}</b>
+                      <small>{product.description}</small>
+                    </td>
+                    <td>{product.category}</td>
+                    <td>{product.sku}</td>
+                    <td>{money(product.price)}</td>
+                    <td>{money(product.cost)}</td>
+                    <td>{product.taxRate}%</td>
+                    <td>
+                      <Status value={state} />
+                      {state === "IN_STOCK" && (
+                        <small>{available(product)} available</small>
+                      )}
+                    </td>
+                    <td>
+                      {canManage && (
+                        <button
+                          aria-label={`Edit ${product.name}`}
+                          onClick={() => setEditing(product)}
+                        >
+                          Edit <ChevronRight />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {!filtered.length && <Empty text="No products match your search." />}
+        </div>
+      </section>
+      {canManage && <PriceListManager data={data} mutate={mutate} />}
+      {creating && (
+        <CreateProductModal mutate={mutate} close={() => setCreating(false)} />
+      )}
+      {editing && (
+        <CreateProductModal
+          key={editing.id}
+          product={editing}
+          mutate={mutate}
+          close={() => setEditing(null)}
+        />
+      )}
+    </div>
+  );
+}
+function ProductDetail({
+  product,
+  mutate,
+  role,
+}: {
+  product?: Product;
+  mutate: Function;
+  role: string;
+}) {
+  const [price, setPrice] = useState(Number(product?.price ?? 0));
+  const [cost, setCost] = useState(Number(product?.cost ?? 0));
+  const [variantOpen, setVariantOpen] = useState(false);
+  useEffect(() => {
+    setPrice(Number(product?.price ?? 0));
+    setCost(Number(product?.cost ?? 0));
+  }, [product?.id]);
+  if (!product)
+    return <Empty text="Product not found or you do not have access." />;
+  const canManage = role === "ADMIN";
+  const createVariant = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await mutate(
+      `/products/${product.id}/variants`,
+      {
+        name: form.get("name"),
+        sku: String(form.get("sku")).toUpperCase(),
+        attributes: { configuration: form.get("configuration") },
+        priceDelta: Number(form.get("priceDelta")),
+        costDelta: Number(form.get("costDelta")),
+      },
+      "POST",
+      "Product variant created",
+    );
+    setVariantOpen(false);
+  };
+  return (
+    <>
+      <div className="detail-head">
+        <div>
+          <span className="status">
+            {product.active ? "Active" : "Archived"}
+          </span>
+          <h2>{product.name}</h2>
+          <p>
+            {product.sku} · {product.category}
+          </p>
+        </div>
+        {canManage && (
+          <div className="actions">
+            <button
+              className="button ghost"
+              onClick={() => setVariantOpen(true)}
+            >
+              <Plus />
+              Add variant
+            </button>
+            <button
+              className="button primary"
+              onClick={() =>
+                mutate(
+                  `/products/${product.id}`,
+                  { price, cost, active: product.active },
+                  "PATCH",
+                  "Product updated",
+                )
+              }
+            >
+              Save product
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="two-col">
+        <Panel title="General information">
+          <div className="form grid">
+            <label>
+              Product name
+              <input value={product.name} disabled />
+            </label>
+            <label>
+              Category
+              <input value={product.category} disabled />
+            </label>
+            <label>
+              Unit
+              <input value={product.unit} disabled />
+            </label>
+            <label>
+              Tax rate
+              <input value={`${product.taxRate}%`} disabled />
+            </label>
+            <label>
+              Base price
+              <input
+                type="number"
+                value={price}
+                disabled={!canManage}
+                onChange={(e) => setPrice(Number(e.target.value))}
+              />
+            </label>
+            <label>
+              Base cost
+              <input
+                type="number"
+                value={cost}
+                disabled={!canManage}
+                onChange={(e) => setCost(Number(e.target.value))}
+              />
+            </label>
+          </div>
+        </Panel>
+        <Panel title="Inventory & billing">
+          <div className="facts">
+            <div>
+              <span>Recurring</span>
+              <b>{product.recurring ? "Yes" : "No"}</b>
+            </div>
+            <div>
+              <span>Cadence</span>
+              <b>{product.cadence ?? "One-time"}</b>
+            </div>
+            {product.stocks.map((s) => (
+              <div key={s.warehouse.name}>
+                <span>{s.warehouse.name}</span>
+                <b>{s.onHand - s.reserved} available</b>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      </div>
+      <Panel title="Variants">
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>SKU</th>
+                <th>Price delta</th>
+                <th>Cost delta</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(product.variants ?? []).map((variant) => (
+                <tr key={variant.id}>
+                  <td>{variant.name}</td>
+                  <td>{variant.sku}</td>
+                  <td>{money(variant.priceDelta)}</td>
+                  <td>{money(variant.costDelta)}</td>
+                  <td>
+                    <Status value={variant.active ? "ACTIVE" : "ARCHIVED"} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!product.variants?.length && (
+            <Empty text="No variants configured; quotations use the base product." />
+          )}
+        </div>
+      </Panel>
+      {canManage && variantOpen && (
+        <Modal title="Add product variant" close={() => setVariantOpen(false)}>
+          <form className="form" onSubmit={createVariant}>
+            <label>
+              Variant name
+              <input name="name" required minLength={1} />
+            </label>
+            <label>
+              Variant SKU
+              <input name="sku" required minLength={2} />
+            </label>
+            <label>
+              Configuration
+              <input
+                name="configuration"
+                placeholder="Color, size, region, package…"
+              />
+            </label>
+            <label>
+              Price delta
+              <input
+                name="priceDelta"
+                type="number"
+                step="0.01"
+                defaultValue="0"
+                required
+              />
+            </label>
+            <label>
+              Cost delta
+              <input
+                name="costDelta"
+                type="number"
+                step="0.01"
+                defaultValue="0"
+                required
+              />
+            </label>
+            <button className="button primary">Create variant</button>
+          </form>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+function PriceListManager({
+  data,
+  mutate,
+}: {
+  data: Workspace;
+  mutate: Function;
+}) {
+  const [open, setOpen] = useState(false);
+  const [itemListId, setItemListId] = useState("");
+  const create = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await mutate(
+      "/price-lists",
+      {
+        name: form.get("name"),
+        currency: String(form.get("currency")).toUpperCase(),
+        customerTier: form.get("customerTier") || null,
+        effectiveFrom: new Date(
+          String(form.get("effectiveFrom")),
+        ).toISOString(),
+      },
+      "POST",
+      "Price list created",
+    );
+    setOpen(false);
+  };
+  const addItem = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const list = (data.priceLists ?? []).find((item) => item.id === itemListId);
+    if (!list) return;
+    const form = new FormData(event.currentTarget);
+    const [productId, variantId = ""] = String(form.get("selection")).split(
+      "|",
+    );
+    const items = [
+      ...(list.items ?? [])
+        .filter(
+          (item) =>
+            !(
+              item.productId === productId &&
+              (item.variantId ?? "") === variantId
+            ),
+        )
+        .map((item) => ({
+          productId: item.productId,
+          variantId: item.variantId ?? null,
+          unitPrice: Number(item.unitPrice),
+        })),
+      {
+        productId,
+        variantId: variantId || null,
+        unitPrice: Number(form.get("unitPrice")),
+      },
+    ];
+    await mutate(
+      `/price-lists/${list.id}/items`,
+      { items, reason: String(form.get("reason")) },
+      "PUT",
+      "Price rule published",
+    );
+    setItemListId("");
+  };
+  return (
+    <section className="product-catalog-card">
+      <div className="product-catalog-head">
+        <div>
+          <h3>Price Lists</h3>
+          <p>Effective-dated, tier and currency-specific quote pricing.</p>
+        </div>
+        <button className="button ghost" onClick={() => setOpen(true)}>
+          <Plus />
+          New price list
+        </button>
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Tier</th>
+              <th>Currency</th>
+              <th>Items</th>
+              <th>Status</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {(data.priceLists ?? []).map((list) => (
+              <tr key={list.id}>
+                <td>
+                  <b>{list.name}</b>
+                </td>
+                <td>{list.customerTier ?? "All tiers"}</td>
+                <td>{list.currency}</td>
+                <td>{list.items?.length ?? 0}</td>
+                <td>
+                  <Status
+                    value={list.active === false ? "ARCHIVED" : "ACTIVE"}
+                  />
+                </td>
+                <td>
+                  <button onClick={() => setItemListId(list.id)}>
+                    Add price rule
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!data.priceLists?.length && (
+          <Empty text="No price lists configured; catalog base prices apply." />
+        )}
+      </div>
+      {open && (
+        <Modal title="New price list" close={() => setOpen(false)}>
+          <form className="form" onSubmit={create}>
+            <label>
+              Name
+              <input name="name" required minLength={2} />
+            </label>
+            <label>
+              Customer tier
+              <select name="customerTier">
+                <option value="">All tiers</option>
+                {[...new Set(data.policies.map((policy) => policy.tier))].map(
+                  (tier) => (
+                    <option key={tier}>{tier}</option>
+                  ),
+                )}
+              </select>
+            </label>
+            <label>
+              Currency
+              <input
+                name="currency"
+                defaultValue="INR"
+                minLength={3}
+                maxLength={3}
+                required
+              />
+            </label>
+            <label>
+              Effective from
+              <input
+                name="effectiveFrom"
+                type="date"
+                defaultValue={new Date().toISOString().slice(0, 10)}
+                required
+              />
+            </label>
+            <button className="button primary">Create price list</button>
+          </form>
+        </Modal>
+      )}
+      {itemListId && (
+        <Modal title="Add price rule" close={() => setItemListId("")}>
+          <form className="form" onSubmit={addItem}>
+            <label>
+              Product / variant
+              <select name="selection" required>
+                {data.products
+                  .filter((product) => product.active)
+                  .flatMap((product) => [
+                    <option key={product.id} value={`${product.id}|`}>
+                      {product.name} · Base
+                    </option>,
+                    ...(product.variants ?? [])
+                      .filter((variant) => variant.active)
+                      .map((variant) => (
+                        <option
+                          key={variant.id}
+                          value={`${product.id}|${variant.id}`}
+                        >
+                          {product.name} · {variant.name}
+                        </option>
+                      )),
+                  ])}
+              </select>
+            </label>
+            <label>
+              Unit price
+              <input
+                name="unitPrice"
+                type="number"
+                min="0.01"
+                step="0.01"
+                required
+              />
+            </label>
+            <label>
+              Publishing reason
+              <textarea name="reason" minLength={5} maxLength={240} required />
+            </label>
+            <button className="button primary">Publish price rule</button>
+          </form>
+        </Modal>
+      )}
+    </section>
+  );
+}
+function AdvancedPolicies({
+  data,
+  mutate,
+  reload,
+}: {
+  data: Workspace;
+  mutate: Function;
+  reload: () => Promise<void>;
+}) {
+  const categoryLimits = data.policies.flatMap((policy) => [
+    Number(policy.hardwareLimit),
+    Number(policy.servicesLimit),
+    Number(policy.subscriptionLimit),
+  ]);
+  const strictest = categoryLimits.length ? Math.min(...categoryLimits) : 0;
+  const canManage = ["MANAGER", "ADMIN"].includes(data.user.role);
+  return (
+    <>
+      <div className="metric-grid three policy-metrics">
+        <Metric
+          label="Published tiers"
+          value={String(data.policies.length)}
+          note="Customer-specific guardrails"
+        />
+        <Metric
+          label="Strictest category cap"
+          value={`${strictest}%`}
+          note="Lowest active product ceiling"
+          tone="warn"
+        />
+        <Metric
+          label="Policy versions"
+          value={String(
+            data.policies.reduce((sum, policy) => sum + policy.version, 0),
+          )}
+          note="Every save creates an audited version"
+        />
+      </div>
+      <Panel title="Discount tiers and category limits">
+        <div className="policy-grid">
+          {canManage
+            ? data.policies.map((policy) => (
+                <AdvancedPolicyCard
+                  key={policy.id}
+                  policy={policy}
+                  mutate={mutate}
+                  users={data.users}
+                />
+              ))
+            : data.policies.map((policy) => (
+                <article className="policy-card" key={policy.id}>
+                  <div className="policy-card-head">
+                    <span className="tier">{policy.tier}</span>
+                  </div>
+                  <div className="facts">
+                    <div>
+                      <span>Overall ceiling</span>
+                      <b>{policy.maxDiscount}%</b>
+                    </div>
+                    <div>
+                      <span>Hardware</span>
+                      <b>{policy.hardwareLimit}%</b>
+                    </div>
+                    <div>
+                      <span>Services</span>
+                      <b>{policy.servicesLimit}%</b>
+                    </div>
+                    <div>
+                      <span>Subscriptions</span>
+                      <b>{policy.subscriptionLimit}%</b>
+                    </div>
+                    <div>
+                      <span>Finance escalation</span>
+                      <b>{policy.financeThreshold} pts</b>
+                    </div>
+                    <div>
+                      <span>Policy version</span>
+                      <b>v{policy.version}</b>
+                    </div>
+                  </div>
+                </article>
+              ))}
+        </div>
+      </Panel>
+      {canManage && (
+        <RfqHandlingSettings
+          initialMode={data.organization.rfqHandlingMode ?? "LEAD_FIRST"}
+          onChanged={() => void reload()}
+        />
+      )}
+      {data.user.role === "ADMIN" && <DirectoryProfileSettings />}
+    </>
+  );
+}
+
+type PolicyDraft = {
+  maxDiscount: number;
+  hardwareLimit: number;
+  servicesLimit: number;
+  subscriptionLimit: number;
+  financeThreshold: number;
+  aggregateDiscountLimit: number;
+  minimumMarginPercent: number;
+};
+const policyDraft = (policy: Workspace["policies"][number]): PolicyDraft => ({
+  maxDiscount: Number(policy.maxDiscount),
+  hardwareLimit: Number(policy.hardwareLimit),
+  servicesLimit: Number(policy.servicesLimit),
+  subscriptionLimit: Number(policy.subscriptionLimit),
+  financeThreshold: Number(policy.financeThreshold),
+  aggregateDiscountLimit: Number(policy.aggregateDiscountLimit),
+  minimumMarginPercent: Number(policy.minimumMarginPercent),
+});
+function AdvancedPolicyCard({
+  policy,
+  mutate,
+  users,
+}: {
+  policy: Workspace["policies"][number];
+  mutate: Function;
+  users: Workspace["users"];
+}) {
+  const [draft, setDraft] = useState<PolicyDraft>(() => policyDraft(policy));
+  const [reason, setReason] = useState("");
+  const [approvalSequence, setApprovalSequence] = useState<string>(
+    policy.approvalSequence?.[0] === "Finance"
+      ? "FINANCE_FIRST"
+      : "MANAGER_FIRST",
+  );
+  const [managerReviewerId, setManagerReviewerId] = useState(
+    policy.managerReviewerId ?? "",
+  );
+  const [financeReviewerId, setFinanceReviewerId] = useState(
+    policy.financeReviewerId ?? "",
+  );
+  useEffect(() => {
+    setDraft(policyDraft(policy));
+    setReason("");
+    setApprovalSequence(
+      policy.approvalSequence?.[0] === "Finance"
+        ? "FINANCE_FIRST"
+        : "MANAGER_FIRST",
+    );
+    setManagerReviewerId(policy.managerReviewerId ?? "");
+    setFinanceReviewerId(policy.financeReviewerId ?? "");
+  }, [policy]);
+  const original = policyDraft(policy);
+  const dirty =
+    (Object.keys(original) as Array<keyof PolicyDraft>).some(
+      (key) => draft[key] !== original[key],
+    ) ||
+    approvalSequence !==
+      (policy.approvalSequence?.[0] === "Finance"
+        ? "FINANCE_FIRST"
+        : "MANAGER_FIRST") ||
+    managerReviewerId !== (policy.managerReviewerId ?? "") ||
+    financeReviewerId !== (policy.financeReviewerId ?? "");
+  const invalid = Object.values(draft).some(
+    (value) => !Number.isFinite(value) || value < 0 || value > 100,
+  );
+  const categoryTooHigh =
+    draft.hardwareLimit > draft.maxDiscount ||
+    draft.servicesLimit > draft.maxDiscount ||
+    draft.subscriptionLimit > draft.maxDiscount;
+  const canSave =
+    dirty && !invalid && !categoryTooHigh && reason.trim().length >= 5;
+  const set = (field: keyof PolicyDraft, value: number) =>
+    setDraft((current) => ({ ...current, [field]: value }));
+  const reset = () => {
+    setDraft(original);
+    setReason("");
+    setApprovalSequence(
+      policy.approvalSequence?.[0] === "Finance"
+        ? "FINANCE_FIRST"
+        : "MANAGER_FIRST",
+    );
+    setManagerReviewerId(policy.managerReviewerId ?? "");
+    setFinanceReviewerId(policy.financeReviewerId ?? "");
+  };
+  const save = () =>
+    mutate(
+      `/policies/${policy.id}`,
+      {
+        ...draft,
+        approvalSequence:
+          approvalSequence === "FINANCE_FIRST"
+            ? ["Finance", "Sales Manager"]
+            : ["Sales Manager", "Finance"],
+        managerReviewerId: managerReviewerId || null,
+        financeReviewerId: financeReviewerId || null,
+        reason: reason.trim(),
+      },
+      "PATCH",
+      `${policy.tier} policy published`,
+    );
+  const categories: [
+    keyof Pick<
+      PolicyDraft,
+      "hardwareLimit" | "servicesLimit" | "subscriptionLimit"
+    >,
+    string,
+    string,
+  ][] = [
+    ["hardwareLimit", "Hardware", "Physical products"],
+    ["servicesLimit", "Services", "Professional services"],
+    ["subscriptionLimit", "Subscriptions", "Recurring products"],
+  ];
+  return (
+    <article className={`policy-card ${dirty ? "policy-dirty" : ""}`}>
+      <div className="policy-card-head">
+        <span className="tier">{policy.tier}</span>
+      </div>
+      <label className="policy-overall" htmlFor={`max-${policy.id}`}>
+        <span>
+          <b>Overall tier ceiling</b>
+          <small>Absolute maximum for this customer tier</small>
+        </span>
+        <span className="percent-input">
+          <input
+            id={`max-${policy.id}`}
+            aria-label={`${policy.tier} overall discount ceiling`}
+            type="number"
+            min="0"
+            max="100"
+            step="0.5"
+            value={draft.maxDiscount}
+            onChange={(event) => set("maxDiscount", Number(event.target.value))}
+          />
+          <b>%</b>
+        </span>
+      </label>
+      <div className="category-editor">
+        <div className="category-title">
+          <b>Category ceilings</b>
+          <small>Set individual limits by product category</small>
+        </div>
+        {categories.map(([field, name, description]) => (
+          <label key={field} htmlFor={`${field}-${policy.id}`}>
+            <span>
+              <b>{name}</b>
+              <small>{description}</small>
+            </span>
+            <span className="percent-input">
+              <input
+                id={`${field}-${policy.id}`}
+                aria-label={`${policy.tier} ${name} discount ceiling`}
+                type="number"
+                min="0"
+                max={draft.maxDiscount}
+                step="0.5"
+                value={draft[field]}
+                onChange={(event) => set(field, Number(event.target.value))}
+              />
+              <b>%</b>
+            </span>
+          </label>
+        ))}
+      </div>
+      <label className="finance-editor" htmlFor={`finance-${policy.id}`}>
+        <span>
+          <b>Finance escalation</b>
+          <small>
+            Route to Finance when excess is greater than this many points
+          </small>
+        </span>
+        <span className="percent-input">
+          <input
+            id={`finance-${policy.id}`}
+            aria-label={`${policy.tier} Finance escalation threshold`}
+            type="number"
+            min="0"
+            max="100"
+            step="0.5"
+            value={draft.financeThreshold}
+            onChange={(event) =>
+              set("financeThreshold", Number(event.target.value))
+            }
+          />
+          <b>pts</b>
+        </span>
+      </label>
+      <label className="finance-editor" htmlFor={`aggregate-${policy.id}`}>
+        <span>
+          <b>Aggregate discount ceiling</b>
+          <small>
+            Finance review after Manager when a cadence bucket exceeds this
+            discount
+          </small>
+        </span>
+        <span className="percent-input">
+          <input
+            id={`aggregate-${policy.id}`}
+            aria-label={`${policy.tier} aggregate discount ceiling`}
+            type="number"
+            min="0"
+            max="100"
+            step="0.5"
+            value={draft.aggregateDiscountLimit}
+            onChange={(event) =>
+              set("aggregateDiscountLimit", Number(event.target.value))
+            }
+          />
+          <b>%</b>
+        </span>
+      </label>
+      <label className="finance-editor" htmlFor={`margin-${policy.id}`}>
+        <span>
+          <b>Minimum margin floor</b>
+          <small>
+            Finance review after Manager when any cadence bucket falls below
+            this margin
+          </small>
+        </span>
+        <span className="percent-input">
+          <input
+            id={`margin-${policy.id}`}
+            aria-label={`${policy.tier} minimum margin floor`}
+            type="number"
+            min="-100"
+            max="100"
+            step="0.5"
+            value={draft.minimumMarginPercent}
+            onChange={(event) =>
+              set("minimumMarginPercent", Number(event.target.value))
+            }
+          />
+          <b>%</b>
+        </span>
+      </label>
+      <label className="policy-reason">
+        Approval sequence
+        <select
+          aria-label={`${policy.tier} approval sequence`}
+          value={approvalSequence}
+          onChange={(event) => setApprovalSequence(event.target.value)}
+        >
+          <option value="MANAGER_FIRST">Sales Manager → Finance</option>
+          <option value="FINANCE_FIRST">Finance → Sales Manager</option>
+        </select>
+      </label>
+      <label className="policy-reason">
+        Assigned manager reviewer
+        <select
+          aria-label={`${policy.tier} manager reviewer`}
+          value={managerReviewerId}
+          onChange={(event) => setManagerReviewerId(event.target.value)}
+        >
+          <option value="">Use quotation team manager</option>
+          {users
+            .filter(
+              (user) =>
+                ["MANAGER", "ADMIN"].includes(user.role) &&
+                user.status === "ACTIVE",
+            )
+            .map((user) => (
+              <option key={user.id} value={user.id}>
+                {user.name}
+              </option>
+            ))}
+        </select>
+      </label>
+      <label className="policy-reason">
+        Assigned finance reviewer
+        <select
+          aria-label={`${policy.tier} finance reviewer`}
+          value={financeReviewerId}
+          onChange={(event) => setFinanceReviewerId(event.target.value)}
+        >
+          <option value="">Any Finance user</option>
+          {users
+            .filter(
+              (user) =>
+                ["FINANCE", "ADMIN"].includes(user.role) &&
+                user.status === "ACTIVE",
+            )
+            .map((user) => (
+              <option key={user.id} value={user.id}>
+                {user.name}
+              </option>
+            ))}
+        </select>
+      </label>
+      <label className="policy-reason" htmlFor={`reason-${policy.id}`}>
+        <span>Reason for change</span>
+        <textarea
+          id={`reason-${policy.id}`}
+          aria-label={`${policy.tier} policy change reason`}
+          maxLength={240}
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          placeholder="Explain why these guardrails are changing"
+        />
+      </label>
+      {(invalid || categoryTooHigh) && (
+        <p className="policy-validation" role="alert">
+          {categoryTooHigh
+            ? "Category ceilings cannot exceed the overall tier ceiling."
+            : "Use percentages from 0 to 100."}
+        </p>
+      )}
+      <div className="policy-actions">
+        <button
+          className="button ghost"
+          onClick={reset}
+          disabled={!dirty && !reason}
+        >
+          Reset
+        </button>
+        <button className="button primary" onClick={save} disabled={!canSave}>
+          Save & publish
+        </button>
       </div>
     </article>
-    <div className="invoice-settlement-grid">
-      <section className="invoice-payment-history">
-        <div className="invoice-section-title"><div><small>Settlement history</small><h3>Payments</h3></div><span>{invoice.payments.length} recorded</span></div>
-        {invoice.payments.length?<div className="payment-list">{invoice.payments.map(payment=><div key={payment.id}><span><Check/><b>{payment.reference||'Payment received'}</b><small>{date(payment.paidAt)}</small></span><strong>{invoiceMoney(payment.amount)}</strong></div>)}</div>:<div className="invoice-empty-payment"><Receipt/><span><b>No payments recorded</b><small>The invoice balance is still outstanding.</small></span></div>}
-      </section>
-      <form className="invoice-payment-card" onSubmit={recordPayment}>
-        <div className="invoice-section-title"><div><small>Settlement action</small><h3>Record payment</h3></div><span>{invoiceMoney(outstanding)} due</span></div>
-        <div className="invoice-payment-fields"><label>Amount received<input aria-label="Amount received" type="number" min="0.01" step="0.01" max={outstanding} value={amount} disabled={invoice.state==='PAID'} onChange={event=>setAmount(Number(event.target.value))}/></label><label>Bank reference<input value={ref} disabled={invoice.state==='PAID'} onChange={event=>setRef(event.target.value)} placeholder="Transaction or bank reference"/></label></div>
-        <button className="button primary" disabled={!paymentValid}><Check/>{invoice.state==='PAID'?'Invoice paid':'Record payment'}</button>
-        <p>Records verified settlement evidence only. It does not initiate a bank transfer.</p>
-      </form>
-    </div>
-  </div>
+  );
 }
-function Products({data,mutate}:{data:Workspace;open:(v:View,id?:string)=>void;mutate:Function}){
-  const[creating,setCreating]=useState(false);
-  const[editing,setEditing]=useState<Product|null>(null);
-  const[query,setQuery]=useState('');
-  const active=data.products.filter(p=>p.active);
-  const categories=new Set(data.products.map(p=>p.category));
-  const available=(product:Product)=>product.stocks.reduce((sum,row)=>sum+row.onHand-row.reserved,0);
-  const stock=data.products.reduce((sum,product)=>sum+(product.recurring?0:available(product)),0);
-  const stockState=(product:Product)=>product.recurring?'NOT_TRACKED':available(product)>0?'IN_STOCK':'OUT_OF_STOCK';
-  const filtered=data.products.filter(p=>[p.name,p.sku,p.category,p.description].join(' ').toLowerCase().includes(query.toLowerCase()));
-  return <div className="product-module">
-    <div className="product-command"><div><span className="eyebrow">Catalog control</span><p>Create products once, then reuse them in quotations, invoices, stock, and customer documents.</p></div><button className="button primary" onClick={()=>setCreating(true)}><Plus/>Create Product</button></div>
-    <div className="product-stat-grid"><Metric label="Active products" value={String(active.length)} note="Ready for quotations and invoices"/><Metric label="Categories" value={String(categories.size)} note="Grouped catalog families"/><Metric label="Available stock" value={String(stock)} note="Across linked warehouses"/></div>
-    <section className="product-catalog-card">
-      <div className="product-catalog-head"><div><h3>Catalog Items</h3><p>{filtered.length} visible item{filtered.length===1?'':'s'}</p></div><div className="search"><Search/><input placeholder="Search by product, SKU, or category" value={query} onChange={e=>setQuery(e.target.value)}/></div></div>
-      <div className="table-wrap"><table><thead><tr><th>Product</th><th>Category</th><th>SKU</th><th>Price</th><th>Cost</th><th>Tax</th><th>Stock</th><th/></tr></thead><tbody>{filtered.map(product=>{const state=stockState(product);return <tr key={product.id}><td><b>{product.name}</b><small>{product.description}</small></td><td>{product.category}</td><td>{product.sku}</td><td>{money(product.price)}</td><td>{money(product.cost)}</td><td>{product.taxRate}%</td><td><Status value={state}/>{state==='IN_STOCK'&&<small>{available(product)} available</small>}</td><td><button aria-label={`Edit ${product.name}`} onClick={()=>setEditing(product)}>Edit <ChevronRight/></button></td></tr>})}</tbody></table>{!filtered.length&&<Empty text="No products match your search."/>}</div>
-    </section>
-    {creating&&<CreateProductModal mutate={mutate} close={()=>setCreating(false)}/>}
-    {editing&&<CreateProductModal key={editing.id} product={editing} mutate={mutate} close={()=>setEditing(null)}/>}
-  </div>
-}
-function ProductDetail({product,mutate}:{product?:Product;mutate:Function}){const[price,setPrice]=useState(Number(product?.price??0));const[cost,setCost]=useState(Number(product?.cost??0));useEffect(()=>{setPrice(Number(product?.price??0));setCost(Number(product?.cost??0))},[product?.id]);if(!product)return <Empty text="No product selected."/>;return <><div className="detail-head"><div><span className="status">{product.active?'Active':'Archived'}</span><h2>{product.name}</h2><p>{product.sku} · {product.category}</p></div><button className="button primary" onClick={()=>mutate(`/products/${product.id}`,{price,cost,active:product.active},'PATCH','Product updated')}>Save product</button></div><div className="two-col"><Panel title="General information"><div className="form grid"><label>Product name<input value={product.name} disabled/></label><label>Category<input value={product.category} disabled/></label><label>Unit<input value={product.unit} disabled/></label><label>Tax rate<input value={`${product.taxRate}%`} disabled/></label><label>Price<input type="number" value={price} onChange={e=>setPrice(Number(e.target.value))}/></label><label>Cost<input type="number" value={cost} onChange={e=>setCost(Number(e.target.value))}/></label></div></Panel><Panel title="Inventory & billing"><div className="facts"><div><span>Recurring</span><b>{product.recurring?'Yes':'No'}</b></div><div><span>Cadence</span><b>{product.cadence??'One-time'}</b></div>{product.stocks.map(s=><div key={s.warehouse.name}><span>{s.warehouse.name}</span><b>{s.onHand-s.reserved} available</b></div>)}</div></Panel></div></>}
-function AdvancedPolicies({data,mutate,reload}:{data:Workspace;mutate:Function;reload:()=>Promise<void>}){
-  const categoryLimits=data.policies.flatMap(policy=>[Number(policy.hardwareLimit),Number(policy.servicesLimit),Number(policy.subscriptionLimit)]);
-  const strictest=categoryLimits.length?Math.min(...categoryLimits):0;
-  return <>
-    <div className="metric-grid three policy-metrics"><Metric label="Published tiers" value={String(data.policies.length)} note="Customer-specific guardrails"/><Metric label="Strictest category cap" value={`${strictest}%`} note="Lowest active product ceiling" tone="warn"/><Metric label="Policy versions" value={String(data.policies.reduce((sum,policy)=>sum+policy.version,0))} note="Every save creates an audited version"/></div>
-    <Panel title="Discount tiers and category limits">
-      <div className="policy-grid">{data.policies.map(policy=><AdvancedPolicyCard key={policy.id} policy={policy} mutate={mutate}/>)}</div>
-    </Panel>
-    <RfqHandlingSettings initialMode={data.organization.rfqHandlingMode??'LEAD_FIRST'} onChanged={()=>void reload()}/>
-    {data.user.role==='ADMIN'&&<DirectoryProfileSettings/>}
-  </>;
-}
-
-type PolicyDraft={maxDiscount:number;hardwareLimit:number;servicesLimit:number;subscriptionLimit:number;financeThreshold:number;aggregateDiscountLimit:number;minimumMarginPercent:number};
-const policyDraft=(policy:Workspace['policies'][number]):PolicyDraft=>({maxDiscount:Number(policy.maxDiscount),hardwareLimit:Number(policy.hardwareLimit),servicesLimit:Number(policy.servicesLimit),subscriptionLimit:Number(policy.subscriptionLimit),financeThreshold:Number(policy.financeThreshold),aggregateDiscountLimit:Number(policy.aggregateDiscountLimit),minimumMarginPercent:Number(policy.minimumMarginPercent)});
-function AdvancedPolicyCard({policy,mutate}:{policy:Workspace['policies'][number];mutate:Function}){
-  const[draft,setDraft]=useState<PolicyDraft>(()=>policyDraft(policy));
-  const[reason,setReason]=useState('');
-  useEffect(()=>{setDraft(policyDraft(policy));setReason('')},[policy]);
-  const original=policyDraft(policy);
-  const dirty=(Object.keys(original) as Array<keyof PolicyDraft>).some(key=>draft[key]!==original[key]);
-  const invalid=Object.values(draft).some(value=>!Number.isFinite(value)||value<0||value>100);
-  const categoryTooHigh=draft.hardwareLimit>draft.maxDiscount||draft.servicesLimit>draft.maxDiscount||draft.subscriptionLimit>draft.maxDiscount;
-  const canSave=dirty&&!invalid&&!categoryTooHigh&&reason.trim().length>=5;
-  const set=(field:keyof PolicyDraft,value:number)=>setDraft(current=>({...current,[field]:value}));
-  const reset=()=>{setDraft(original);setReason('')};
-  const save=()=>mutate(`/policies/${policy.id}`,{...draft,reason:reason.trim()},'PATCH',`${policy.tier} policy published`);
-  const categories:[keyof Pick<PolicyDraft,'hardwareLimit'|'servicesLimit'|'subscriptionLimit'>,string,string][]=[['hardwareLimit','Hardware','Physical products'],['servicesLimit','Services','Professional services'],['subscriptionLimit','Subscriptions','Recurring products']];
-  return <article className={`policy-card ${dirty?'policy-dirty':''}`}>
-    <div className="policy-card-head"><span className="tier">{policy.tier}</span></div>
-    <label className="policy-overall" htmlFor={`max-${policy.id}`}><span><b>Overall tier ceiling</b><small>Absolute maximum for this customer tier</small></span><span className="percent-input"><input id={`max-${policy.id}`} aria-label={`${policy.tier} overall discount ceiling`} type="number" min="0" max="100" step="0.5" value={draft.maxDiscount} onChange={event=>set('maxDiscount',Number(event.target.value))}/><b>%</b></span></label>
-    <div className="category-editor"><div className="category-title"><b>Category ceilings</b><small>Set individual limits by product category</small></div>{categories.map(([field,name,description])=><label key={field} htmlFor={`${field}-${policy.id}`}><span><b>{name}</b><small>{description}</small></span><span className="percent-input"><input id={`${field}-${policy.id}`} aria-label={`${policy.tier} ${name} discount ceiling`} type="number" min="0" max={draft.maxDiscount} step="0.5" value={draft[field]} onChange={event=>set(field,Number(event.target.value))}/><b>%</b></span></label>)}</div>
-    <label className="finance-editor" htmlFor={`finance-${policy.id}`}><span><b>Finance escalation</b><small>Route to Finance when excess is greater than this many points</small></span><span className="percent-input"><input id={`finance-${policy.id}`} aria-label={`${policy.tier} Finance escalation threshold`} type="number" min="0" max="100" step="0.5" value={draft.financeThreshold} onChange={event=>set('financeThreshold',Number(event.target.value))}/><b>pts</b></span></label>
-    <label className="finance-editor" htmlFor={`aggregate-${policy.id}`}><span><b>Aggregate discount ceiling</b><small>Finance review after Manager when a cadence bucket exceeds this discount</small></span><span className="percent-input"><input id={`aggregate-${policy.id}`} aria-label={`${policy.tier} aggregate discount ceiling`} type="number" min="0" max="100" step="0.5" value={draft.aggregateDiscountLimit} onChange={event=>set('aggregateDiscountLimit',Number(event.target.value))}/><b>%</b></span></label>
-    <label className="finance-editor" htmlFor={`margin-${policy.id}`}><span><b>Minimum margin floor</b><small>Finance review after Manager when any cadence bucket falls below this margin</small></span><span className="percent-input"><input id={`margin-${policy.id}`} aria-label={`${policy.tier} minimum margin floor`} type="number" min="-100" max="100" step="0.5" value={draft.minimumMarginPercent} onChange={event=>set('minimumMarginPercent',Number(event.target.value))}/><b>%</b></span></label>
-    <label className="policy-reason" htmlFor={`reason-${policy.id}`}><span>Reason for change</span><textarea id={`reason-${policy.id}`} aria-label={`${policy.tier} policy change reason`} maxLength={240} value={reason} onChange={event=>setReason(event.target.value)} placeholder="Explain why these guardrails are changing"/></label>
-    {(invalid||categoryTooHigh)&&<p className="policy-validation" role="alert">{categoryTooHigh?'Category ceilings cannot exceed the overall tier ceiling.':'Use percentages from 0 to 100.'}</p>}
-    <div className="policy-actions"><button className="button ghost" onClick={reset} disabled={!dirty&&!reason}>Reset</button><button className="button primary" onClick={save} disabled={!canSave}>Save & publish</button></div>
-  </article>;
-}
-const readOnlyAccessModules=[['dashboard','Overview'],['quotations','Quotations'],['approvals','Approvals'],['fulfillment','Fulfillment & stock'],['invoices','Invoices'],['health','Deal health'],['reports','Reports'],['products','Products'],['policies','Rules']] as const;
-type OrganizationMemberDetail={id:string;name:string;email:string;loginId?:string;role:string;status:string;membershipStatus:string;accessRole:string;moduleAccess:string[];createdAt:string;joinedAt:string};
-function ReadOnlyAccessControl({data,reload}:{data:Workspace;reload:()=>Promise<void>}){
-  const[name,setName]=useState('');const[selected,setSelected]=useState<string[]>(['dashboard']);const[busy,setBusy]=useState(false);const[error,setError]=useState('');const[credentials,setCredentials]=useState<{loginId:string;password:string}|null>(null);const[member,setMember]=useState<OrganizationMemberDetail|null>(null);const[detailBusy,setDetailBusy]=useState(false);
-  const create=async(e:FormEvent)=>{e.preventDefault();try{setBusy(true);setError('');const result=await request<{credentials:{loginId:string;password:string}}>('/admin/users',{method:'POST',body:JSON.stringify({name,modules:selected})});setCredentials(result.credentials);setName('');setSelected(['dashboard']);await reload()}catch(e){setError(e instanceof Error?e.message:'Could not create access')}finally{setBusy(false)}};
-  const viewMember=async(id:string)=>{try{setDetailBusy(true);setError('');setMember(await request<OrganizationMemberDetail>(`/admin/users/${id}`))}catch(e){setError(e instanceof Error?e.message:'Could not load member details')}finally{setDetailBusy(false)}};
-  return <><div className="access-layout"><Panel title={`${data.organization.name} · Add user access`}><form className="access-form" onSubmit={create}><label>User name<input required maxLength={120} value={name} onChange={e=>setName(e.target.value)} placeholder="Jordan Davis"/></label><div><b>Visible modules</b><p className="muted">Select exactly what this user can see. No role assignment is required.</p><div className="module-grid">{readOnlyAccessModules.map(([id,text])=><label className={selected.includes(id)?'selected':''} key={id}><input type="checkbox" checked={selected.includes(id)} onChange={()=>setSelected(selected.includes(id)?selected.filter(x=>x!==id):[...selected,id])}/><span><Check/>{text}</span></label>)}</div></div>{error&&<div className="error">{error}</div>}<button className="button primary" disabled={busy||!selected.length}><UserRound/> {busy?'Generating…':'Generate login ID & password'}</button></form>{credentials&&<div className="credential-card" role="status"><span className="eyebrow">COPY AND SHARE SECURELY</span><h3>Login credentials generated</h3><div><span>User ID</span><code>{credentials.loginId}</code></div><div><span>Temporary password</span><code>{credentials.password}</code></div><p>These credentials are shown only in this response. The user can sign in from the normal login page.</p></div>}</Panel><Panel title="Organization users"><div className="user-access-list">{data.users.map(user=><button type="button" key={user.id} onClick={()=>viewMember(user.id)} aria-label={`View details for ${user.name}`}><span className="avatar">{user.name.split(' ').map(p=>p[0]).join('').slice(0,2)}</span><span><b>{user.name}</b><small>{user.loginId??'Organization admin'} · {user.moduleAccess.length?user.moduleAccess.map(label).join(', '):'Full admin access'}</small></span><Status value={user.status}/><ChevronRight/></button>)}</div>{detailBusy&&<div className="member-detail-loading"><RefreshCw/> Loading member details…</div>}</Panel></div>{member&&<MemberDetails member={member} close={()=>setMember(null)}/>}</>
-}
-function MemberDetails({member,close}:{member:OrganizationMemberDetail;close:()=>void}){const modules=member.role==='ADMIN'?['All workspace modules']:member.moduleAccess.map(label);return <Modal title="Organization member details" close={close}><div className="member-detail"><div className="member-detail-identity"><span className="avatar">{member.name.split(' ').map(p=>p[0]).join('').slice(0,2)}</span><span><h2>{member.name}</h2><p>{member.email}</p></span><Status value={member.status}/></div><dl><div><dt>Organization role</dt><dd>{label(member.role)}</dd></div><div><dt>Access level</dt><dd>{label(member.accessRole)}</dd></div><div><dt>Membership</dt><dd><Status value={member.membershipStatus}/></dd></div><div><dt>User ID</dt><dd>{member.loginId??'Email sign-in'}</dd></div><div><dt>Joined organization</dt><dd>{date(member.joinedAt)}</dd></div><div><dt>Account created</dt><dd>{date(member.createdAt)}</dd></div></dl><div className="member-detail-modules"><b>Visible modules</b><div>{modules.length?modules.map(module=><span key={module}><Check/>{module}</span>):<p className="muted">No workspace modules assigned.</p>}</div></div><p className="member-detail-note"><Eye/> Read-only account information for this organization.</p></div></Modal>}
-function Customers({data,open,mutate}:{data:Workspace;open:(v:View,id?:string)=>void;mutate:Function}){const[creating,setCreating]=useState(false);const[query,setQuery]=useState('');const[unassignedOnly,setUnassignedOnly]=useState(false);const activeCustomers=data.customers.filter(c=>c.active);const filtered=activeCustomers.filter(c=>[c.name,c.email??'',c.phone??'',c.contactPerson??''].join(' ').toLowerCase().includes(query.toLowerCase())).filter(c=>!unassignedOnly||!c.primaryTeam||!c.primaryRepresentative);return <><div className="toolbar customer-toolbar"><p className="muted">Manage account teams, representatives, commercial profiles, and receivables from one workspace.</p><button className="button primary" onClick={()=>setCreating(true)}><Plus/>Add Customer</button></div><div className="metric-grid three"><Metric label="Total Customers" value={String(activeCustomers.length)} note="Active customer records"/><Metric label="Assigned accounts" value={String(activeCustomers.filter(c=>c.primaryTeam&&c.primaryRepresentative).length)} note="Ready for representative quoting"/><Metric label="Assignment required" value={String(activeCustomers.filter(c=>!c.primaryTeam||!c.primaryRepresentative).length)} note="Needs manager review" tone="warn"/></div><Panel title="Customer records"><div className="customer-list-controls"><div className="search full-search"><Search/><input placeholder="Search by name, email, phone, or contact person..." value={query} onChange={e=>setQuery(e.target.value)}/></div><label className="checkbox-row"><input type="checkbox" checked={unassignedOnly} onChange={event=>setUnassignedOnly(event.target.checked)}/>Unassigned only</label></div>{filtered.length?<div className="table-wrap"><table><thead><tr><th>Customer</th><th>Primary rep</th><th>Sales team</th><th>Open quotations</th><th>Last activity</th><th>Status</th><th/></tr></thead><tbody>{filtered.map(c=><tr key={c.id}><td><b>{c.name}</b><small>{c.customerType} · {c.region}</small></td><td>{c.primaryRepresentative?.name??<span className="risk-pill">Unassigned</span>}</td><td>{c.primaryTeam?.name??'—'}</td><td>{c.openQuotationCount??data.quotes.filter(q=>q.customer===c.name&&!['CONFIRMED','REJECTED'].includes(q.stage)).length}</td><td>{date(c.lastActivity??c.updatedAt)}</td><td><Status value="ACTIVE"/></td><td><button onClick={()=>open('customer',c.id)}>Open <ChevronRight/></button></td></tr>)}</tbody></table></div>:<div className="customer-empty"><UserRound/><h3>No customers found</h3><p>{unassignedOnly?'Every active customer is assigned.':'Add your first customer to get started.'}</p></div>}</Panel>{creating&&<CustomerModal actorRole={data.user.role} mutate={mutate} close={()=>setCreating(false)}/>}</>}
-function CustomerDetail({customer,open,mutate,role}:{customer?:Customer;open:(v:View,id?:string)=>void;mutate:Function;role:string}){const[editing,setEditing]=useState(false);const[deleting,setDeleting]=useState(false);if(!customer)return <Empty text="No customer selected."/>;const archive=async()=>{const saved=await mutate(`/customers/${customer.id}`,{active:false},'PATCH','Customer deleted');if(saved){setDeleting(false);open('customers')}};return <><div className="detail-head"><div><span className="status active">Active</span><h2>{customer.name}</h2><p>{customer.customerType} · {customer.region} · {customer.currency}</p></div><div className="actions"><button className="button ghost" onClick={()=>setEditing(true)}><Pencil/>Edit customer</button><button className="button danger" onClick={()=>setDeleting(true)}><Trash2/>Delete customer</button></div></div><div className="two-col"><Panel title="Customer profile"><div className="facts"><div><span>Tier</span><b>{customer.tier}</b></div><div><span>Payment terms</span><b>{customer.paymentTerms} days</b></div><div><span>Contact person</span><b>{customer.contactPerson||'Not added'}</b></div><div><span>Email</span><b>{customer.email||'Not added'}</b></div><div><span>Phone</span><b>{customer.phone?`${customer.countryCode} ${customer.phone}`:'Not added'}</b></div><div><span>GSTIN</span><b>{customer.gstin||'Not added'}</b></div><div><span>Billing address</span><b>{customer.billingAddress||'Not added'}</b></div><div><span>Shipping address</span><b>{customer.shippingAddress||'Not added'}</b></div></div></Panel><Panel title="Recent activity"><div className="customer-activity">{(customer.quotes??[]).map(q=><button key={q.id} onClick={()=>open('quote',q.id)}><FileCheck/><span><b>{q.number}</b><small>{label(q.stage)} · {money(q.total)}</small></span><ChevronRight/></button>)}{(customer.invoices??[]).map(i=><button key={i.id} onClick={()=>open('invoice',i.id)}><Receipt/><span><b>{i.number}</b><small>{label(i.state)} · {money(i.amount)}</small></span><ChevronRight/></button>)}</div></Panel></div>{editing&&<CustomerModal actorRole={role} customer={customer} mutate={mutate} close={()=>setEditing(false)}/>} {deleting&&<Modal title="Delete customer" close={()=>setDeleting(false)} className="delete-customer-modal"><div className="delete-customer-confirm"><span className="delete-customer-icon"><AlertTriangle/></span><div className="delete-customer-copy"><span className="eyebrow">Remove from active customers</span><h2>Delete {customer.name}?</h2><p>This customer will no longer appear in customer lists or be available for new quotations.</p></div><div className="delete-customer-history"><ShieldCheck/><span><b>Your business history stays intact</b><small>Existing quotations, invoices, and audit records will be preserved.</small></span></div><div className="actions"><button className="button ghost" onClick={()=>setDeleting(false)}>Keep customer</button><button className="button danger" onClick={archive}><Trash2/>Delete customer</button></div></div></Modal>}</>}
-function CustomerPortal({data,mutate,reload,logout}:{data:Workspace;mutate:Function;reload:()=>Promise<void>;logout:()=>Promise<void>}){type PortalView='dashboard'|'invoices'|'quotations'|'orders'|'history';const[active,setActive]=useState<PortalView>('dashboard');const customer={name:data.user.name,email:data.user.email,organization:{name:data.organization?.name??'DealOS'}};const pendingInvoices=data.invoices.filter(i=>i.state!=='PAID');const pendingQuotes=data.quotes.filter(q=>['APPROVED','NEGOTIATION'].includes(q.stage));const portalNav:Array<[PortalView,string,typeof LayoutDashboard,number|null]>=[['dashboard','Dashboard',LayoutDashboard,null],['invoices','Invoices',FileText,pendingInvoices.length],['quotations','Quotations',FileCheck,pendingQuotes.length],['orders','Purchase Orders',ShoppingCart,null],['history','Purchase History',History,null]];const content=active==='dashboard'?<PortalDashboard customer={customer} invoices={data.invoices} quotes={data.quotes}/>:active==='invoices'?<PortalInvoices invoices={data.invoices} mutate={mutate}/>:active==='quotations'?<PortalQuotations quotes={data.quotes} mutate={mutate}/>:active==='orders'?<PortalOrders quotes={data.quotes}/>:<PortalHistory invoices={data.invoices} quotes={data.quotes}/>;return <div className="customer-portal-shell"><header className="customer-portal-top"><button className="portal-menu" aria-label="Open portal menu"><Menu/></button><div className="brand"><span>D</span><strong>{customer.organization.name}</strong><small>Customer Portal</small></div><div className="header-actions"><button className="icon-button" onClick={reload} aria-label="Reload portal"><RefreshCw/></button><button className="icon-button" aria-label="Notifications"><Bell/>{pendingInvoices.length+pendingQuotes.length>0&&<em>{pendingInvoices.length+pendingQuotes.length}</em>}</button><div className="portal-user"><span>{customer.name[0]}</span><b>{customer.name}</b></div><button className="button ghost" onClick={logout}><LogOut/>Logout</button></div></header><div className="customer-portal-body"><aside className="customer-portal-nav">{portalNav.map(([id,text,Icon,badge])=><button key={id} className={active===id?'active':''} onClick={()=>setActive(id)}><Icon/><span>{text}</span>{Number(badge)>0&&<em>{badge}</em>}</button>)}</aside><div className="customer-portal-content">{content}</div></div></div>}
-function PortalDashboard({customer,invoices,quotes}:{customer:{name:string;email:string;organization:{name:string}};invoices:Invoice[];quotes:Quote[]}){const outstanding=invoices.reduce((s,i)=>s+Number(i.amount)-Number(i.paidAmount),0);return <><div className="portal-welcome"><div><h2>Welcome back, {customer.name}</h2><p>Manage invoices, quotations, orders, and purchase history from your portal.</p></div><span className="status active">Active</span></div><div className="metric-grid four portal-metrics"><Metric label="Total invoices" value={String(invoices.length)} note="Shared by the organization"/><Metric label="Pending action" value={String(invoices.filter(i=>i.state==='UNPAID').length+quotes.filter(q=>q.stage==='APPROVED').length)} note="Awaiting your response" tone="warn"/><Metric label="Outstanding balance" value={money(outstanding)} note="Accepted and unpaid"/><Metric label="Total quotations" value={String(quotes.length)} note="Pending and historical"/></div><Panel title="Account information"><div className="portal-account-grid"><div><span>Organization</span><b>{customer.organization.name}</b></div><div><span>Your name</span><b>{customer.name}</b></div><div><span>Email</span><b>{customer.email}</b></div><div><span>Account status</span><b className="good">Active</b></div></div></Panel></>}
-function PortalInvoices({invoices,mutate}:{invoices:Invoice[];mutate:Function}){const[tab,setTab]=useState<'pending'|'due'|'history'>('pending');const[requesting,setRequesting]=useState<Invoice|null>(null);const filtered=invoices.filter(i=>tab==='history'?i.state==='PAID':tab==='due'?['UNPAID','PARTIAL'].includes(i.state):i.state==='UNPAID');return <><PortalSectionTitle title="Invoices" note="View invoices and request billing-date changes. Finance records payments after settlement." tabs={[['pending','Pending'],['due','Due'],['history','History']]} active={tab} setActive={setTab}/><div className="portal-list">{filtered.length?filtered.map(i=><article key={i.id}><div><span className="status warning">{label(i.state)}</span><h3>{i.number}</h3><p>{i.customer} · Due {date(i.dueAt)}</p></div><strong>{money(i.amount)}</strong><div className="actions"><a className="button ghost" href={`/api/v1/invoices/${i.id}/pdf`} download><Download/>Download PDF</a><button className="button primary" disabled={i.state==='PAID'} onClick={()=>setRequesting(i)}><CalendarClock/>Request date</button></div></article>):<Empty text="No invoices in this category."/>}</div>{requesting&&<Modal title="Request due date change" close={()=>setRequesting(null)}><form className="form" onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget);mutate(`/portal/invoices/${requesting.id}/request-change`,{requestedDate:f.get('date'),message:f.get('message')},'POST','Request sent');setRequesting(null)}}><label>Requested date<input name="date" type="date" required/></label><label>Reason<textarea name="message" required placeholder="Tell the finance team why you need a change."/></label><button className="button primary">Submit request</button></form></Modal>}</>}
-function PortalQuotations({quotes,mutate}:{quotes:Quote[];mutate:Function}){const[tab,setTab]=useState<'pending'|'history'>('pending');const[declining,setDeclining]=useState<Quote|null>(null);const filtered=quotes.filter(q=>tab==='pending'?['APPROVED','NEGOTIATION'].includes(q.stage):['CONFIRMED','REJECTED'].includes(q.stage));return <><PortalSectionTitle title="Quotations" note="Review and respond to quotations." tabs={[['pending','Pending'],['history','History']]} active={tab} setActive={setTab}/><div className="portal-list">{filtered.length?filtered.map(q=><article key={q.id}><div><span className="status warning">{label(q.stage)}</span><h3>{q.number}</h3><p>{q.lines.length} item(s) · Version {q.version}</p></div><strong>{money(q.total)}</strong><div className="actions"><button className="button ghost" onClick={()=>setDeclining(q)}><ThumbsDown/>Decline</button><button className="button primary" disabled={q.stage!=='APPROVED'} onClick={()=>mutate(`/portal/quotations/${q.id}/confirm`,{},'POST','Quotation confirmed')}>Accept quotation</button></div></article>):<Empty text="No quotations in this category."/>}</div>{declining&&<Modal title={`Decline ${declining.number}`} close={()=>setDeclining(null)}><form className="form" onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget);mutate(`/portal/quotations/${declining.id}/message`,{message:`Declined: ${f.get('reason')}`},'POST','Decline note sent');setDeclining(null)}}><label>Reason<textarea name="reason" required placeholder="Share the reason for declining."/></label><button className="button danger">Send decline note</button></form></Modal>}</>}
-function PortalOrders({quotes}:{quotes:Quote[]}){const orders=quotes.filter(q=>q.stage==='CONFIRMED');return <><PortalSectionTitle title="Purchase Orders" note="Confirmed quotations converted into orders."/><div className="portal-list">{orders.length?orders.map(q=><article key={q.id}><div><span className="status active">Confirmed</span><h3>SO-{q.number.replace(/^Q-/,'')}</h3><p>{q.customer} · {q.lines.length} line(s)</p></div><strong>{money(q.total)}</strong></article>):<Empty text="No purchase orders yet."/>}</div></>}
-function PortalHistory({invoices,quotes}:{invoices:Invoice[];quotes:Quote[]}){return <><PortalSectionTitle title="Purchase History" note="A compact history of invoices and completed quotations."/><div className="customer-activity history-list">{invoices.map(i=><button key={i.id}><Receipt/><span><b>{i.number}</b><small>{label(i.state)} · {money(i.amount)}</small></span></button>)}{quotes.filter(q=>q.stage==='CONFIRMED').map(q=><button key={q.id}><FileCheck/><span><b>{q.number}</b><small>{money(q.total)}</small></span></button>)}</div></>}
-function PortalSectionTitle({title:txt,note,tabs,active,setActive}:{title:string;note:string;tabs?:Array<[string,string]>;active?:string;setActive?:(v:any)=>void}){return <div className="portal-section-title"><div><h2>{txt}</h2><p>{note}</p></div>{tabs&&<div className="filter-row">{tabs.map(([id,text])=><button key={id} className={`chip ${active===id?'active':''}`} onClick={()=>setActive?.(id)}>{text}</button>)}</div>}</div>}
-
-type CustomerPortalView='requests'|'quotations'|'invoices'|'messages'|'profile';
-function CustomerPortalV2({data,mutate,reload,logout}:{data:Workspace;mutate:Function;reload:()=>Promise<void>;logout:()=>Promise<void>}){const[active,setActive]=useState<CustomerPortalView>('quotations');useEffect(()=>{const sync=()=>{if(document.visibilityState==='visible')void reload()};const timer=window.setInterval(sync,8000);document.addEventListener('visibilitychange',sync);return()=>{window.clearInterval(timer);document.removeEventListener('visibilitychange',sync)}},[reload]);const pendingQuotes=data.quotes.filter(q=>['SENT','NEGOTIATION'].includes(q.stage)).length;const openInvoices=data.invoices.filter(i=>i.state!=='PAID').length;const messages=data.quotes.reduce((sum,q)=>sum+q.negotiation.length,0);const tabs:Array<[CustomerPortalView,string,ReactNode,number]>=[['requests','Request a quote',<Inbox/>,0],['quotations','My quotations',<FileCheck/>,pendingQuotes],['invoices','Invoices',<Receipt/>,openInvoices],['messages','Messages',<MessageSquare/>,messages],['profile','Profile',<UserRound/>,0]];const heading=active==='requests'?'Request a quotation':active==='quotations'?'Review your quotations':active==='invoices'?'Your invoices':active==='messages'?'Commercial conversation':'Your portal profile';const intro=active==='requests'?'Describe what you need. Your assigned representative will review it before anything is shared back.':active==='quotations'?'Review terms, request a change, or accept the latest approved quotation.':active==='invoices'?'Every invoice shared with your invited email appears here automatically.':active==='messages'?'All quotation comments and negotiation updates stay synchronized here.':'This verified identity controls which documents you can access.';return <div className="deal-room"><header className="deal-room-header"><div className="deal-room-brand"><Brand/><span>Customer portal</span></div><div className="deal-room-user"><span>{data.user.name.slice(0,1).toUpperCase()}</span><div><b>{data.user.name}</b><small>{data.user.email}</small></div><button className="icon-button" onClick={()=>void reload()} aria-label="Refresh customer portal"><RefreshCw/></button><button className="icon-button" onClick={logout} aria-label="Sign out"><LogOut/></button></div></header><nav className="deal-room-tabs" aria-label="Customer portal">{tabs.map(([id,text,icon,count])=><button key={id} className={active===id?'active':''} onClick={()=>setActive(id)}>{icon}<span>{text}</span>{count>0&&<em>{count}</em>}</button>)}</nav><main className="deal-room-main"><div className="deal-room-intro"><div><span className="eyebrow">Secure deal room</span><h1>{heading}</h1><p>{intro}</p></div><span className="portal-sync"><i/>Live sync</span></div>{active==='requests'?<PortalRequests/>:active==='quotations'?<CustomerQuotationRoom quotes={data.quotes} mutate={mutate}/>:active==='invoices'?<ProfessionalCustomerInvoiceRoom invoices={data.invoices} mutate={mutate} reload={reload}/>:active==='messages'?<CustomerMessages quotes={data.quotes}/>:<CustomerProfile data={data}/>}</main></div>}
-
-function CustomerInvoiceRoom({invoices,mutate}:{invoices:Invoice[];mutate:Function}){const[selectedId,setSelectedId]=useState(invoices[0]?.id??'');const[requestOpen,setRequestOpen]=useState(false);const invoice=invoices.find(i=>i.id===selectedId)??invoices[0];if(!invoice)return <div className="deal-room-empty"><Receipt/><h2>No invoices yet</h2><p>Invoices created for your invited email will appear here automatically.</p></div>;return <div className="quote-room-layout"><aside className="document-list">{invoices.map(item=><button key={item.id} className={item.id===invoice.id?'active':''} onClick={()=>setSelectedId(item.id)}><span><small>{item.number}</small><b>Due {date(item.dueAt)}</b></span><strong>{money(item.amount)}</strong><em>{label(item.state)}</em></button>)}</aside><section className="quotation-sheet invoice-sheet"><div className="quotation-sheet-head"><div><span className={`status ${invoice.state.toLowerCase()}`}>{label(invoice.state)}</span><h2>{invoice.number}</h2><p>Issued to {invoice.customer} · Due {date(invoice.dueAt)}</p></div><strong>{money(invoice.amount)}</strong></div><div className="quotation-lines"><table><thead><tr><th>Description</th><th>Qty</th><th>Net</th><th>Tax</th><th>Amount</th></tr></thead><tbody>{invoice.lines.map((line,index)=><tr key={`${line.description}-${index}`}><td><b>{line.description}</b><small>{line.cadence??'One-time'}</small></td><td>{line.quantity??1}</td><td>{money(line.net??line.amount)}</td><td>{money(line.tax??0)}</td><td>{money(line.amount)}</td></tr>)}</tbody></table></div><div className="invoice-summary"><span>Invoice total<b>{money(invoice.amount)}</b></span><span>Paid<b>{money(invoice.paidAmount)}</b></span><span>Outstanding<b>{money(Number(invoice.amount)-Number(invoice.paidAmount))}</b></span></div><div className="quotation-actions"><a className="button ghost" href={`/api/v1/invoices/${invoice.id}/pdf`} download><Download/>Download PDF</a><button className="button primary" disabled={invoice.state==='PAID'} onClick={()=>setRequestOpen(true)}><CalendarClock/>Request due-date change</button></div></section>{requestOpen&&<Modal title="Request due-date change" close={()=>setRequestOpen(false)}><form className="form" onSubmit={e=>{e.preventDefault();const form=new FormData(e.currentTarget);mutate(`/portal/invoices/${invoice.id}/request-change`,{requestedDate:form.get('date'),message:form.get('message')},'POST','Request sent');setRequestOpen(false)}}><label>Requested date<input name="date" type="date" required/></label><label>Reason<textarea name="message" required placeholder="Explain the requested change"/></label><button className="button primary">Submit request</button></form></Modal>}</div>}
-
-function CustomerQuoteRoom({quotes,mutate}:{quotes:Quote[];mutate:Function}){const[selectedId,setSelectedId]=useState(quotes[0]?.id??'');const[message,setMessage]=useState('');const[counter,setCounter]=useState(0);const[delivery,setDelivery]=useState('');useEffect(()=>{if(!quotes.some(q=>q.id===selectedId))setSelectedId(quotes[0]?.id??'')},[quotes,selectedId]);const quote=quotes.find(q=>q.id===selectedId);if(!quote)return <div className="deal-room-empty"><FileCheck/><h2>No quotations yet</h2><p>The latest quotation is being prepared or approved. It will appear here automatically after approval.</p></div>;const submit=()=>{const detail=[message.trim(),delivery?`Requested delivery date: ${delivery}`:''].filter(Boolean).join(' · ');mutate(`/portal/quotations/${quote.id}/message`,counter>0?{message:detail,counterDiscount:counter}:{message:detail},'POST',counter>0?'Counter proposal sent':'Request sent');setMessage('');setCounter(0);setDelivery('')};return <div className="quote-room-layout"><aside className="document-list">{quotes.map(item=><button key={item.id} className={item.id===quote.id?'active':''} onClick={()=>setSelectedId(item.id)}><span><small>{item.number}</small><b>{item.customer}</b></span><strong>{money(item.total)}</strong><em>{label(item.stage)}</em></button>)}</aside><section className="quotation-sheet"><div className="quotation-sheet-head"><div><span className={`status ${quote.stage.toLowerCase()}`}>{label(quote.stage)}</span><h2>{quote.number}</h2><p>Revision {quote.revisionNumber??quote.version} · Shared by {quote.customer}</p></div><strong>{money(quote.total)}</strong></div><div className="quotation-lines"><table><thead><tr><th>Line</th><th>Qty</th><th>Unit price</th><th>Line discount</th><th>Amount before order discount</th></tr></thead><tbody>{quote.lines.map(line=><tr key={line.id}><td><b>{line.product.name}</b><small>{line.product.description}</small></td><td>{line.quantity}</td><td>{money(line.unitPrice)}</td><td>{line.discount}%</td><td>{money(Number(line.unitPrice)*line.quantity*(1-Number(line.discount)/100))}</td></tr>)}</tbody></table></div>{Number(quote.orderDiscount)>0&&<div className="portal-order-discount"><span>Negotiated order discount<small>Applied after all line discounts</small></span><b>{quote.orderDiscount}%</b></div>}<div className="negotiation-grid"><label>Your comment<textarea value={message} onChange={e=>setMessage(e.target.value)} placeholder="Ask about a line or explain the requested change"/></label><label>Counter order discount %<input type="number" min="0" max="100" value={counter} onChange={e=>setCounter(Number(e.target.value))}/></label><label>Requested delivery date<input type="date" value={delivery} onChange={e=>setDelivery(e.target.value)}/></label></div><div className="quotation-actions"><button className="button ghost" disabled={!message.trim()&&!delivery} onClick={submit}><Send/>Submit request</button><button className="button primary accept-button" disabled={quote.stage!=='APPROVED'} onClick={()=>mutate(`/portal/quotations/${quote.id}/confirm`,{},'POST','Quotation accepted')}><Check/>Accept quotation</button></div>{quote.stage!=='APPROVED'&&<div className="approval-note"><ShieldCheck/><span><b>Approval in progress</b>Acceptance becomes available when the latest terms are approved and re-shared.</span></div>}{quote.negotiation.length>0&&<div className="conversation-strip"><h3>Conversation</h3>{quote.negotiation.map(item=><div key={item.id}><span>{item.author.slice(0,1)}</span><p><b>{item.author}</b>{item.message}<small>{date(item.createdAt)}{item.counterDiscount?` · ${item.counterDiscount}% proposed order discount`:''}</small></p></div>)}</div>}</section></div>}
-
-type PortalPaymentState={invoice:Invoice;status:'processing'|'success'|'error';error?:string}|null;
-function ProfessionalCustomerInvoiceRoom({invoices,mutate,reload}:{invoices:Invoice[];mutate:Function;reload:()=>Promise<void>}){
-  const[selectedId,setSelectedId]=useState(invoices[0]?.id??'');
-  const[requestOpen,setRequestOpen]=useState(false);
-  const[payment,setPayment]=useState<PortalPaymentState>(null);
-  useEffect(()=>{if(!invoices.some(invoice=>invoice.id===selectedId))setSelectedId(invoices[0]?.id??'')},[invoices,selectedId]);
-  const invoice=invoices.find(item=>item.id===selectedId)??invoices[0];
-  if(!invoice)return <div className="deal-room-empty"><Receipt/><h2>No invoices yet</h2><p>Invoices created for your customer account will appear here automatically.</p></div>;
-  const outstanding=Math.max(0,Number(invoice.amount)-Number(invoice.paidAmount));
-  const pay=async()=>{
-    setPayment({invoice,status:'processing'});
-    try{
-      await payInvoiceWithRazorpay(invoice.id);
-      window.localStorage.setItem('dealos.invoice.updated',String(Date.now()));
+const readOnlyAccessModules = [
+  ["dashboard", "Overview"],
+  ["quotations", "Quotations"],
+  ["approvals", "Approvals"],
+  ["fulfillment", "Fulfillment & stock"],
+  ["invoices", "Invoices"],
+  ["health", "Deal health"],
+  ["reports", "Reports"],
+  ["products", "Products"],
+  ["policies", "Rules"],
+] as const;
+type OrganizationMemberDetail = {
+  id: string;
+  name: string;
+  email: string;
+  loginId?: string;
+  role: string;
+  status: string;
+  membershipStatus: string;
+  accessRole: string;
+  moduleAccess: string[];
+  createdAt: string;
+  joinedAt: string;
+};
+function ReadOnlyAccessControl({
+  data,
+  reload,
+}: {
+  data: Workspace;
+  reload: () => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [selected, setSelected] = useState<string[]>(["dashboard"]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [credentials, setCredentials] = useState<{
+    loginId: string;
+    password: string;
+  } | null>(null);
+  const [member, setMember] = useState<OrganizationMemberDetail | null>(null);
+  const [detailBusy, setDetailBusy] = useState(false);
+  const create = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      setBusy(true);
+      setError("");
+      const result = await request<{
+        credentials: { loginId: string; password: string };
+      }>("/admin/users", {
+        method: "POST",
+        body: JSON.stringify({ name, modules: selected }),
+      });
+      setCredentials(result.credentials);
+      setName("");
+      setSelected(["dashboard"]);
       await reload();
-      setPayment({invoice:{...invoice,paidAmount:invoice.amount,state:'PAID'},status:'success'});
-    }catch(error){
-      setPayment({invoice,status:'error',error:error instanceof Error?error.message:'Payment could not be completed.'});
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create access");
+    } finally {
+      setBusy(false);
     }
   };
-  return <div className="invoice-portal-workspace">
-    <div className="invoice-portal-overview"><span><small>Invoices</small><b>{invoices.length}</b></span><span><small>Outstanding</small><b>{money(invoices.reduce((sum,item)=>sum+Math.max(0,Number(item.amount)-Number(item.paidAmount)),0))}</b></span><span><small>Account</small><b>{invoice.customer}</b></span></div>
-    <div className="quote-room-layout invoice-room-layout">
-      <aside className="document-list invoice-document-list"><div className="document-list-head"><span>Invoice inbox</span><strong>{invoices.length}</strong></div>{invoices.map(item=><button key={item.id} className={item.id===invoice.id?'active':''} onClick={()=>setSelectedId(item.id)}><span><small>{item.number}</small><b>Due {date(item.dueAt)}</b><em className={item.state.toLowerCase()}>{label(item.state)}</em></span><strong>{money(item.amount)}</strong></button>)}</aside>
-      <section className="quotation-sheet invoice-sheet enhanced-invoice-sheet">
-        <div className="quotation-sheet-head"><div><span className={`status ${invoice.state.toLowerCase()}`}>{label(invoice.state)}</span><h2>{invoice.number}</h2><p>Issued to {invoice.customer} · Due {date(invoice.dueAt)}</p></div><strong>{money(invoice.amount)}</strong></div>
-        <div className="invoice-meta-strip"><span><small>Customer</small><b>{invoice.customer}</b></span><span><small>Due date</small><b>{date(invoice.dueAt)}</b></span><span><small>Payment status</small><b>{label(invoice.state)}</b></span></div>
-        <div className="quotation-lines invoice-lines-card"><table><thead><tr><th>Description</th><th>Qty</th><th>Net</th><th>Tax</th><th>Amount</th></tr></thead><tbody>{invoice.lines.map((line,index)=><tr key={`${line.description}-${index}`}><td><b>{line.description}</b><small>{line.cadence??'One-time'}</small></td><td>{line.quantity??1}</td><td>{money(line.net??line.amount)}</td><td>{money(line.tax??0)}</td><td>{money(line.amount)}</td></tr>)}</tbody></table>{!invoice.lines.length&&<div className="invoice-lines-empty">No item breakdown is available for this invoice.</div>}</div>
-        <div className="invoice-summary"><span>Invoice total<b>{money(invoice.amount)}</b></span><span>Paid<b>{money(invoice.paidAmount)}</b></span><span>Outstanding<b>{money(outstanding)}</b></span></div>
-        {invoice.state==='PAID'?<div className="invoice-paid-note"><Check/><span><b>Payment complete</b><small>This invoice is fully paid and synchronized with the business account.</small></span></div>:<div className="dummy-payment-note"><ShieldCheck/><span><b>Razorpay Test Mode</b><small>No real money is charged. The invoice updates only after server verification.</small></span></div>}
-        <div className="quotation-actions invoice-actions"><a className="button ghost" href={`/api/v1/invoices/${invoice.id}/pdf`} download><Download/>Download PDF</a><button className="button ghost" disabled={invoice.state==='PAID'} onClick={()=>setRequestOpen(true)}><CalendarClock/>Request due-date change</button><button className="button primary pay-now-button" disabled={invoice.state==='PAID'||payment?.status==='processing'} onClick={pay}><IndianRupee/>{invoice.state==='PAID'?'Paid':`Pay now · ${money(outstanding)}`}</button></div>
+  const viewMember = async (id: string) => {
+    try {
+      setDetailBusy(true);
+      setError("");
+      setMember(await request<OrganizationMemberDetail>(`/admin/users/${id}`));
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Could not load member details",
+      );
+    } finally {
+      setDetailBusy(false);
+    }
+  };
+  return (
+    <>
+      <div className="access-layout">
+        <Panel title={`${data.organization.name} · Add user access`}>
+          <form className="access-form" onSubmit={create}>
+            <label>
+              User name
+              <input
+                required
+                maxLength={120}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Jordan Davis"
+              />
+            </label>
+            <div>
+              <b>Visible modules</b>
+              <p className="muted">
+                Select exactly what this user can see. No role assignment is
+                required.
+              </p>
+              <div className="module-grid">
+                {readOnlyAccessModules.map(([id, text]) => (
+                  <label
+                    className={selected.includes(id) ? "selected" : ""}
+                    key={id}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(id)}
+                      onChange={() =>
+                        setSelected(
+                          selected.includes(id)
+                            ? selected.filter((x) => x !== id)
+                            : [...selected, id],
+                        )
+                      }
+                    />
+                    <span>
+                      <Check />
+                      {text}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            {error && <div className="error">{error}</div>}
+            <button
+              className="button primary"
+              disabled={busy || !selected.length}
+            >
+              <UserRound />{" "}
+              {busy ? "Generating…" : "Generate login ID & password"}
+            </button>
+          </form>
+          {credentials && (
+            <div className="credential-card" role="status">
+              <span className="eyebrow">COPY AND SHARE SECURELY</span>
+              <h3>Login credentials generated</h3>
+              <div>
+                <span>User ID</span>
+                <code>{credentials.loginId}</code>
+              </div>
+              <div>
+                <span>Temporary password</span>
+                <code>{credentials.password}</code>
+              </div>
+              <p>
+                These credentials are shown only in this response. The user can
+                sign in from the normal login page.
+              </p>
+            </div>
+          )}
+        </Panel>
+        <Panel title="Organization users">
+          <div className="user-access-list">
+            {data.users.map((user) => (
+              <button
+                type="button"
+                key={user.id}
+                onClick={() => viewMember(user.id)}
+                aria-label={`View details for ${user.name}`}
+              >
+                <span className="avatar">
+                  {user.name
+                    .split(" ")
+                    .map((p) => p[0])
+                    .join("")
+                    .slice(0, 2)}
+                </span>
+                <span>
+                  <b>{user.name}</b>
+                  <small>
+                    {user.loginId ?? "Organization admin"} ·{" "}
+                    {user.moduleAccess.length
+                      ? user.moduleAccess.map(label).join(", ")
+                      : "Full admin access"}
+                  </small>
+                </span>
+                <Status value={user.status} />
+                <ChevronRight />
+              </button>
+            ))}
+          </div>
+          {detailBusy && (
+            <div className="member-detail-loading">
+              <RefreshCw /> Loading member details…
+            </div>
+          )}
+        </Panel>
+      </div>
+      {member && (
+        <MemberDetails member={member} close={() => setMember(null)} />
+      )}
+    </>
+  );
+}
+function MemberDetails({
+  member,
+  close,
+}: {
+  member: OrganizationMemberDetail;
+  close: () => void;
+}) {
+  const modules =
+    member.role === "ADMIN"
+      ? ["All workspace modules"]
+      : member.moduleAccess.map(label);
+  return (
+    <Modal title="Organization member details" close={close}>
+      <div className="member-detail">
+        <div className="member-detail-identity">
+          <span className="avatar">
+            {member.name
+              .split(" ")
+              .map((p) => p[0])
+              .join("")
+              .slice(0, 2)}
+          </span>
+          <span>
+            <h2>{member.name}</h2>
+            <p>{member.email}</p>
+          </span>
+          <Status value={member.status} />
+        </div>
+        <dl>
+          <div>
+            <dt>Organization role</dt>
+            <dd>{label(member.role)}</dd>
+          </div>
+          <div>
+            <dt>Access level</dt>
+            <dd>{label(member.accessRole)}</dd>
+          </div>
+          <div>
+            <dt>Membership</dt>
+            <dd>
+              <Status value={member.membershipStatus} />
+            </dd>
+          </div>
+          <div>
+            <dt>User ID</dt>
+            <dd>{member.loginId ?? "Email sign-in"}</dd>
+          </div>
+          <div>
+            <dt>Joined organization</dt>
+            <dd>{date(member.joinedAt)}</dd>
+          </div>
+          <div>
+            <dt>Account created</dt>
+            <dd>{date(member.createdAt)}</dd>
+          </div>
+        </dl>
+        <div className="member-detail-modules">
+          <b>Visible modules</b>
+          <div>
+            {modules.length ? (
+              modules.map((module) => (
+                <span key={module}>
+                  <Check />
+                  {module}
+                </span>
+              ))
+            ) : (
+              <p className="muted">No workspace modules assigned.</p>
+            )}
+          </div>
+        </div>
+        <p className="member-detail-note">
+          <Eye /> Read-only account information for this organization.
+        </p>
+      </div>
+    </Modal>
+  );
+}
+function Customers({
+  data,
+  open,
+  mutate,
+}: {
+  data: Workspace;
+  open: (v: View, id?: string) => void;
+  mutate: Function;
+}) {
+  const [creating, setCreating] = useState(false);
+  const [query, setQuery] = useState("");
+  const [unassignedOnly, setUnassignedOnly] = useState(false);
+  const canManage = ["MANAGER", "ADMIN"].includes(data.user.role);
+  const activeCustomers = data.customers.filter((c) => c.active);
+  const filtered = activeCustomers
+    .filter((c) =>
+      [c.name, c.email ?? "", c.phone ?? "", c.contactPerson ?? ""]
+        .join(" ")
+        .toLowerCase()
+        .includes(query.toLowerCase()),
+    )
+    .filter(
+      (c) => !unassignedOnly || !c.primaryTeam || !c.primaryRepresentative,
+    );
+  return (
+    <>
+      <div className="toolbar customer-toolbar">
+        <p className="muted">
+          Manage account teams, representatives, commercial profiles, and
+          receivables from one workspace.
+        </p>
+        {canManage && (
+          <button className="button primary" onClick={() => setCreating(true)}>
+            <Plus />
+            Add Customer
+          </button>
+        )}
+      </div>
+      <div className="metric-grid three">
+        <Metric
+          label="Total Customers"
+          value={String(activeCustomers.length)}
+          note="Active customer records"
+        />
+        <Metric
+          label="Assigned accounts"
+          value={String(
+            activeCustomers.filter(
+              (c) => c.primaryTeam && c.primaryRepresentative,
+            ).length,
+          )}
+          note="Ready for representative quoting"
+        />
+        <Metric
+          label="Assignment required"
+          value={String(
+            activeCustomers.filter(
+              (c) => !c.primaryTeam || !c.primaryRepresentative,
+            ).length,
+          )}
+          note="Needs manager review"
+          tone="warn"
+        />
+      </div>
+      <Panel title="Customer records">
+        <div className="customer-list-controls">
+          <div className="search full-search">
+            <Search />
+            <input
+              placeholder="Search by name, email, phone, or contact person..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={unassignedOnly}
+              onChange={(event) => setUnassignedOnly(event.target.checked)}
+            />
+            Unassigned only
+          </label>
+        </div>
+        {filtered.length ? (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Primary rep</th>
+                  <th>Sales team</th>
+                  <th>Open quotations</th>
+                  <th>Last activity</th>
+                  <th>Status</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((c) => (
+                  <tr key={c.id}>
+                    <td>
+                      <b>{c.name}</b>
+                      <small>
+                        {c.customerType} · {c.region}
+                      </small>
+                    </td>
+                    <td>
+                      {c.primaryRepresentative?.name ?? (
+                        <span className="risk-pill">Unassigned</span>
+                      )}
+                    </td>
+                    <td>{c.primaryTeam?.name ?? "—"}</td>
+                    <td>
+                      {c.openQuotationCount ??
+                        data.quotes.filter(
+                          (q) =>
+                            q.customer === c.name &&
+                            !["CONFIRMED", "REJECTED"].includes(q.stage),
+                        ).length}
+                    </td>
+                    <td>{date(c.lastActivity ?? c.updatedAt)}</td>
+                    <td>
+                      <Status value="ACTIVE" />
+                    </td>
+                    <td>
+                      <button onClick={() => open("customer", c.id)}>
+                        Open <ChevronRight />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="customer-empty">
+            <UserRound />
+            <h3>No customers found</h3>
+            <p>
+              {unassignedOnly
+                ? "Every active customer is assigned."
+                : "Add your first customer to get started."}
+            </p>
+          </div>
+        )}
+      </Panel>
+      {canManage && creating && (
+        <CustomerModal
+          actorRole={data.user.role}
+          mutate={mutate}
+          close={() => setCreating(false)}
+        />
+      )}
+    </>
+  );
+}
+function CustomerDetail({
+  customer,
+  open,
+  mutate,
+  role,
+}: {
+  customer?: Customer;
+  open: (v: View, id?: string) => void;
+  mutate: Function;
+  role: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  if (!customer) return <Empty text="No customer selected." />;
+  const canManage = ["MANAGER", "ADMIN"].includes(role);
+  const archive = async () => {
+    const saved = await mutate(
+      `/customers/${customer.id}`,
+      { active: false },
+      "PATCH",
+      "Customer deleted",
+    );
+    if (saved) {
+      setDeleting(false);
+      open("customers");
+    }
+  };
+  return (
+    <>
+      <div className="detail-head">
+        <div>
+          <span className="status active">Active</span>
+          <h2>{customer.name}</h2>
+          <p>
+            {customer.customerType} · {customer.region} · {customer.currency}
+          </p>
+        </div>
+        {canManage && (
+          <div className="actions">
+            <button className="button ghost" onClick={() => setEditing(true)}>
+              <Pencil />
+              Edit customer
+            </button>
+            <button className="button danger" onClick={() => setDeleting(true)}>
+              <Trash2 />
+              Delete customer
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="two-col">
+        <Panel title="Customer profile">
+          <div className="facts">
+            <div>
+              <span>Tier</span>
+              <b>{customer.tier}</b>
+            </div>
+            <div>
+              <span>Payment terms</span>
+              <b>{customer.paymentTerms} days</b>
+            </div>
+            <div>
+              <span>Contact person</span>
+              <b>{customer.contactPerson || "Not added"}</b>
+            </div>
+            <div>
+              <span>Email</span>
+              <b>{customer.email || "Not added"}</b>
+            </div>
+            <div>
+              <span>Phone</span>
+              <b>
+                {customer.phone
+                  ? `${customer.countryCode} ${customer.phone}`
+                  : "Not added"}
+              </b>
+            </div>
+            <div>
+              <span>GSTIN</span>
+              <b>{customer.gstin || "Not added"}</b>
+            </div>
+            <div>
+              <span>Billing address</span>
+              <b>{customer.billingAddress || "Not added"}</b>
+            </div>
+            <div>
+              <span>Shipping address</span>
+              <b>{customer.shippingAddress || "Not added"}</b>
+            </div>
+          </div>
+        </Panel>
+        <Panel title="Recent activity">
+          <div className="customer-activity">
+            {(customer.quotes ?? []).map((q) => (
+              <button key={q.id} onClick={() => open("quote", q.id)}>
+                <FileCheck />
+                <span>
+                  <b>{q.number}</b>
+                  <small>
+                    {label(q.stage)} · {money(q.total)}
+                  </small>
+                </span>
+                <ChevronRight />
+              </button>
+            ))}
+            {(customer.invoices ?? []).map((i) => (
+              <button key={i.id} onClick={() => open("invoice", i.id)}>
+                <Receipt />
+                <span>
+                  <b>{i.number}</b>
+                  <small>
+                    {label(i.state)} · {money(i.amount)}
+                  </small>
+                </span>
+                <ChevronRight />
+              </button>
+            ))}
+          </div>
+        </Panel>
+      </div>
+      {canManage && editing && (
+        <CustomerModal
+          actorRole={role}
+          customer={customer}
+          mutate={mutate}
+          close={() => setEditing(false)}
+        />
+      )}{" "}
+      {canManage && deleting && (
+        <Modal
+          title="Delete customer"
+          close={() => setDeleting(false)}
+          className="delete-customer-modal"
+        >
+          <div className="delete-customer-confirm">
+            <span className="delete-customer-icon">
+              <AlertTriangle />
+            </span>
+            <div className="delete-customer-copy">
+              <span className="eyebrow">Remove from active customers</span>
+              <h2>Delete {customer.name}?</h2>
+              <p>
+                This customer will no longer appear in customer lists or be
+                available for new quotations.
+              </p>
+            </div>
+            <div className="delete-customer-history">
+              <ShieldCheck />
+              <span>
+                <b>Your business history stays intact</b>
+                <small>
+                  Existing quotations, invoices, and audit records will be
+                  preserved.
+                </small>
+              </span>
+            </div>
+            <div className="actions">
+              <button
+                className="button ghost"
+                onClick={() => setDeleting(false)}
+              >
+                Keep customer
+              </button>
+              <button className="button danger" onClick={archive}>
+                <Trash2 />
+                Delete customer
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+function CustomerPortal({
+  data,
+  mutate,
+  reload,
+  logout,
+}: {
+  data: Workspace;
+  mutate: Function;
+  reload: () => Promise<void>;
+  logout: () => Promise<void>;
+}) {
+  type PortalView =
+    "dashboard" | "invoices" | "quotations" | "orders" | "history";
+  const [active, setActive] = useState<PortalView>("dashboard");
+  const customer = {
+    name: data.user.name,
+    email: data.user.email,
+    organization: { name: data.organization?.name ?? "DealOS" },
+  };
+  const pendingInvoices = data.invoices.filter((i) => i.state !== "PAID");
+  const pendingQuotes = data.quotes.filter((q) =>
+    ["APPROVED", "NEGOTIATION"].includes(q.stage),
+  );
+  const portalNav: Array<
+    [PortalView, string, typeof LayoutDashboard, number | null]
+  > = [
+    ["dashboard", "Dashboard", LayoutDashboard, null],
+    ["invoices", "Invoices", FileText, pendingInvoices.length],
+    ["quotations", "Quotations", FileCheck, pendingQuotes.length],
+    ["orders", "Purchase Orders", ShoppingCart, null],
+    ["history", "Purchase History", History, null],
+  ];
+  const content =
+    active === "dashboard" ? (
+      <PortalDashboard
+        customer={customer}
+        invoices={data.invoices}
+        quotes={data.quotes}
+      />
+    ) : active === "invoices" ? (
+      <PortalInvoices invoices={data.invoices} mutate={mutate} />
+    ) : active === "quotations" ? (
+      <PortalQuotations quotes={data.quotes} mutate={mutate} />
+    ) : active === "orders" ? (
+      <PortalOrders quotes={data.quotes} />
+    ) : (
+      <PortalHistory invoices={data.invoices} quotes={data.quotes} />
+    );
+  return (
+    <div className="customer-portal-shell">
+      <header className="customer-portal-top">
+        <button className="portal-menu" aria-label="Open portal menu">
+          <Menu />
+        </button>
+        <div className="brand">
+          <span>D</span>
+          <strong>{customer.organization.name}</strong>
+          <small>Customer Portal</small>
+        </div>
+        <div className="header-actions">
+          <button
+            className="icon-button"
+            onClick={reload}
+            aria-label="Reload portal"
+          >
+            <RefreshCw />
+          </button>
+          <button className="icon-button" aria-label="Notifications">
+            <Bell />
+            {pendingInvoices.length + pendingQuotes.length > 0 && (
+              <em>{pendingInvoices.length + pendingQuotes.length}</em>
+            )}
+          </button>
+          <div className="portal-user">
+            <span>{customer.name[0]}</span>
+            <b>{customer.name}</b>
+          </div>
+          <button className="button ghost" onClick={logout}>
+            <LogOut />
+            Logout
+          </button>
+        </div>
+      </header>
+      <div className="customer-portal-body">
+        <aside className="customer-portal-nav">
+          {portalNav.map(([id, text, Icon, badge]) => (
+            <button
+              key={id}
+              className={active === id ? "active" : ""}
+              onClick={() => setActive(id)}
+            >
+              <Icon />
+              <span>{text}</span>
+              {Number(badge) > 0 && <em>{badge}</em>}
+            </button>
+          ))}
+        </aside>
+        <div className="customer-portal-content">{content}</div>
+      </div>
+    </div>
+  );
+}
+function PortalDashboard({
+  customer,
+  invoices,
+  quotes,
+}: {
+  customer: { name: string; email: string; organization: { name: string } };
+  invoices: Invoice[];
+  quotes: Quote[];
+}) {
+  const outstanding = invoices.reduce(
+    (s, i) => s + Number(i.amount) - Number(i.paidAmount),
+    0,
+  );
+  return (
+    <>
+      <div className="portal-welcome">
+        <div>
+          <h2>Welcome back, {customer.name}</h2>
+          <p>
+            Manage invoices, quotations, orders, and purchase history from your
+            portal.
+          </p>
+        </div>
+        <span className="status active">Active</span>
+      </div>
+      <div className="metric-grid four portal-metrics">
+        <Metric
+          label="Total invoices"
+          value={String(invoices.length)}
+          note="Shared by the organization"
+        />
+        <Metric
+          label="Pending action"
+          value={String(
+            invoices.filter((i) => i.state === "UNPAID").length +
+              quotes.filter((q) => q.stage === "APPROVED").length,
+          )}
+          note="Awaiting your response"
+          tone="warn"
+        />
+        <Metric
+          label="Outstanding balance"
+          value={money(outstanding)}
+          note="Accepted and unpaid"
+        />
+        <Metric
+          label="Total quotations"
+          value={String(quotes.length)}
+          note="Pending and historical"
+        />
+      </div>
+      <Panel title="Account information">
+        <div className="portal-account-grid">
+          <div>
+            <span>Organization</span>
+            <b>{customer.organization.name}</b>
+          </div>
+          <div>
+            <span>Your name</span>
+            <b>{customer.name}</b>
+          </div>
+          <div>
+            <span>Email</span>
+            <b>{customer.email}</b>
+          </div>
+          <div>
+            <span>Account status</span>
+            <b className="good">Active</b>
+          </div>
+        </div>
+      </Panel>
+    </>
+  );
+}
+function PortalInvoices({
+  invoices,
+  mutate,
+}: {
+  invoices: Invoice[];
+  mutate: Function;
+}) {
+  const [tab, setTab] = useState<"pending" | "due" | "history">("pending");
+  const [requesting, setRequesting] = useState<Invoice | null>(null);
+  const filtered = invoices.filter((i) =>
+    tab === "history"
+      ? i.state === "PAID"
+      : tab === "due"
+        ? ["UNPAID", "PARTIAL"].includes(i.state)
+        : i.state === "UNPAID",
+  );
+  return (
+    <>
+      <PortalSectionTitle
+        title="Invoices"
+        note="View invoices and request billing-date changes. Finance records payments after settlement."
+        tabs={[
+          ["pending", "Pending"],
+          ["due", "Due"],
+          ["history", "History"],
+        ]}
+        active={tab}
+        setActive={setTab}
+      />
+      <div className="portal-list">
+        {filtered.length ? (
+          filtered.map((i) => (
+            <article key={i.id}>
+              <div>
+                <span className="status warning">{label(i.state)}</span>
+                <h3>{i.number}</h3>
+                <p>
+                  {i.customer} · Due {date(i.dueAt)}
+                </p>
+              </div>
+              <strong>{money(i.amount)}</strong>
+              <div className="actions">
+                <a
+                  className="button ghost"
+                  href={`/api/v1/invoices/${i.id}/pdf`}
+                  download
+                >
+                  <Download />
+                  Download PDF
+                </a>
+                <button
+                  className="button primary"
+                  disabled={i.state === "PAID"}
+                  onClick={() => setRequesting(i)}
+                >
+                  <CalendarClock />
+                  Request date
+                </button>
+              </div>
+            </article>
+          ))
+        ) : (
+          <Empty text="No invoices in this category." />
+        )}
+      </div>
+      {requesting && (
+        <Modal
+          title="Request due date change"
+          close={() => setRequesting(null)}
+        >
+          <form
+            className="form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const f = new FormData(e.currentTarget);
+              mutate(
+                `/portal/invoices/${requesting.id}/request-change`,
+                { requestedDate: f.get("date"), message: f.get("message") },
+                "POST",
+                "Request sent",
+              );
+              setRequesting(null);
+            }}
+          >
+            <label>
+              Requested date
+              <input name="date" type="date" required />
+            </label>
+            <label>
+              Reason
+              <textarea
+                name="message"
+                required
+                placeholder="Tell the finance team why you need a change."
+              />
+            </label>
+            <button className="button primary">Submit request</button>
+          </form>
+        </Modal>
+      )}
+    </>
+  );
+}
+function PortalQuotations({
+  quotes,
+  mutate,
+}: {
+  quotes: Quote[];
+  mutate: Function;
+}) {
+  const [tab, setTab] = useState<"pending" | "history">("pending");
+  const [declining, setDeclining] = useState<Quote | null>(null);
+  const filtered = quotes.filter((q) =>
+    tab === "pending"
+      ? ["APPROVED", "NEGOTIATION"].includes(q.stage)
+      : ["CONFIRMED", "REJECTED"].includes(q.stage),
+  );
+  return (
+    <>
+      <PortalSectionTitle
+        title="Quotations"
+        note="Review and respond to quotations."
+        tabs={[
+          ["pending", "Pending"],
+          ["history", "History"],
+        ]}
+        active={tab}
+        setActive={setTab}
+      />
+      <div className="portal-list">
+        {filtered.length ? (
+          filtered.map((q) => (
+            <article key={q.id}>
+              <div>
+                <span className="status warning">{label(q.stage)}</span>
+                <h3>{q.number}</h3>
+                <p>
+                  {q.lines.length} item(s) · Version {q.version}
+                </p>
+              </div>
+              <strong>{money(q.total)}</strong>
+              <div className="actions">
+                <button
+                  className="button ghost"
+                  onClick={() => setDeclining(q)}
+                >
+                  <ThumbsDown />
+                  Decline
+                </button>
+                <button
+                  className="button primary"
+                  disabled={q.stage !== "APPROVED"}
+                  onClick={() =>
+                    mutate(
+                      `/portal/quotations/${q.id}/confirm`,
+                      {},
+                      "POST",
+                      "Quotation confirmed",
+                    )
+                  }
+                >
+                  Accept quotation
+                </button>
+              </div>
+            </article>
+          ))
+        ) : (
+          <Empty text="No quotations in this category." />
+        )}
+      </div>
+      {declining && (
+        <Modal
+          title={`Decline ${declining.number}`}
+          close={() => setDeclining(null)}
+        >
+          <form
+            className="form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const f = new FormData(e.currentTarget);
+              mutate(
+                `/portal/quotations/${declining.id}/message`,
+                { message: `Declined: ${f.get("reason")}` },
+                "POST",
+                "Decline note sent",
+              );
+              setDeclining(null);
+            }}
+          >
+            <label>
+              Reason
+              <textarea
+                name="reason"
+                required
+                placeholder="Share the reason for declining."
+              />
+            </label>
+            <button className="button danger">Send decline note</button>
+          </form>
+        </Modal>
+      )}
+    </>
+  );
+}
+function PortalOrders({ quotes }: { quotes: Quote[] }) {
+  const orders = quotes.filter((q) => q.stage === "CONFIRMED");
+  return (
+    <>
+      <PortalSectionTitle
+        title="Purchase Orders"
+        note="Confirmed quotations converted into orders."
+      />
+      <div className="portal-list">
+        {orders.length ? (
+          orders.map((q) => (
+            <article key={q.id}>
+              <div>
+                <span className="status active">Confirmed</span>
+                <h3>SO-{q.number.replace(/^Q-/, "")}</h3>
+                <p>
+                  {q.customer} · {q.lines.length} line(s)
+                </p>
+              </div>
+              <strong>{money(q.total)}</strong>
+            </article>
+          ))
+        ) : (
+          <Empty text="No purchase orders yet." />
+        )}
+      </div>
+    </>
+  );
+}
+function PortalHistory({
+  invoices,
+  quotes,
+}: {
+  invoices: Invoice[];
+  quotes: Quote[];
+}) {
+  return (
+    <>
+      <PortalSectionTitle
+        title="Purchase History"
+        note="A compact history of invoices and completed quotations."
+      />
+      <div className="customer-activity history-list">
+        {invoices.map((i) => (
+          <button key={i.id}>
+            <Receipt />
+            <span>
+              <b>{i.number}</b>
+              <small>
+                {label(i.state)} · {money(i.amount)}
+              </small>
+            </span>
+          </button>
+        ))}
+        {quotes
+          .filter((q) => q.stage === "CONFIRMED")
+          .map((q) => (
+            <button key={q.id}>
+              <FileCheck />
+              <span>
+                <b>{q.number}</b>
+                <small>{money(q.total)}</small>
+              </span>
+            </button>
+          ))}
+      </div>
+    </>
+  );
+}
+function PortalSectionTitle({
+  title: txt,
+  note,
+  tabs,
+  active,
+  setActive,
+}: {
+  title: string;
+  note: string;
+  tabs?: Array<[string, string]>;
+  active?: string;
+  setActive?: (v: any) => void;
+}) {
+  return (
+    <div className="portal-section-title">
+      <div>
+        <h2>{txt}</h2>
+        <p>{note}</p>
+      </div>
+      {tabs && (
+        <div className="filter-row">
+          {tabs.map(([id, text]) => (
+            <button
+              key={id}
+              className={`chip ${active === id ? "active" : ""}`}
+              onClick={() => setActive?.(id)}
+            >
+              {text}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type CustomerPortalView =
+  "requests" | "quotations" | "invoices" | "messages" | "profile";
+function CustomerPortalV2({
+  data,
+  mutate,
+  reload,
+  logout,
+}: {
+  data: Workspace;
+  mutate: Function;
+  reload: () => Promise<void>;
+  logout: () => Promise<void>;
+}) {
+  const [active, setActive] = useState<CustomerPortalView>("quotations");
+  useEffect(() => {
+    const sync = () => {
+      if (document.visibilityState === "visible") void reload();
+    };
+    const timer = window.setInterval(sync, 8000);
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, [reload]);
+  const pendingQuotes = data.quotes.filter((q) =>
+    ["SENT", "NEGOTIATION"].includes(q.stage),
+  ).length;
+  const openInvoices = data.invoices.filter((i) => i.state !== "PAID").length;
+  const messages = data.quotes.reduce(
+    (sum, q) => sum + q.negotiation.length,
+    0,
+  );
+  const tabs: Array<[CustomerPortalView, string, ReactNode, number]> = [
+    ["requests", "Request a quote", <Inbox />, 0],
+    ["quotations", "My quotations", <FileCheck />, pendingQuotes],
+    ["invoices", "Invoices", <Receipt />, openInvoices],
+    ["messages", "Messages", <MessageSquare />, messages],
+    ["profile", "Profile", <UserRound />, 0],
+  ];
+  const heading =
+    active === "requests"
+      ? "Request a quotation"
+      : active === "quotations"
+        ? "Review your quotations"
+        : active === "invoices"
+          ? "Your invoices"
+          : active === "messages"
+            ? "Commercial conversation"
+            : "Your portal profile";
+  const intro =
+    active === "requests"
+      ? "Describe what you need. Your assigned representative will review it before anything is shared back."
+      : active === "quotations"
+        ? "Review terms, request a change, or accept the latest approved quotation."
+        : active === "invoices"
+          ? "Every invoice shared with your invited email appears here automatically."
+          : active === "messages"
+            ? "All quotation comments and negotiation updates stay synchronized here."
+            : "This verified identity controls which documents you can access.";
+  return (
+    <div className="deal-room">
+      <header className="deal-room-header">
+        <div className="deal-room-brand">
+          <Brand />
+          <span>Customer portal</span>
+        </div>
+        <div className="deal-room-user">
+          <span>{data.user.name.slice(0, 1).toUpperCase()}</span>
+          <div>
+            <b>{data.user.name}</b>
+            <small>{data.user.email}</small>
+          </div>
+          <button
+            className="icon-button"
+            onClick={() => void reload()}
+            aria-label="Refresh customer portal"
+          >
+            <RefreshCw />
+          </button>
+          <button
+            className="icon-button"
+            onClick={logout}
+            aria-label="Sign out"
+          >
+            <LogOut />
+          </button>
+        </div>
+      </header>
+      <nav className="deal-room-tabs" aria-label="Customer portal">
+        {tabs.map(([id, text, icon, count]) => (
+          <button
+            key={id}
+            className={active === id ? "active" : ""}
+            onClick={() => setActive(id)}
+          >
+            {icon}
+            <span>{text}</span>
+            {count > 0 && <em>{count}</em>}
+          </button>
+        ))}
+      </nav>
+      <main className="deal-room-main">
+        <div className="deal-room-intro">
+          <div>
+            <span className="eyebrow">Secure deal room</span>
+            <h1>{heading}</h1>
+            <p>{intro}</p>
+          </div>
+          <span className="portal-sync">
+            <i />
+            Live sync
+          </span>
+        </div>
+        {active === "requests" ? (
+          <PortalRequests />
+        ) : active === "quotations" ? (
+          <CustomerQuotationRoom quotes={data.quotes} mutate={mutate} />
+        ) : active === "invoices" ? (
+          <ProfessionalCustomerInvoiceRoom
+            invoices={data.invoices}
+            mutate={mutate}
+            reload={reload}
+          />
+        ) : active === "messages" ? (
+          <CustomerMessages quotes={data.quotes} />
+        ) : (
+          <CustomerProfile data={data} />
+        )}
+      </main>
+    </div>
+  );
+}
+
+function CustomerInvoiceRoom({
+  invoices,
+  mutate,
+}: {
+  invoices: Invoice[];
+  mutate: Function;
+}) {
+  const [selectedId, setSelectedId] = useState(invoices[0]?.id ?? "");
+  const [requestOpen, setRequestOpen] = useState(false);
+  const invoice = invoices.find((i) => i.id === selectedId) ?? invoices[0];
+  if (!invoice)
+    return (
+      <div className="deal-room-empty">
+        <Receipt />
+        <h2>No invoices yet</h2>
+        <p>
+          Invoices created for your invited email will appear here
+          automatically.
+        </p>
+      </div>
+    );
+  return (
+    <div className="quote-room-layout">
+      <aside className="document-list">
+        {invoices.map((item) => (
+          <button
+            key={item.id}
+            className={item.id === invoice.id ? "active" : ""}
+            onClick={() => setSelectedId(item.id)}
+          >
+            <span>
+              <small>{item.number}</small>
+              <b>Due {date(item.dueAt)}</b>
+            </span>
+            <strong>{money(item.amount)}</strong>
+            <em>{label(item.state)}</em>
+          </button>
+        ))}
+      </aside>
+      <section className="quotation-sheet invoice-sheet">
+        <div className="quotation-sheet-head">
+          <div>
+            <span className={`status ${invoice.state.toLowerCase()}`}>
+              {label(invoice.state)}
+            </span>
+            <h2>{invoice.number}</h2>
+            <p>
+              Issued to {invoice.customer} · Due {date(invoice.dueAt)}
+            </p>
+          </div>
+          <strong>{money(invoice.amount)}</strong>
+        </div>
+        <div className="quotation-lines">
+          <table>
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th>Qty</th>
+                <th>Net</th>
+                <th>Tax</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoice.lines.map((line, index) => (
+                <tr key={`${line.description}-${index}`}>
+                  <td>
+                    <b>{line.description}</b>
+                    <small>{line.cadence ?? "One-time"}</small>
+                  </td>
+                  <td>{line.quantity ?? 1}</td>
+                  <td>{money(line.net ?? line.amount)}</td>
+                  <td>{money(line.tax ?? 0)}</td>
+                  <td>{money(line.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="invoice-summary">
+          <span>
+            Invoice total<b>{money(invoice.amount)}</b>
+          </span>
+          <span>
+            Paid<b>{money(invoice.paidAmount)}</b>
+          </span>
+          <span>
+            Outstanding
+            <b>{money(Number(invoice.amount) - Number(invoice.paidAmount))}</b>
+          </span>
+        </div>
+        <div className="quotation-actions">
+          <a
+            className="button ghost"
+            href={`/api/v1/invoices/${invoice.id}/pdf`}
+            download
+          >
+            <Download />
+            Download PDF
+          </a>
+          <button
+            className="button primary"
+            disabled={invoice.state === "PAID"}
+            onClick={() => setRequestOpen(true)}
+          >
+            <CalendarClock />
+            Request due-date change
+          </button>
+        </div>
+      </section>
+      {requestOpen && (
+        <Modal
+          title="Request due-date change"
+          close={() => setRequestOpen(false)}
+        >
+          <form
+            className="form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const form = new FormData(e.currentTarget);
+              mutate(
+                `/portal/invoices/${invoice.id}/request-change`,
+                {
+                  requestedDate: form.get("date"),
+                  message: form.get("message"),
+                },
+                "POST",
+                "Request sent",
+              );
+              setRequestOpen(false);
+            }}
+          >
+            <label>
+              Requested date
+              <input name="date" type="date" required />
+            </label>
+            <label>
+              Reason
+              <textarea
+                name="message"
+                required
+                placeholder="Explain the requested change"
+              />
+            </label>
+            <button className="button primary">Submit request</button>
+          </form>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function CustomerQuoteRoom({
+  quotes,
+  mutate,
+}: {
+  quotes: Quote[];
+  mutate: Function;
+}) {
+  const [selectedId, setSelectedId] = useState(quotes[0]?.id ?? "");
+  const [message, setMessage] = useState("");
+  const [counter, setCounter] = useState(0);
+  const [delivery, setDelivery] = useState("");
+  useEffect(() => {
+    if (!quotes.some((q) => q.id === selectedId))
+      setSelectedId(quotes[0]?.id ?? "");
+  }, [quotes, selectedId]);
+  const quote = quotes.find((q) => q.id === selectedId);
+  if (!quote)
+    return (
+      <div className="deal-room-empty">
+        <FileCheck />
+        <h2>No quotations yet</h2>
+        <p>
+          The latest quotation is being prepared or approved. It will appear
+          here automatically after approval.
+        </p>
+      </div>
+    );
+  const submit = () => {
+    const detail = [
+      message.trim(),
+      delivery ? `Requested delivery date: ${delivery}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    mutate(
+      `/portal/quotations/${quote.id}/message`,
+      counter > 0
+        ? { message: detail, counterDiscount: counter }
+        : { message: detail },
+      "POST",
+      counter > 0 ? "Counter proposal sent" : "Request sent",
+    );
+    setMessage("");
+    setCounter(0);
+    setDelivery("");
+  };
+  return (
+    <div className="quote-room-layout">
+      <aside className="document-list">
+        {quotes.map((item) => (
+          <button
+            key={item.id}
+            className={item.id === quote.id ? "active" : ""}
+            onClick={() => setSelectedId(item.id)}
+          >
+            <span>
+              <small>{item.number}</small>
+              <b>{item.customer}</b>
+            </span>
+            <strong>{money(item.total)}</strong>
+            <em>{label(item.stage)}</em>
+          </button>
+        ))}
+      </aside>
+      <section className="quotation-sheet">
+        <div className="quotation-sheet-head">
+          <div>
+            <span className={`status ${quote.stage.toLowerCase()}`}>
+              {label(quote.stage)}
+            </span>
+            <h2>{quote.number}</h2>
+            <p>
+              Revision {quote.revisionNumber ?? quote.version} · Shared by{" "}
+              {quote.customer}
+            </p>
+          </div>
+          <strong>{money(quote.total)}</strong>
+        </div>
+        <div className="quotation-lines">
+          <table>
+            <thead>
+              <tr>
+                <th>Line</th>
+                <th>Qty</th>
+                <th>Unit price</th>
+                <th>Line discount</th>
+                <th>Amount before order discount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {quote.lines.map((line) => (
+                <tr key={line.id}>
+                  <td>
+                    <b>{line.product.name}</b>
+                    <small>{line.product.description}</small>
+                  </td>
+                  <td>{line.quantity}</td>
+                  <td>{money(line.unitPrice)}</td>
+                  <td>{line.discount}%</td>
+                  <td>
+                    {money(
+                      Number(line.unitPrice) *
+                        line.quantity *
+                        (1 - Number(line.discount) / 100),
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {Number(quote.orderDiscount) > 0 && (
+          <div className="portal-order-discount">
+            <span>
+              Negotiated order discount
+              <small>Applied after all line discounts</small>
+            </span>
+            <b>{quote.orderDiscount}%</b>
+          </div>
+        )}
+        <div className="negotiation-grid">
+          <label>
+            Your comment
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Ask about a line or explain the requested change"
+            />
+          </label>
+          <label>
+            Counter order discount %
+            <input
+              type="number"
+              min="0"
+              max="100"
+              value={counter}
+              onChange={(e) => setCounter(Number(e.target.value))}
+            />
+          </label>
+          <label>
+            Requested delivery date
+            <input
+              type="date"
+              value={delivery}
+              onChange={(e) => setDelivery(e.target.value)}
+            />
+          </label>
+        </div>
+        <div className="quotation-actions">
+          <button
+            className="button ghost"
+            disabled={!message.trim() && !delivery}
+            onClick={submit}
+          >
+            <Send />
+            Submit request
+          </button>
+          <button
+            className="button primary accept-button"
+            disabled={quote.stage !== "APPROVED"}
+            onClick={() =>
+              mutate(
+                `/portal/quotations/${quote.id}/confirm`,
+                {},
+                "POST",
+                "Quotation accepted",
+              )
+            }
+          >
+            <Check />
+            Accept quotation
+          </button>
+        </div>
+        {quote.stage !== "APPROVED" && (
+          <div className="approval-note">
+            <ShieldCheck />
+            <span>
+              <b>Approval in progress</b>Acceptance becomes available when the
+              latest terms are approved and re-shared.
+            </span>
+          </div>
+        )}
+        {quote.negotiation.length > 0 && (
+          <div className="conversation-strip">
+            <h3>Conversation</h3>
+            {quote.negotiation.map((item) => (
+              <div key={item.id}>
+                <span>{item.author.slice(0, 1)}</span>
+                <p>
+                  <b>{item.author}</b>
+                  {item.message}
+                  <small>
+                    {date(item.createdAt)}
+                    {item.counterDiscount
+                      ? ` · ${item.counterDiscount}% proposed order discount`
+                      : ""}
+                  </small>
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
     </div>
-    {requestOpen&&<Modal title="Request due-date change" close={()=>setRequestOpen(false)}><form className="form" onSubmit={event=>{event.preventDefault();const form=new FormData(event.currentTarget);mutate(`/portal/invoices/${invoice.id}/request-change`,{requestedDate:form.get('date'),message:form.get('message')},'POST','Request sent');setRequestOpen(false)}}><label>Requested date<input name="date" type="date" required/></label><label>Reason<textarea name="message" required placeholder="Explain the requested change"/></label><button className="button primary">Submit request</button></form></Modal>}
-    {payment&&<Modal title={payment.status==='success'?'Payment complete':payment.status==='error'?'Payment issue':'Secure checkout'} close={()=>payment.status!=='processing'&&setPayment(null)} className="portal-payment-modal"><div className={`portal-payment-result ${payment.status}`}>{payment.status==='processing'?<><RefreshCw className="spin"/><h2>Opening Razorpay Test Mode</h2><p>Complete the secure checkout for {money(outstanding)}. The invoice changes only after verification.</p></>:payment.status==='success'?<><span className="payment-success-icon"><Check/></span><span className="eyebrow">Payment verified</span><h2>Successfully paid</h2><strong>{money(payment.invoice.amount)}</strong><p>{payment.invoice.number} is now marked Paid in both the customer portal and the invoice workspace.</p><button type="button" className="button primary" onClick={()=>setPayment(null)}>Done</button></>:<><AlertTriangle/><h2>Payment could not be completed</h2><p>{payment.error}</p><div className="actions"><button type="button" className="button ghost" onClick={()=>setPayment(null)}>Close</button><button type="button" className="button primary" onClick={pay}>Try again</button></div></>}</div></Modal>}
-  </div>;
+  );
 }
 
-function CustomerMessages({quotes}:{quotes:Quote[]}){const messages=quotes.flatMap(quote=>quote.negotiation.map(item=>({...item,quoteNumber:quote.number}))).sort((a,b)=>new Date(b.createdAt).getTime()-new Date(a.createdAt).getTime());return <section className="messages-panel">{messages.length?messages.map(item=><article key={item.id}><span>{item.author.slice(0,1).toUpperCase()}</span><div><small>{item.quoteNumber} · {date(item.createdAt)}</small><h3>{item.author}</h3><p>{item.message}</p>{item.counterDiscount&&<em>Counter proposal: {item.counterDiscount}%</em>}</div></article>):<div className="deal-room-empty"><MessageSquare/><h2>No messages yet</h2><p>Your quotation conversations will be collected here.</p></div>}</section>}
-
-function CustomerProfile({data}:{data:Workspace}){return <section className="profile-card"><div className="profile-avatar">{data.user.name.slice(0,1).toUpperCase()}</div><div><span className="status active"><Check/>Verified customer</span><h2>{data.user.name}</h2><p>{data.user.email}</p></div><dl><div><dt>Organization</dt><dd>{data.organization?.name}</dd></div><div><dt>Portal access</dt><dd>Customer verified</dd></div><div><dt>Quotations shared</dt><dd>{data.quotes.length}</dd></div><div><dt>Invoices shared</dt><dd>{data.invoices.length}</dd></div></dl><div className="approval-note"><ShieldCheck/><span><b>Your data is isolated</b>Only records assigned to this customer identity and organization are returned by the server.</span></div></section>}
-function CustomerModal({mutate,close,onSaved,customer,actorRole}:{mutate:Function;close:()=>void;onSaved?:()=>void;customer?:Customer;actorRole:string}){
-  const editing=Boolean(customer);const canProvision=!editing&&actorRole==='ADMIN';const[same,setSame]=useState(!customer?.shippingAddress||customer.shippingAddress===customer.billingAddress);const[temporaryPassword,setTemporaryPassword]=useState(()=>canProvision?generatedPassword():'');const[credentials,setCredentials]=useState<{email:string;password:string}|null>(null);const[copied,setCopied]=useState(false);
-  const submit=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);const billingAddress=String(f.get('billingAddress')??'');const email=String(f.get('email')??'')||null;const profile={customerType:f.get('customerType'),region:f.get('region'),name:f.get('name'),contactPerson:f.get('contactPerson')||null,email,countryCode:f.get('countryCode'),phone:f.get('phone')||null,gstin:f.get('gstin')||null,billingAddress:billingAddress||null,shippingAddress:same?billingAddress:String(f.get('shippingAddress')??'')||null,paymentTerms:Number(f.get('paymentTerms')),tier:f.get('tier'),currency:f.get('currency'),active:true,...(canProvision?{temporaryPassword}: {})};const saved=await mutate(editing?`/customers/${customer!.id}`:'/customers',profile,editing?'PATCH':'POST',editing?'Customer updated':'Customer and portal login created');if(saved){onSaved?.();if(canProvision&&email){setCredentials({email,password:temporaryPassword});return}close()}};
-  const copyCredentials=async()=>{if(!credentials)return;try{await navigator.clipboard.writeText(`Customer portal: ${window.location.origin}/customer/sign-in\nEmail: ${credentials.email}\nTemporary password: ${credentials.password}`);setCopied(true)}catch{setCopied(false)}};
-  if(credentials)return <div className="modal-wrap" onMouseDown={e=>e.target===e.currentTarget&&close()}><div className="modal customer-credential-modal"><div className="customer-login-ready"><ShieldCheck/><span className="eyebrow">CUSTOMER LOGIN READY</span><h2>Copy these credentials now</h2><p>The password is shown only in this window. Share it securely with the customer; DealOS stores only its hash.</p><div><span>Email</span><code>{credentials.email}</code></div><div><span>Temporary password</span><code>{credentials.password}</code></div><small>The customer can sign in at <b>/customer/sign-in</b>. Assignment is still required before RFQ submission or quotation creation.</small><button type="button" className="button ghost" onClick={copyCredentials}><Copy/>{copied?'Copied':'Copy login details'}</button><button type="button" className="button primary" onClick={close}>Done</button></div></div></div>;
-  return <div className="modal-wrap" onMouseDown={e=>e.target===e.currentTarget&&close()}><div className="modal large-modal"><div className="panel-title"><h3><UserRound/> {editing?'Edit Customer':'Add New Customer'}</h3><button aria-label={`Close ${editing?'edit':'new'} customer`} onClick={close}><X/></button></div><form className="form customer-form" onSubmit={submit}><label>Customer Type *<select name="customerType" defaultValue={customer?.customerType??'Business / Company'}><option>Business / Company</option><option>Individual</option></select></label><label>GSTIN (Optional)<input name="gstin" defaultValue={customer?.gstin??''} placeholder="e.g., 22AAAAA0000A1Z5" maxLength={15}/><small>Must be 15 characters, as per GST format.</small></label><label>Customer Region / Country<select name="region" defaultValue={customer?.region??'India'}><option>India</option><option>United States</option><option>United Kingdom</option><option>Singapore</option><option>United Arab Emirates</option></select><small>Affects phone country code and tax fields for this customer.</small></label><label>Tier<select name="tier" defaultValue={customer?.tier??'Gold'}>{customer?.tier==='Enterprise'&&<option>Enterprise</option>}<option>Gold</option><option>Silver</option><option>Bronze</option></select></label><label>Company Name *<input name="name" required defaultValue={customer?.name??''} placeholder="Enter company name"/></label><label>Contact Person<input name="contactPerson" defaultValue={customer?.contactPerson??''} placeholder="Enter contact person name"/></label><label>Email ID{canProvision?' *':''}<input name="email" type="email" required={canProvision} defaultValue={customer?.email??''} placeholder="contact@example.com"/><small>{canProvision?'This email becomes the customer portal login immediately.':'Used for portal identity after account assignment and invitation.'}</small></label><label>Phone Number *<div className="phone-row"><select name="countryCode" defaultValue={customer?.countryCode??'+91'}><option>+91</option><option>+1</option><option>+44</option><option>+65</option><option>+971</option></select><input name="phone" required defaultValue={customer?.phone??''} placeholder="e.g. 9876543210"/></div><small>Max 10 digits for selected country.</small></label>{canProvision&&<><div className="wide form-section-title">Customer portal login</div><label className="wide">Temporary password *<div className="password-inline"><input name="temporaryPassword" autoComplete="new-password" required minLength={12} maxLength={128} value={temporaryPassword} onChange={e=>setTemporaryPassword(e.target.value)}/><button className="button ghost" type="button" onClick={()=>setTemporaryPassword(generatedPassword())}><RefreshCw/>Generate another</button></div><small>Shown once after creation for secure manual sharing. Only a bcrypt hash is stored.</small></label></>}<div className="wide form-section-title">Address</div><label>Billing Address<textarea name="billingAddress" defaultValue={customer?.billingAddress??''} placeholder="Click to add billing address..."/></label><label>Shipping Address <span className="inline-check"><input type="checkbox" checked={same} onChange={e=>setSame(e.target.checked)}/> Same as billing</span><textarea name="shippingAddress" defaultValue={customer?.shippingAddress??''} placeholder="Click to add shipping address..." disabled={same}/></label><label>Payment Terms (Days)<select name="paymentTerms" defaultValue={String(customer?.paymentTerms??7)}><option value="7">7 Days</option><option value="15">15 Days</option><option value="30">30 Days</option><option value="45">45 Days</option><option value="60">60 Days</option></select></label><label>Currency<input name="currency" defaultValue={customer?.currency??'INR'} maxLength={3}/></label><div className="actions wide form-footer"><button type="button" className="button ghost" onClick={close}><X/>Cancel</button><button className="button primary"><Check/>{editing?'Save Changes':'Add Customer'}</button></div></form></div></div>
+type PortalPaymentState = {
+  invoice: Invoice;
+  status: "processing" | "success" | "error";
+  error?: string;
+} | null;
+function ProfessionalCustomerInvoiceRoom({
+  invoices,
+  mutate,
+  reload,
+}: {
+  invoices: Invoice[];
+  mutate: Function;
+  reload: () => Promise<void>;
+}) {
+  const [selectedId, setSelectedId] = useState(invoices[0]?.id ?? "");
+  const [requestOpen, setRequestOpen] = useState(false);
+  const [payment, setPayment] = useState<PortalPaymentState>(null);
+  useEffect(() => {
+    if (!invoices.some((invoice) => invoice.id === selectedId))
+      setSelectedId(invoices[0]?.id ?? "");
+  }, [invoices, selectedId]);
+  const invoice =
+    invoices.find((item) => item.id === selectedId) ?? invoices[0];
+  if (!invoice)
+    return (
+      <div className="deal-room-empty">
+        <Receipt />
+        <h2>No invoices yet</h2>
+        <p>
+          Invoices created for your customer account will appear here
+          automatically.
+        </p>
+      </div>
+    );
+  const outstanding = Math.max(
+    0,
+    Number(invoice.amount) - Number(invoice.paidAmount),
+  );
+  const pay = async () => {
+    setPayment({ invoice, status: "processing" });
+    try {
+      await payInvoiceWithRazorpay(invoice.id);
+      window.localStorage.setItem("dealos.invoice.updated", String(Date.now()));
+      await reload();
+      setPayment({
+        invoice: { ...invoice, paidAmount: invoice.amount, state: "PAID" },
+        status: "success",
+      });
+    } catch (error) {
+      setPayment({
+        invoice,
+        status: "error",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Payment could not be completed.",
+      });
+    }
+  };
+  return (
+    <div className="invoice-portal-workspace">
+      <div className="invoice-portal-overview">
+        <span>
+          <small>Invoices</small>
+          <b>{invoices.length}</b>
+        </span>
+        <span>
+          <small>Outstanding</small>
+          <b>
+            {money(
+              invoices.reduce(
+                (sum, item) =>
+                  sum +
+                  Math.max(0, Number(item.amount) - Number(item.paidAmount)),
+                0,
+              ),
+            )}
+          </b>
+        </span>
+        <span>
+          <small>Account</small>
+          <b>{invoice.customer}</b>
+        </span>
+      </div>
+      <div className="quote-room-layout invoice-room-layout">
+        <aside className="document-list invoice-document-list">
+          <div className="document-list-head">
+            <span>Invoice inbox</span>
+            <strong>{invoices.length}</strong>
+          </div>
+          {invoices.map((item) => (
+            <button
+              key={item.id}
+              className={item.id === invoice.id ? "active" : ""}
+              onClick={() => setSelectedId(item.id)}
+            >
+              <span>
+                <small>{item.number}</small>
+                <b>Due {date(item.dueAt)}</b>
+                <em className={item.state.toLowerCase()}>
+                  {label(item.state)}
+                </em>
+              </span>
+              <strong>{money(item.amount)}</strong>
+            </button>
+          ))}
+        </aside>
+        <section className="quotation-sheet invoice-sheet enhanced-invoice-sheet">
+          <div className="quotation-sheet-head">
+            <div>
+              <span className={`status ${invoice.state.toLowerCase()}`}>
+                {label(invoice.state)}
+              </span>
+              <h2>{invoice.number}</h2>
+              <p>
+                Issued to {invoice.customer} · Due {date(invoice.dueAt)}
+              </p>
+            </div>
+            <strong>{money(invoice.amount)}</strong>
+          </div>
+          <div className="invoice-meta-strip">
+            <span>
+              <small>Customer</small>
+              <b>{invoice.customer}</b>
+            </span>
+            <span>
+              <small>Due date</small>
+              <b>{date(invoice.dueAt)}</b>
+            </span>
+            <span>
+              <small>Payment status</small>
+              <b>{label(invoice.state)}</b>
+            </span>
+          </div>
+          <div className="quotation-lines invoice-lines-card">
+            <table>
+              <thead>
+                <tr>
+                  <th>Description</th>
+                  <th>Qty</th>
+                  <th>Net</th>
+                  <th>Tax</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invoice.lines.map((line, index) => (
+                  <tr key={`${line.description}-${index}`}>
+                    <td>
+                      <b>{line.description}</b>
+                      <small>{line.cadence ?? "One-time"}</small>
+                    </td>
+                    <td>{line.quantity ?? 1}</td>
+                    <td>{money(line.net ?? line.amount)}</td>
+                    <td>{money(line.tax ?? 0)}</td>
+                    <td>{money(line.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!invoice.lines.length && (
+              <div className="invoice-lines-empty">
+                No item breakdown is available for this invoice.
+              </div>
+            )}
+          </div>
+          <div className="invoice-summary">
+            <span>
+              Invoice total<b>{money(invoice.amount)}</b>
+            </span>
+            <span>
+              Paid<b>{money(invoice.paidAmount)}</b>
+            </span>
+            <span>
+              Outstanding<b>{money(outstanding)}</b>
+            </span>
+          </div>
+          {invoice.state === "PAID" ? (
+            <div className="invoice-paid-note">
+              <Check />
+              <span>
+                <b>Payment complete</b>
+                <small>
+                  This invoice is fully paid and synchronized with the business
+                  account.
+                </small>
+              </span>
+            </div>
+          ) : (
+            <div className="dummy-payment-note">
+              <ShieldCheck />
+              <span>
+                <b>Razorpay Test Mode</b>
+                <small>
+                  No real money is charged. The invoice updates only after
+                  server verification.
+                </small>
+              </span>
+            </div>
+          )}
+          <div className="quotation-actions invoice-actions">
+            <a
+              className="button ghost"
+              href={`/api/v1/invoices/${invoice.id}/pdf`}
+              download
+            >
+              <Download />
+              Download PDF
+            </a>
+            <button
+              className="button ghost"
+              disabled={invoice.state === "PAID"}
+              onClick={() => setRequestOpen(true)}
+            >
+              <CalendarClock />
+              Request due-date change
+            </button>
+            <button
+              className="button primary pay-now-button"
+              disabled={
+                invoice.state === "PAID" || payment?.status === "processing"
+              }
+              onClick={pay}
+            >
+              <IndianRupee />
+              {invoice.state === "PAID"
+                ? "Paid"
+                : `Pay now · ${money(outstanding)}`}
+            </button>
+          </div>
+        </section>
+      </div>
+      {requestOpen && (
+        <Modal
+          title="Request due-date change"
+          close={() => setRequestOpen(false)}
+        >
+          <form
+            className="form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              mutate(
+                `/portal/invoices/${invoice.id}/request-change`,
+                {
+                  requestedDate: form.get("date"),
+                  message: form.get("message"),
+                },
+                "POST",
+                "Request sent",
+              );
+              setRequestOpen(false);
+            }}
+          >
+            <label>
+              Requested date
+              <input name="date" type="date" required />
+            </label>
+            <label>
+              Reason
+              <textarea
+                name="message"
+                required
+                placeholder="Explain the requested change"
+              />
+            </label>
+            <button className="button primary">Submit request</button>
+          </form>
+        </Modal>
+      )}
+      {payment && (
+        <Modal
+          title={
+            payment.status === "success"
+              ? "Payment complete"
+              : payment.status === "error"
+                ? "Payment issue"
+                : "Secure checkout"
+          }
+          close={() => payment.status !== "processing" && setPayment(null)}
+          className="portal-payment-modal"
+        >
+          <div className={`portal-payment-result ${payment.status}`}>
+            {payment.status === "processing" ? (
+              <>
+                <RefreshCw className="spin" />
+                <h2>Opening Razorpay Test Mode</h2>
+                <p>
+                  Complete the secure checkout for {money(outstanding)}. The
+                  invoice changes only after verification.
+                </p>
+              </>
+            ) : payment.status === "success" ? (
+              <>
+                <span className="payment-success-icon">
+                  <Check />
+                </span>
+                <span className="eyebrow">Payment verified</span>
+                <h2>Successfully paid</h2>
+                <strong>{money(payment.invoice.amount)}</strong>
+                <p>
+                  {payment.invoice.number} is now marked Paid in both the
+                  customer portal and the invoice workspace.
+                </p>
+                <button
+                  type="button"
+                  className="button primary"
+                  onClick={() => setPayment(null)}
+                >
+                  Done
+                </button>
+              </>
+            ) : (
+              <>
+                <AlertTriangle />
+                <h2>Payment could not be completed</h2>
+                <p>{payment.error}</p>
+                <div className="actions">
+                  <button
+                    type="button"
+                    className="button ghost"
+                    onClick={() => setPayment(null)}
+                  >
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    className="button primary"
+                    onClick={pay}
+                  >
+                    Try again
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
 }
-function CreateProductModal({product,mutate,close}:{product?:Product;products?:Product[];mutate:Function;close:()=>void}){
-  const standardCategories=['Hardware','Services','Subscriptions'];
-  const editing=Boolean(product);
-  const initialCategory=product&&standardCategories.includes(product.category)?product.category:product?'Other':'Hardware';
-  const[name,setName]=useState(product?.name??'');
-  const[categoryChoice,setCategoryChoice]=useState(initialCategory);
-  const[customCategory,setCustomCategory]=useState(product&&initialCategory==='Other'?product.category:'');
-  const[unit,setUnit]=useState(product?.unit??'Piece');
-  const[sku,setSku]=useState(product?.sku??'');
-  const[skuEdited,setSkuEdited]=useState(editing);
-  const[priceIncludesTax,setPriceIncludesTax]=useState(false);
-  const[enteredPrice,setEnteredPrice]=useState<number|string>(product?Number(product.price):'');
-  const[purchaseCost,setPurchaseCost]=useState<number|string>(product?Number(product.cost):'');
-  const[taxRate,setTaxRate]=useState(product?Number(product.taxRate):18);
-  const[openingStock,setOpeningStock]=useState<number|string>('');
-  const[minAlertLevel,setMinAlertLevel]=useState<number|string>('');
-  const[maxCapacity,setMaxCapacity]=useState<number|string>('');
-  const[active,setActive]=useState(product?.active??true);
-  const[storeVisible,setStoreVisible]=useState(product?.storeVisible??true);
-  const[featured,setFeatured]=useState(product?.featured??false);
-  const skuSuffix=useMemo(()=>Math.random().toString(36).slice(2,6).toUpperCase(),[]);
-  const actualCategory=categoryChoice==='Other'?(customCategory.trim()||'Other'):categoryChoice;
-  const recurring=['Services','Subscriptions'].includes(categoryChoice);
-  const hasInventory=!recurring;
-  const suggestedSku=useMemo(()=>{const categoryCode=actualCategory.replace(/[^a-z0-9]/gi,'').slice(0,3).toUpperCase()||'ITM';const nameCode=name.trim().replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'').slice(0,14).toUpperCase()||'NEW';return `${categoryCode}-${nameCode}-${skuSuffix}`},[actualCategory,name,skuSuffix]);
-  useEffect(()=>{if(!skuEdited)setSku(suggestedSku)},[suggestedSku,skuEdited]);
-  const categoryDefaults:Record<string,string>={Hardware:'Piece',Services:'Hour',Subscriptions:'License',Other:'Unit'};
-  const selectCategory=(next:string)=>{setCategoryChoice(next);setUnit(categoryDefaults[next]??'Unit')};
-  const numericPrice=Number(enteredPrice)||0;
-  const taxablePrice=priceIncludesTax&&taxRate>0?numericPrice/(1+taxRate/100):numericPrice;
-  const numericCost=purchaseCost===''?Number.NaN:Number(purchaseCost);
-  const costError=Number.isFinite(numericCost)&&numericCost>=0&&numericCost<taxablePrice?'':'Purchase cost must be zero or more and lower than the taxable selling price.';
-  const taxAmount=priceIncludesTax?numericPrice-taxablePrice:taxablePrice*taxRate/100;
-  const customerPrice=taxablePrice+taxAmount;
-  const opening=openingStock===''?0:Math.max(0,Math.trunc(Number(openingStock)||0));
-  const lowStock=minAlertLevel===''?0:Math.max(0,Math.trunc(Number(minAlertLevel)||0));
-  const capacity=maxCapacity===''?null:Math.max(1,Math.trunc(Number(maxCapacity)||1));
-  const inventoryError=hasInventory&&capacity!==null&&capacity<opening?'Maximum capacity cannot be below opening stock.':'';
-  const canSubmit=numericPrice>0&&!costError&&!inventoryError&&(categoryChoice!=='Other'||customCategory.trim().length>=2);
-  const normalizeInteger=(value:number|string,setter:(value:number|string)=>void)=>setter(value===''?'':String(Math.max(0,Math.trunc(Number(value)||0))));
-  const itemLabel=categoryChoice==='Services'?'Service':categoryChoice==='Subscriptions'?'Subscription':'Product';
-  const submit=async(e:FormEvent<HTMLFormElement>)=>{
+
+function CustomerMessages({ quotes }: { quotes: Quote[] }) {
+  const messages = quotes
+    .flatMap((quote) =>
+      quote.negotiation.map((item) => ({ ...item, quoteNumber: quote.number })),
+    )
+    .sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+  return (
+    <section className="messages-panel">
+      {messages.length ? (
+        messages.map((item) => (
+          <article key={item.id}>
+            <span>{item.author.slice(0, 1).toUpperCase()}</span>
+            <div>
+              <small>
+                {item.quoteNumber} · {date(item.createdAt)}
+              </small>
+              <h3>{item.author}</h3>
+              <p>{item.message}</p>
+              {item.counterDiscount && (
+                <em>Counter proposal: {item.counterDiscount}%</em>
+              )}
+            </div>
+          </article>
+        ))
+      ) : (
+        <div className="deal-room-empty">
+          <MessageSquare />
+          <h2>No messages yet</h2>
+          <p>Your quotation conversations will be collected here.</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CustomerProfile({ data }: { data: Workspace }) {
+  return (
+    <section className="profile-card">
+      <div className="profile-avatar">
+        {data.user.name.slice(0, 1).toUpperCase()}
+      </div>
+      <div>
+        <span className="status active">
+          <Check />
+          Verified customer
+        </span>
+        <h2>{data.user.name}</h2>
+        <p>{data.user.email}</p>
+      </div>
+      <dl>
+        <div>
+          <dt>Organization</dt>
+          <dd>{data.organization?.name}</dd>
+        </div>
+        <div>
+          <dt>Portal access</dt>
+          <dd>Customer verified</dd>
+        </div>
+        <div>
+          <dt>Quotations shared</dt>
+          <dd>{data.quotes.length}</dd>
+        </div>
+        <div>
+          <dt>Invoices shared</dt>
+          <dd>{data.invoices.length}</dd>
+        </div>
+      </dl>
+      <div className="approval-note">
+        <ShieldCheck />
+        <span>
+          <b>Your data is isolated</b>Only records assigned to this customer
+          identity and organization are returned by the server.
+        </span>
+      </div>
+    </section>
+  );
+}
+function CustomerModal({
+  mutate,
+  close,
+  onSaved,
+  customer,
+  actorRole,
+}: {
+  mutate: Function;
+  close: () => void;
+  onSaved?: () => void;
+  customer?: Customer;
+  actorRole: string;
+}) {
+  const editing = Boolean(customer);
+  const canProvision = !editing && actorRole === "ADMIN";
+  const [same, setSame] = useState(
+    !customer?.shippingAddress ||
+      customer.shippingAddress === customer.billingAddress,
+  );
+  const [temporaryPassword, setTemporaryPassword] = useState(() =>
+    canProvision ? generatedPassword() : "",
+  );
+  const [credentials, setCredentials] = useState<{
+    email: string;
+    password: string;
+  } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if(!canSubmit)return;
-    const f=new FormData(e.currentTarget);
-    const common={name,sku:sku.trim()||undefined,category:actualCategory,description:f.get('description'),unit,brand:f.get('brand')||null,price:Number(taxablePrice.toFixed(2)),cost:Number(Number(numericCost).toFixed(2)),taxRate,recurring,cadence:recurring?f.get('cadence'):null,active,...(hasInventory?{storeVisible,featured}:{})};
-    const payload=editing?common:{...common,...(hasInventory?{openingStock:opening,minAlertLevel:lowStock,maxCapacity:capacity}:{})};
-    await mutate(product?`/products/${product.id}`:'/products',payload,product?'PATCH':'POST',product?`${itemLabel} updated`:`${itemLabel} added to catalog`);
+    const f = new FormData(e.currentTarget);
+    const billingAddress = String(f.get("billingAddress") ?? "");
+    const email = String(f.get("email") ?? "") || null;
+    const profile = {
+      customerType: f.get("customerType"),
+      region: f.get("region"),
+      name: f.get("name"),
+      contactPerson: f.get("contactPerson") || null,
+      email,
+      countryCode: f.get("countryCode"),
+      phone: f.get("phone") || null,
+      gstin: f.get("gstin") || null,
+      billingAddress: billingAddress || null,
+      shippingAddress: same
+        ? billingAddress
+        : String(f.get("shippingAddress") ?? "") || null,
+      paymentTerms: Number(f.get("paymentTerms")),
+      tier: f.get("tier"),
+      currency: f.get("currency"),
+      active: true,
+      ...(canProvision ? { temporaryPassword } : {}),
+    };
+    const saved = await mutate(
+      editing ? `/customers/${customer!.id}` : "/customers",
+      profile,
+      editing ? "PATCH" : "POST",
+      editing ? "Customer updated" : "Customer and portal login created",
+    );
+    if (saved) {
+      onSaved?.();
+      if (canProvision && email) {
+        setCredentials({ email, password: temporaryPassword });
+        return;
+      }
+      close();
+    }
+  };
+  const copyCredentials = async () => {
+    if (!credentials) return;
+    try {
+      await navigator.clipboard.writeText(
+        `Customer portal: ${window.location.origin}/customer/sign-in\nEmail: ${credentials.email}\nTemporary password: ${credentials.password}`,
+      );
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+  if (credentials)
+    return (
+      <div
+        className="modal-wrap"
+        onMouseDown={(e) => e.target === e.currentTarget && close()}
+      >
+        <div className="modal customer-credential-modal">
+          <div className="customer-login-ready">
+            <ShieldCheck />
+            <span className="eyebrow">CUSTOMER LOGIN READY</span>
+            <h2>Copy these credentials now</h2>
+            <p>
+              The password is shown only in this window. Share it securely with
+              the customer; DealOS stores only its hash.
+            </p>
+            <div>
+              <span>Email</span>
+              <code>{credentials.email}</code>
+            </div>
+            <div>
+              <span>Temporary password</span>
+              <code>{credentials.password}</code>
+            </div>
+            <small>
+              The customer can sign in at <b>/customer/sign-in</b>. Assignment
+              is still required before RFQ submission or quotation creation.
+            </small>
+            <button
+              type="button"
+              className="button ghost"
+              onClick={copyCredentials}
+            >
+              <Copy />
+              {copied ? "Copied" : "Copy login details"}
+            </button>
+            <button type="button" className="button primary" onClick={close}>
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  return (
+    <div
+      className="modal-wrap"
+      onMouseDown={(e) => e.target === e.currentTarget && close()}
+    >
+      <div className="modal large-modal">
+        <div className="panel-title">
+          <h3>
+            <UserRound /> {editing ? "Edit Customer" : "Add New Customer"}
+          </h3>
+          <button
+            aria-label={`Close ${editing ? "edit" : "new"} customer`}
+            onClick={close}
+          >
+            <X />
+          </button>
+        </div>
+        <form className="form customer-form" onSubmit={submit}>
+          <label>
+            Customer Type *
+            <select
+              name="customerType"
+              defaultValue={customer?.customerType ?? "Business / Company"}
+            >
+              <option>Business / Company</option>
+              <option>Individual</option>
+            </select>
+          </label>
+          <label>
+            GSTIN (Optional)
+            <input
+              name="gstin"
+              defaultValue={customer?.gstin ?? ""}
+              placeholder="e.g., 22AAAAA0000A1Z5"
+              maxLength={15}
+            />
+            <small>Must be 15 characters, as per GST format.</small>
+          </label>
+          <label>
+            Customer Region / Country
+            <select name="region" defaultValue={customer?.region ?? "India"}>
+              <option>India</option>
+              <option>United States</option>
+              <option>United Kingdom</option>
+              <option>Singapore</option>
+              <option>United Arab Emirates</option>
+            </select>
+            <small>
+              Affects phone country code and tax fields for this customer.
+            </small>
+          </label>
+          <label>
+            Tier
+            <select name="tier" defaultValue={customer?.tier ?? "Gold"}>
+              {customer?.tier === "Enterprise" && <option>Enterprise</option>}
+              <option>Gold</option>
+              <option>Silver</option>
+              <option>Bronze</option>
+            </select>
+          </label>
+          <label>
+            Company Name *
+            <input
+              name="name"
+              required
+              defaultValue={customer?.name ?? ""}
+              placeholder="Enter company name"
+            />
+          </label>
+          <label>
+            Contact Person
+            <input
+              name="contactPerson"
+              defaultValue={customer?.contactPerson ?? ""}
+              placeholder="Enter contact person name"
+            />
+          </label>
+          <label>
+            Email ID{canProvision ? " *" : ""}
+            <input
+              name="email"
+              type="email"
+              required={canProvision}
+              defaultValue={customer?.email ?? ""}
+              placeholder="contact@example.com"
+            />
+            <small>
+              {canProvision
+                ? "This email becomes the customer portal login immediately."
+                : "Used for portal identity after account assignment and invitation."}
+            </small>
+          </label>
+          <label>
+            Phone Number *
+            <div className="phone-row">
+              <select
+                name="countryCode"
+                defaultValue={customer?.countryCode ?? "+91"}
+              >
+                <option>+91</option>
+                <option>+1</option>
+                <option>+44</option>
+                <option>+65</option>
+                <option>+971</option>
+              </select>
+              <input
+                name="phone"
+                required
+                defaultValue={customer?.phone ?? ""}
+                placeholder="e.g. 9876543210"
+              />
+            </div>
+            <small>Max 10 digits for selected country.</small>
+          </label>
+          {canProvision && (
+            <>
+              <div className="wide form-section-title">
+                Customer portal login
+              </div>
+              <label className="wide">
+                Temporary password *
+                <div className="password-inline">
+                  <input
+                    name="temporaryPassword"
+                    autoComplete="new-password"
+                    required
+                    minLength={12}
+                    maxLength={128}
+                    value={temporaryPassword}
+                    onChange={(e) => setTemporaryPassword(e.target.value)}
+                  />
+                  <button
+                    className="button ghost"
+                    type="button"
+                    onClick={() => setTemporaryPassword(generatedPassword())}
+                  >
+                    <RefreshCw />
+                    Generate another
+                  </button>
+                </div>
+                <small>
+                  Shown once after creation for secure manual sharing. Only a
+                  bcrypt hash is stored.
+                </small>
+              </label>
+            </>
+          )}
+          <div className="wide form-section-title">Address</div>
+          <label>
+            Billing Address
+            <textarea
+              name="billingAddress"
+              defaultValue={customer?.billingAddress ?? ""}
+              placeholder="Click to add billing address..."
+            />
+          </label>
+          <label>
+            Shipping Address{" "}
+            <span className="inline-check">
+              <input
+                type="checkbox"
+                checked={same}
+                onChange={(e) => setSame(e.target.checked)}
+              />{" "}
+              Same as billing
+            </span>
+            <textarea
+              name="shippingAddress"
+              defaultValue={customer?.shippingAddress ?? ""}
+              placeholder="Click to add shipping address..."
+              disabled={same}
+            />
+          </label>
+          <label>
+            Payment Terms (Days)
+            <select
+              name="paymentTerms"
+              defaultValue={String(customer?.paymentTerms ?? 7)}
+            >
+              <option value="7">7 Days</option>
+              <option value="15">15 Days</option>
+              <option value="30">30 Days</option>
+              <option value="45">45 Days</option>
+              <option value="60">60 Days</option>
+            </select>
+          </label>
+          <label>
+            Currency
+            <input
+              name="currency"
+              defaultValue={customer?.currency ?? "INR"}
+              maxLength={3}
+            />
+          </label>
+          <div className="actions wide form-footer">
+            <button type="button" className="button ghost" onClick={close}>
+              <X />
+              Cancel
+            </button>
+            <button className="button primary">
+              <Check />
+              {editing ? "Save Changes" : "Add Customer"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+function CreateProductModal({
+  product,
+  mutate,
+  close,
+}: {
+  product?: Product;
+  products?: Product[];
+  mutate: Function;
+  close: () => void;
+}) {
+  const standardCategories = ["Hardware", "Services", "Subscriptions"];
+  const editing = Boolean(product);
+  const initialCategory =
+    product && standardCategories.includes(product.category)
+      ? product.category
+      : product
+        ? "Other"
+        : "Hardware";
+  const [name, setName] = useState(product?.name ?? "");
+  const [categoryChoice, setCategoryChoice] = useState(initialCategory);
+  const [customCategory, setCustomCategory] = useState(
+    product && initialCategory === "Other" ? product.category : "",
+  );
+  const [unit, setUnit] = useState(product?.unit ?? "Piece");
+  const [sku, setSku] = useState(product?.sku ?? "");
+  const [skuEdited, setSkuEdited] = useState(editing);
+  const [priceIncludesTax, setPriceIncludesTax] = useState(false);
+  const [enteredPrice, setEnteredPrice] = useState<number | string>(
+    product ? Number(product.price) : "",
+  );
+  const [purchaseCost, setPurchaseCost] = useState<number | string>(
+    product ? Number(product.cost) : "",
+  );
+  const [taxRate, setTaxRate] = useState(
+    product ? Number(product.taxRate) : 18,
+  );
+  const [openingStock, setOpeningStock] = useState<number | string>("");
+  const [minAlertLevel, setMinAlertLevel] = useState<number | string>("");
+  const [maxCapacity, setMaxCapacity] = useState<number | string>("");
+  const [active, setActive] = useState(product?.active ?? true);
+  const [storeVisible, setStoreVisible] = useState(
+    product?.storeVisible ?? true,
+  );
+  const [featured, setFeatured] = useState(product?.featured ?? false);
+  const skuSuffix = useMemo(
+    () => Math.random().toString(36).slice(2, 6).toUpperCase(),
+    [],
+  );
+  const actualCategory =
+    categoryChoice === "Other"
+      ? customCategory.trim() || "Other"
+      : categoryChoice;
+  const recurring = ["Services", "Subscriptions"].includes(categoryChoice);
+  const hasInventory = !recurring;
+  const suggestedSku = useMemo(() => {
+    const categoryCode =
+      actualCategory
+        .replace(/[^a-z0-9]/gi, "")
+        .slice(0, 3)
+        .toUpperCase() || "ITM";
+    const nameCode =
+      name
+        .trim()
+        .replace(/[^a-z0-9]+/gi, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 14)
+        .toUpperCase() || "NEW";
+    return `${categoryCode}-${nameCode}-${skuSuffix}`;
+  }, [actualCategory, name, skuSuffix]);
+  useEffect(() => {
+    if (!skuEdited) setSku(suggestedSku);
+  }, [suggestedSku, skuEdited]);
+  const categoryDefaults: Record<string, string> = {
+    Hardware: "Piece",
+    Services: "Hour",
+    Subscriptions: "License",
+    Other: "Unit",
+  };
+  const selectCategory = (next: string) => {
+    setCategoryChoice(next);
+    setUnit(categoryDefaults[next] ?? "Unit");
+  };
+  const numericPrice = Number(enteredPrice) || 0;
+  const taxablePrice =
+    priceIncludesTax && taxRate > 0
+      ? numericPrice / (1 + taxRate / 100)
+      : numericPrice;
+  const numericCost = purchaseCost === "" ? Number.NaN : Number(purchaseCost);
+  const costError =
+    Number.isFinite(numericCost) &&
+    numericCost >= 0 &&
+    numericCost < taxablePrice
+      ? ""
+      : "Purchase cost must be zero or more and lower than the taxable selling price.";
+  const taxAmount = priceIncludesTax
+    ? numericPrice - taxablePrice
+    : (taxablePrice * taxRate) / 100;
+  const customerPrice = taxablePrice + taxAmount;
+  const opening =
+    openingStock === ""
+      ? 0
+      : Math.max(0, Math.trunc(Number(openingStock) || 0));
+  const lowStock =
+    minAlertLevel === ""
+      ? 0
+      : Math.max(0, Math.trunc(Number(minAlertLevel) || 0));
+  const capacity =
+    maxCapacity === ""
+      ? null
+      : Math.max(1, Math.trunc(Number(maxCapacity) || 1));
+  const inventoryError =
+    hasInventory && capacity !== null && capacity < opening
+      ? "Maximum capacity cannot be below opening stock."
+      : "";
+  const canSubmit =
+    numericPrice > 0 &&
+    !costError &&
+    !inventoryError &&
+    (categoryChoice !== "Other" || customCategory.trim().length >= 2);
+  const normalizeInteger = (
+    value: number | string,
+    setter: (value: number | string) => void,
+  ) =>
+    setter(
+      value === "" ? "" : String(Math.max(0, Math.trunc(Number(value) || 0))),
+    );
+  const itemLabel =
+    categoryChoice === "Services"
+      ? "Service"
+      : categoryChoice === "Subscriptions"
+        ? "Subscription"
+        : "Product";
+  const submit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!canSubmit) return;
+    const f = new FormData(e.currentTarget);
+    const common = {
+      name,
+      sku: sku.trim() || undefined,
+      category: actualCategory,
+      description: f.get("description"),
+      unit,
+      brand: f.get("brand") || null,
+      price: Number(taxablePrice.toFixed(2)),
+      cost: Number(Number(numericCost).toFixed(2)),
+      taxRate,
+      recurring,
+      cadence: recurring ? f.get("cadence") : null,
+      active,
+      ...(hasInventory ? { storeVisible, featured } : {}),
+    };
+    const payload = editing
+      ? common
+      : {
+          ...common,
+          ...(hasInventory
+            ? {
+                openingStock: opening,
+                minAlertLevel: lowStock,
+                maxCapacity: capacity,
+              }
+            : {}),
+        };
+    await mutate(
+      product ? `/products/${product.id}` : "/products",
+      payload,
+      product ? "PATCH" : "POST",
+      product ? `${itemLabel} updated` : `${itemLabel} added to catalog`,
+    );
     close();
   };
-  return <Modal title={product?`Edit ${product.name}`:'Create Product'} close={close}>
-    <form className="add-product-form refined-product-form" onSubmit={submit}>
-      <div className="product-form-head">
-        <span><PackagePlus/></span>
-        <div><h3>{product?'Edit catalog item':'Create catalog item'}</h3><p>{product?'Update the item using the same catalog form.':'Add a product, service, or subscription with accurate stock and GST pricing.'}</p></div>
-      </div>
-      <div className="product-create-grid">
-        <div className="product-form-stack">
-          <section className="product-form-card product-main-card">
-            <h4>Item details</h4>
-            <div className="form grid">
-              <label>Item name *<input name="name" autoFocus required value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Wireless headset"/></label>
-              <label>SKU / HSN code <input aria-label="SKU / HSN code" name="sku" value={sku} onChange={e=>{setSku(e.target.value.toUpperCase());setSkuEdited(true)}} placeholder="Generated automatically"/><small>Auto-generated and editable; it is not a required manual field.</small></label>
-              <label className="wide">Description<textarea name="description" defaultValue={product?.description??''} placeholder="Describe what the customer receives"/></label>
-              <label>Category<div className="category-control"><select aria-label="Category" value={categoryChoice} onChange={e=>selectCategory(e.target.value)}><option>Hardware</option><option>Services</option><option>Subscriptions</option><option>Other</option></select>{categoryChoice==='Other'&&<input aria-label="Custom category" autoFocus value={customCategory} onChange={e=>setCustomCategory(e.target.value)} placeholder="Type category"/>}</div></label>
-              <label>Unit<select aria-label="Unit" value={unit} onChange={e=>setUnit(e.target.value)}><option>Piece</option><option>Unit</option><option>Box</option><option>Pack</option><option>Set</option><option>Kilogram</option><option>Gram</option><option>Litre</option><option>Metre</option><option>Hour</option><option>Day</option><option>Project</option><option>Month</option><option>License</option><option>Subscription</option></select><small>Suggested automatically from the selected category.</small></label>
-              <label>Vendor / brand<input aria-label="Vendor / brand" name="brand" autoComplete="off" defaultValue={product?.brand??''} placeholder="Enter brand manually"/><small>Optional manual entry. No predefined brand list.</small></label>
-              {recurring&&<label>Billing cadence<select name="cadence" defaultValue={product?.cadence??'Monthly'}><option>Monthly</option><option>Quarterly</option><option>Yearly</option></select></label>}
-            </div>
-          </section>
-          {hasInventory&&!editing&&<section className="product-form-card inventory-card">
-            <h4>Inventory</h4>
-            <div className="form grid three-field">
-              <label>Opening stock *<input aria-label="Opening stock *" type="number" min="0" required value={openingStock} onChange={e=>setOpeningStock(e.target.value)} onBlur={()=>normalizeInteger(openingStock,setOpeningStock)} placeholder="0"/></label>
-              <label>Low-stock alert<input type="number" min="0" value={minAlertLevel} onChange={e=>setMinAlertLevel(e.target.value)} onBlur={()=>normalizeInteger(minAlertLevel,setMinAlertLevel)} placeholder="0"/></label>
-              <label>Maximum capacity<input type="number" min={Math.max(1,opening)} value={maxCapacity} onChange={e=>setMaxCapacity(e.target.value)} onBlur={()=>normalizeInteger(maxCapacity,setMaxCapacity)} placeholder="Optional"/></label>
-            </div>
-            {inventoryError&&<div className="pricing-validation" role="alert"><AlertTriangle/>{inventoryError}</div>}
-          </section>}
-          {hasInventory&&editing&&<section className="product-form-card inventory-card"><h4>Inventory</h4><div className="inventory-edit-summary"><span><small>Available stock</small><b>{product?.stocks.reduce((sum,row)=>sum+row.onHand-row.reserved,0)??0}</b></span><p>Stock quantities are controlled through warehouse receipts and fulfillment, so editing catalog details cannot overwrite live inventory.</p></div></section>}
-          <section className="product-form-card product-visibility-card">
-            <h4>Availability</h4>
-            <div className={`visibility-grid ${recurring?'service-availability':''}`}>
-              <ToggleField title="Active status" note="Available for quotations and invoices" checked={active} setChecked={setActive}/>
-              {hasInventory&&<ToggleField title="Store visibility" note="Visible in POS or online sales" checked={storeVisible} setChecked={setStoreVisible}/>}
-              {hasInventory&&<ToggleField title="Featured" note="Highlight this catalog item" checked={featured} setChecked={setFeatured}/>}
-            </div>
-          </section>
+  return (
+    <Modal
+      title={product ? `Edit ${product.name}` : "Create Product"}
+      close={close}
+    >
+      <form className="add-product-form refined-product-form" onSubmit={submit}>
+        <div className="product-form-head">
+          <span>
+            <PackagePlus />
+          </span>
+          <div>
+            <h3>{product ? "Edit catalog item" : "Create catalog item"}</h3>
+            <p>
+              {product
+                ? "Update the item using the same catalog form."
+                : "Add a product, service, or subscription with accurate stock and GST pricing."}
+            </p>
+          </div>
         </div>
-        <div className="product-pricing-rail">
-          <section className="product-form-card pricing-card">
-            <h4>Pricing</h4>
-            <div className="form grid">
-              <label>Price treatment<select value={priceIncludesTax?'included':'excluded'} onChange={e=>setPriceIncludesTax(e.target.value==='included')}><option value="excluded">GST excluded</option><option value="included">GST included</option></select></label>
-              <label>GST rate<select value={taxRate} onChange={e=>setTaxRate(Number(e.target.value))}><option value={0}>0%</option><option value={5}>5%</option><option value={12}>12%</option><option value={18}>18%</option><option value={28}>28%</option></select></label>
-              <label className="taxable-price-field">Base price (before GST)<input aria-label="Base price (before GST)" value={taxablePrice?taxablePrice.toFixed(2):''} readOnly placeholder="Calculated automatically"/><small>Calculated from the selling price and GST treatment.</small></label>
-              <label>{priceIncludesTax?'Selling price (GST included) *':'Selling price (before GST) *'}<input aria-label="Selling price" type="number" min="0.01" step="0.01" inputMode="decimal" required value={enteredPrice} onChange={e=>setEnteredPrice(e.target.value)} placeholder="0.00"/></label>
-              <label>Purchase cost *<input aria-label="Purchase cost" type="number" min="0" step="0.01" inputMode="decimal" required value={purchaseCost} onChange={e=>setPurchaseCost(e.target.value)} placeholder="0.00"/><small>Used for margin and recommendation calculations.</small></label>
+        <div className="product-create-grid">
+          <div className="product-form-stack">
+            <section className="product-form-card product-main-card">
+              <h4>Item details</h4>
+              <div className="form grid">
+                <label>
+                  Item name *
+                  <input
+                    name="name"
+                    autoFocus
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Wireless headset"
+                  />
+                </label>
+                <label>
+                  SKU / HSN code{" "}
+                  <input
+                    aria-label="SKU / HSN code"
+                    name="sku"
+                    value={sku}
+                    onChange={(e) => {
+                      setSku(e.target.value.toUpperCase());
+                      setSkuEdited(true);
+                    }}
+                    placeholder="Generated automatically"
+                  />
+                  <small>
+                    Auto-generated and editable; it is not a required manual
+                    field.
+                  </small>
+                </label>
+                <label className="wide">
+                  Description
+                  <textarea
+                    name="description"
+                    defaultValue={product?.description ?? ""}
+                    placeholder="Describe what the customer receives"
+                  />
+                </label>
+                <label>
+                  Category
+                  <div className="category-control">
+                    <select
+                      aria-label="Category"
+                      value={categoryChoice}
+                      onChange={(e) => selectCategory(e.target.value)}
+                    >
+                      <option>Hardware</option>
+                      <option>Services</option>
+                      <option>Subscriptions</option>
+                      <option>Other</option>
+                    </select>
+                    {categoryChoice === "Other" && (
+                      <input
+                        aria-label="Custom category"
+                        autoFocus
+                        value={customCategory}
+                        onChange={(e) => setCustomCategory(e.target.value)}
+                        placeholder="Type category"
+                      />
+                    )}
+                  </div>
+                </label>
+                <label>
+                  Unit
+                  <select
+                    aria-label="Unit"
+                    value={unit}
+                    onChange={(e) => setUnit(e.target.value)}
+                  >
+                    <option>Piece</option>
+                    <option>Unit</option>
+                    <option>Box</option>
+                    <option>Pack</option>
+                    <option>Set</option>
+                    <option>Kilogram</option>
+                    <option>Gram</option>
+                    <option>Litre</option>
+                    <option>Metre</option>
+                    <option>Hour</option>
+                    <option>Day</option>
+                    <option>Project</option>
+                    <option>Month</option>
+                    <option>License</option>
+                    <option>Subscription</option>
+                  </select>
+                  <small>
+                    Suggested automatically from the selected category.
+                  </small>
+                </label>
+                <label>
+                  Vendor / brand
+                  <input
+                    aria-label="Vendor / brand"
+                    name="brand"
+                    autoComplete="off"
+                    defaultValue={product?.brand ?? ""}
+                    placeholder="Enter brand manually"
+                  />
+                  <small>
+                    Optional manual entry. No predefined brand list.
+                  </small>
+                </label>
+                {recurring && (
+                  <label>
+                    Billing cadence
+                    <select
+                      name="cadence"
+                      defaultValue={product?.cadence ?? "Monthly"}
+                    >
+                      <option>Monthly</option>
+                      <option>Quarterly</option>
+                      <option>Yearly</option>
+                    </select>
+                  </label>
+                )}
+              </div>
+            </section>
+            {hasInventory && !editing && (
+              <section className="product-form-card inventory-card">
+                <h4>Inventory</h4>
+                <div className="form grid three-field">
+                  <label>
+                    Opening stock *
+                    <input
+                      aria-label="Opening stock *"
+                      type="number"
+                      min="0"
+                      required
+                      value={openingStock}
+                      onChange={(e) => setOpeningStock(e.target.value)}
+                      onBlur={() =>
+                        normalizeInteger(openingStock, setOpeningStock)
+                      }
+                      placeholder="0"
+                    />
+                  </label>
+                  <label>
+                    Low-stock alert
+                    <input
+                      type="number"
+                      min="0"
+                      value={minAlertLevel}
+                      onChange={(e) => setMinAlertLevel(e.target.value)}
+                      onBlur={() =>
+                        normalizeInteger(minAlertLevel, setMinAlertLevel)
+                      }
+                      placeholder="0"
+                    />
+                  </label>
+                  <label>
+                    Maximum capacity
+                    <input
+                      type="number"
+                      min={Math.max(1, opening)}
+                      value={maxCapacity}
+                      onChange={(e) => setMaxCapacity(e.target.value)}
+                      onBlur={() =>
+                        normalizeInteger(maxCapacity, setMaxCapacity)
+                      }
+                      placeholder="Optional"
+                    />
+                  </label>
+                </div>
+                {inventoryError && (
+                  <div className="pricing-validation" role="alert">
+                    <AlertTriangle />
+                    {inventoryError}
+                  </div>
+                )}
+              </section>
+            )}
+            {hasInventory && editing && (
+              <section className="product-form-card inventory-card">
+                <h4>Inventory</h4>
+                <div className="inventory-edit-summary">
+                  <span>
+                    <small>Available stock</small>
+                    <b>
+                      {product?.stocks.reduce(
+                        (sum, row) => sum + row.onHand - row.reserved,
+                        0,
+                      ) ?? 0}
+                    </b>
+                  </span>
+                  <p>
+                    Stock quantities are controlled through warehouse receipts
+                    and fulfillment, so editing catalog details cannot overwrite
+                    live inventory.
+                  </p>
+                </div>
+              </section>
+            )}
+            <section className="product-form-card product-visibility-card">
+              <h4>Availability</h4>
+              <div
+                className={`visibility-grid ${recurring ? "service-availability" : ""}`}
+              >
+                <ToggleField
+                  title="Active status"
+                  note="Available for quotations and invoices"
+                  checked={active}
+                  setChecked={setActive}
+                />
+                {hasInventory && (
+                  <ToggleField
+                    title="Store visibility"
+                    note="Visible in POS or online sales"
+                    checked={storeVisible}
+                    setChecked={setStoreVisible}
+                  />
+                )}
+                {hasInventory && (
+                  <ToggleField
+                    title="Featured"
+                    note="Highlight this catalog item"
+                    checked={featured}
+                    setChecked={setFeatured}
+                  />
+                )}
+              </div>
+            </section>
+          </div>
+          <div className="product-pricing-rail">
+            <section className="product-form-card pricing-card">
+              <h4>Pricing</h4>
+              <div className="form grid">
+                <label>
+                  Price treatment
+                  <select
+                    value={priceIncludesTax ? "included" : "excluded"}
+                    onChange={(e) =>
+                      setPriceIncludesTax(e.target.value === "included")
+                    }
+                  >
+                    <option value="excluded">GST excluded</option>
+                    <option value="included">GST included</option>
+                  </select>
+                </label>
+                <label>
+                  GST rate
+                  <select
+                    value={taxRate}
+                    onChange={(e) => setTaxRate(Number(e.target.value))}
+                  >
+                    <option value={0}>0%</option>
+                    <option value={5}>5%</option>
+                    <option value={12}>12%</option>
+                    <option value={18}>18%</option>
+                    <option value={28}>28%</option>
+                  </select>
+                </label>
+                <label className="taxable-price-field">
+                  Base price (before GST)
+                  <input
+                    aria-label="Base price (before GST)"
+                    value={taxablePrice ? taxablePrice.toFixed(2) : ""}
+                    readOnly
+                    placeholder="Calculated automatically"
+                  />
+                  <small>
+                    Calculated from the selling price and GST treatment.
+                  </small>
+                </label>
+                <label>
+                  {priceIncludesTax
+                    ? "Selling price (GST included) *"
+                    : "Selling price (before GST) *"}
+                  <input
+                    aria-label="Selling price"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    inputMode="decimal"
+                    required
+                    value={enteredPrice}
+                    onChange={(e) => setEnteredPrice(e.target.value)}
+                    placeholder="0.00"
+                  />
+                </label>
+                <label>
+                  Purchase cost *
+                  <input
+                    aria-label="Purchase cost"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputMode="decimal"
+                    required
+                    value={purchaseCost}
+                    onChange={(e) => setPurchaseCost(e.target.value)}
+                    placeholder="0.00"
+                  />
+                  <small>
+                    Used for margin and recommendation calculations.
+                  </small>
+                </label>
+              </div>
+              {numericPrice > 0 && costError && (
+                <div className="pricing-validation" role="alert">
+                  <AlertTriangle />
+                  {costError}
+                </div>
+              )}
+              <p className="pricing-help">
+                {priceIncludesTax
+                  ? `${money(taxAmount)} GST is included. Taxable price: ${money(taxablePrice)}.`
+                  : `GST will be added to the selling price. Customer total: ${money(customerPrice)}.`}
+              </p>
+            </section>
+            <aside className="product-summary-card" aria-live="polite">
+              <h4>Price preview</h4>
+              <strong>{money(customerPrice)}</strong>
+              <span>Customer total including GST</span>
+              <div>
+                <small>Taxable price</small>
+                <b>{money(taxablePrice)}</b>
+              </div>
+              <div>
+                <small>GST amount</small>
+                <b>{money(taxAmount)}</b>
+              </div>
+              <div>
+                <small>Gross margin</small>
+                <b
+                  className={
+                    Number.isFinite(numericCost) &&
+                    taxablePrice - numericCost < 0
+                      ? "loss"
+                      : ""
+                  }
+                >
+                  {Number.isFinite(numericCost)
+                    ? money(taxablePrice - numericCost)
+                    : "—"}
+                </b>
+              </div>
+              <p>
+                {recurring
+                  ? "Recurring billing · no inventory"
+                  : "One-time billing · inventory tracked"}
+              </p>
+            </aside>
+          </div>
+        </div>
+        <div className="actions product-form-actions">
+          <button type="button" className="button ghost" onClick={close}>
+            Cancel
+          </button>
+          <button className="button primary" disabled={!canSubmit}>
+            <PackagePlus />
+            {product ? "Save changes" : `Create ${itemLabel}`}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+function InvoiceItemPicker({
+  products,
+  lines,
+  setLines,
+  mutate,
+  close,
+}: {
+  products: Product[];
+  lines: CommerceLine[];
+  setLines: (fn: (value: CommerceLine[]) => CommerceLine[]) => void;
+  mutate: Function;
+  close: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [creating, setCreating] = useState(false);
+  const filtered = products.filter(
+    (product) =>
+      product.active &&
+      [product.name, product.sku, product.category, product.description]
+        .join(" ")
+        .toLowerCase()
+        .includes(query.toLowerCase()),
+  );
+  const setQuantity = (productId: string, quantity: number) =>
+    setLines((current) => {
+      const product = products.find((item) => item.id === productId);
+      const maximum = availableStock(product);
+      const next = Math.max(
+        0,
+        Math.min(Math.trunc(Number.isFinite(quantity) ? quantity : 0), maximum),
+      );
+      const existing = current.find((line) => line.productId === productId);
+      if (next === 0)
+        return current.filter((line) => line.productId !== productId);
+      if (existing)
+        return current.map((line) =>
+          line.productId === productId ? { ...line, quantity: next } : line,
+        );
+      return [...current, { productId, quantity: next, discount: 0 }];
+    });
+  const selectedTotal = lines.reduce((sum, line) => {
+    const product = products.find((item) => item.id === line.productId);
+    return (
+      sum +
+      Number(product?.price ?? 0) * line.quantity * (1 - line.discount / 100)
+    );
+  }, 0);
+  return (
+    <div
+      className="modal-wrap invoice-picker-wrap"
+      onMouseDown={(event) => event.target === event.currentTarget && close()}
+    >
+      <section
+        className="invoice-item-picker"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="invoice-item-picker-title"
+      >
+        <header>
+          <div>
+            <span className="eyebrow">Catalog</span>
+            <h2 id="invoice-item-picker-title">Add invoice items</h2>
+            <p>Choose products or services, then confirm the quantities.</p>
+          </div>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Close item picker"
+            onClick={close}
+          >
+            <X />
+          </button>
+        </header>
+        <div className="invoice-picker-toolbar">
+          <div className="search">
+            <Search />
+            <input
+              autoFocus
+              aria-label="Search invoice items"
+              placeholder="Search by item name, SKU, or category"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </div>
+          <button
+            className="button primary"
+            type="button"
+            onClick={() => setCreating(true)}
+          >
+            <Plus />
+            Create New Product
+          </button>
+        </div>
+        <div className="invoice-picker-columns" aria-hidden="true">
+          <span>Item</span>
+          <span>Rate</span>
+          <span>Availability</span>
+          <span>Quantity</span>
+          <span>Line total</span>
+          <span />
+        </div>
+        <div className="invoice-picker-list">
+          {filtered.map((product) => {
+            const selected = lines.find(
+              (line) => line.productId === product.id,
+            );
+            const quantity = selected?.quantity ?? 0;
+            const stock = availableStock(product);
+            const unavailable = !product.recurring && stock <= 0;
+            const total =
+              Number(product.price) *
+              quantity *
+              (1 - (selected?.discount ?? 0) / 100);
+            return (
+              <article key={product.id} className={selected ? "selected" : ""}>
+                <div className="invoice-picker-product">
+                  <i>
+                    <Package />
+                  </i>
+                  <span>
+                    <b>{product.name}</b>
+                    <small>
+                      {product.sku} · {product.category} · {product.unit}
+                    </small>
+                  </span>
+                </div>
+                <div className="invoice-picker-rate">
+                  <b>{invoiceMoney(product.price)}</b>
+                  <small>per {product.unit.toLowerCase()}</small>
+                </div>
+                <div
+                  className={`invoice-picker-stock ${unavailable ? "unavailable" : ""}`}
+                >
+                  <b>{product.recurring ? "Available" : stock}</b>
+                  <small>{product.recurring ? "Service" : "in stock"}</small>
+                </div>
+                <div className="item-qty-control">
+                  <button
+                    type="button"
+                    aria-label={`Decrease ${product.name}`}
+                    disabled={!selected}
+                    onClick={() => setQuantity(product.id, quantity - 1)}
+                  >
+                    −
+                  </button>
+                  <input
+                    aria-label={`Quantity for ${product.name}`}
+                    type="number"
+                    min="0"
+                    max={product.recurring ? undefined : stock}
+                    value={quantity}
+                    onChange={(event) =>
+                      setQuantity(product.id, Number(event.target.value))
+                    }
+                  />
+                  <button
+                    type="button"
+                    aria-label={`Increase ${product.name}`}
+                    disabled={
+                      unavailable || (!product.recurring && quantity >= stock)
+                    }
+                    onClick={() => setQuantity(product.id, quantity + 1)}
+                  >
+                    +
+                  </button>
+                </div>
+                <strong className="invoice-picker-total">
+                  {invoiceMoney(total)}
+                </strong>
+                <button
+                  type="button"
+                  className={`item-select-button ${selected ? "selected" : ""}`}
+                  disabled={!selected && unavailable}
+                  onClick={() => setQuantity(product.id, selected ? 0 : 1)}
+                >
+                  {selected ? "Remove" : unavailable ? "Out of stock" : "Add"}
+                </button>
+              </article>
+            );
+          })}
+          {!filtered.length && (
+            <Empty text="No matching catalog items. Create a new product to continue." />
+          )}
+        </div>
+        <footer>
+          <span>
+            <small>
+              {lines.length} item{lines.length === 1 ? "" : "s"} selected ·
+              before invoice GST
+            </small>
+            <b>{invoiceMoney(selectedTotal)}</b>
+          </span>
+          <div className="actions">
+            <button type="button" className="button ghost" onClick={close}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="button primary"
+              onClick={close}
+              disabled={!lines.length}
+            >
+              Add to invoice
+            </button>
+          </div>
+        </footer>
+        {creating && (
+          <CreateProductModal
+            products={products}
+            mutate={mutate}
+            close={() => setCreating(false)}
+          />
+        )}
+      </section>
+    </div>
+  );
+}
+function ToggleField({
+  title,
+  note,
+  checked,
+  setChecked,
+}: {
+  title: string;
+  note: string;
+  checked: boolean;
+  setChecked: (checked: boolean) => void;
+}) {
+  return (
+    <label className="toggle-field">
+      <span>
+        <b>{title}</b>
+        <small>{note}</small>
+      </span>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => setChecked(e.target.checked)}
+      />
+      <i />
+    </label>
+  );
+}
+function AddInvoiceItemsModal({
+  products,
+  lines,
+  setLines,
+  mutate,
+  close,
+}: {
+  products: Product[];
+  lines: CommerceLine[];
+  setLines: (fn: (value: CommerceLine[]) => CommerceLine[]) => void;
+  mutate: Function;
+  close: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [creating, setCreating] = useState(false);
+  const active = products.filter((p) => p.active);
+  const filtered = active.filter((p) =>
+    [p.name, p.sku, p.category, p.description]
+      .join(" ")
+      .toLowerCase()
+      .includes(query.toLowerCase()),
+  );
+  const clamp = (productId: string, quantity: number) => {
+    const product = products.find((item) => item.id === productId);
+    const max = availableStock(product);
+    return Math.max(
+      0,
+      Math.min(Math.trunc(Number.isFinite(quantity) ? quantity : 0), max),
+    );
+  };
+  const update = (productId: string, quantity: number) =>
+    setLines((value) => {
+      const next = clamp(productId, quantity);
+      const existing = value.find((line) => line.productId === productId);
+      if (next <= 0)
+        return value.filter((line) => line.productId !== productId);
+      if (existing)
+        return value.map((line) =>
+          line.productId === productId ? { ...line, quantity: next } : line,
+        );
+      return [...value, { productId, quantity: next, discount: 0 }];
+    });
+  const addProduct = (productId: string) =>
+    update(
+      productId,
+      lines.find((line) => line.productId === productId)?.quantity || 1,
+    );
+  const selectedTotal = lines.reduce(
+    (sum, line) =>
+      sum +
+      lineAmount(
+        products.find((product) => product.id === line.productId),
+        line,
+      ).total,
+    0,
+  );
+  return (
+    <div
+      className="modal-wrap"
+      onMouseDown={(e) => e.target === e.currentTarget && close()}
+    >
+      <div className="modal add-items-modal">
+        <div className="panel-title">
+          <h3>Add Items</h3>
+          <button onClick={close}>
+            <X />
+          </button>
+        </div>
+        <div className="add-items-toolbar">
+          <div className="search">
+            <Search />
+            <input
+              autoFocus
+              placeholder="Search items by name, SKU, or category"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <button
+            className="button primary"
+            type="button"
+            onClick={() => setCreating(true)}
+          >
+            <Plus />
+            Create New Product
+          </button>
+        </div>
+        <div className="selected-items-strip">
+          <span>
+            {lines.length} selected item{lines.length === 1 ? "" : "s"}
+          </span>
+          <strong>{money(selectedTotal)}</strong>
+        </div>
+        <div className="table-wrap item-picker-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Item name</th>
+                <th>SKU code</th>
+                <th>Category</th>
+                <th>Sales price</th>
+                <th>Stock</th>
+                <th>Quantity</th>
+                <th>Amount</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((product) => {
+                const selected = lines.find(
+                  (line) => line.productId === product.id,
+                );
+                const quantity = selected?.quantity ?? 0;
+                const amount = lineAmount(product, {
+                  productId: product.id,
+                  quantity,
+                  discount: selected?.discount ?? 0,
+                });
+                const stock = availableStock(product);
+                const outOfStock = !product.recurring && stock <= 0;
+                return (
+                  <tr
+                    key={product.id}
+                    className={selected ? "selected-item-row" : ""}
+                  >
+                    <td>
+                      <b>{product.name}</b>
+                      <small>{product.description}</small>
+                    </td>
+                    <td>{product.sku}</td>
+                    <td>{product.category}</td>
+                    <td>{money(product.price)}</td>
+                    <td>
+                      <span className={outOfStock ? "stock-empty" : ""}>
+                        {product.recurring ? "Service" : stock}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="item-qty-control">
+                        <button
+                          type="button"
+                          aria-label={`Decrease ${product.name}`}
+                          onClick={() => update(product.id, quantity - 1)}
+                          disabled={!selected}
+                        >
+                          -
+                        </button>
+                        <input
+                          className="qty-input"
+                          type="number"
+                          min="0"
+                          max={product.recurring ? undefined : stock}
+                          value={quantity}
+                          onChange={(e) =>
+                            update(product.id, Number(e.target.value))
+                          }
+                        />
+                        <button
+                          type="button"
+                          aria-label={`Increase ${product.name}`}
+                          onClick={() => update(product.id, quantity + 1)}
+                          disabled={!product.recurring && quantity >= stock}
+                        >
+                          +
+                        </button>
+                      </div>
+                      {!product.recurring && (
+                        <small className="stock-limit-note">Max {stock}</small>
+                      )}
+                    </td>
+                    <td>
+                      <b>{money(amount.total)}</b>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className={`item-select-button ${selected ? "selected" : ""}`}
+                        disabled={!selected && outOfStock}
+                        onClick={() =>
+                          selected
+                            ? update(product.id, 0)
+                            : addProduct(product.id)
+                        }
+                      >
+                        {selected
+                          ? "Selected"
+                          : outOfStock
+                            ? "No Stock"
+                            : "Add"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {!filtered.length && (
+            <Empty text="No items found. Create a new product to add it to this invoice." />
+          )}
+        </div>
+        <div className="actions add-items-actions">
+          <button type="button" className="button ghost" onClick={close}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="button primary"
+            onClick={close}
+            disabled={!lines.length}
+          >
+            Done
+          </button>
+        </div>
+        {creating && (
+          <CreateProductModal
+            products={products}
+            mutate={mutate}
+            close={() => setCreating(false)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+function CustomerPickerModal({
+  customers,
+  selectedId,
+  onSelect,
+  onCreate,
+  close,
+}: {
+  customers: Customer[];
+  selectedId: string;
+  onSelect: (customer: Customer | null) => void;
+  onCreate: () => void;
+  close: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const filtered = customers.filter((customer) =>
+    [
+      customer.name,
+      customer.contactPerson ?? "",
+      customer.phone ?? "",
+      customer.email ?? "",
+      customer.gstin ?? "",
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(query.toLowerCase()),
+  );
+  useEffect(() => {
+    const dismiss = (event: KeyboardEvent) => event.key === "Escape" && close();
+    document.addEventListener("keydown", dismiss);
+    return () => document.removeEventListener("keydown", dismiss);
+  }, [close]);
+  return (
+    <div
+      className="customer-picker-layer"
+      onMouseDown={(event) => event.target === event.currentTarget && close()}
+    >
+      <section
+        className="customer-picker-popover"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="customer-picker-title"
+      >
+        <div className="customer-picker-head">
+          <div>
+            <span className="eyebrow">Invoice customer</span>
+            <h2 id="customer-picker-title">Select customer</h2>
+            <p>Choose the billing account for this invoice.</p>
+          </div>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Close customer picker"
+            onClick={close}
+          >
+            <X />
+          </button>
+        </div>
+        <div className="customer-picker-search">
+          <Search />
+          <input
+            aria-label="Search customers"
+            autoFocus
+            placeholder="Search by name, phone, email, or GSTIN"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
+        <div className="customer-picker-list">
+          <small>Customers</small>
+          {filtered.map((customer) => (
+            <button
+              type="button"
+              key={customer.id}
+              className={`customer-picker-row ${selectedId === customer.id ? "active" : ""}`}
+              onClick={() => {
+                onSelect(customer);
+                close();
+              }}
+            >
+              <i>
+                <UserRound />
+              </i>
+              <span>
+                <b>{customer.name}</b>
+                <em>
+                  {[
+                    customer.email,
+                    customer.phone
+                      ? `${customer.countryCode} ${customer.phone}`
+                      : null,
+                    customer.gstin,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || customer.customerType}
+                </em>
+              </span>
+              <strong>{customer.tier}</strong>
+              <ArrowRight />
+            </button>
+          ))}
+          {!filtered.length && <p>No customers match your search.</p>}
+        </div>
+        <button
+          type="button"
+          className="customer-picker-create"
+          onClick={onCreate}
+        >
+          <Plus />
+          Create new customer
+        </button>
+      </section>
+    </div>
+  );
+}
+function CreateInvoiceModal({
+  data,
+  mutate,
+  close,
+}: {
+  data: Workspace;
+  mutate: Function;
+  close: () => void;
+}) {
+  const activeCustomers = data.customers.filter((c) => c.active);
+  const termsDueDate = (days: number) =>
+    new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+  const [customerId, setCustomerId] = useState("");
+  const [terms, setTerms] = useState(30);
+  const [dueAt, setDueAt] = useState(termsDueDate(30));
+  const [lines, setLines] = useState<CommerceLine[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [pickingCustomer, setPickingCustomer] = useState(false);
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
+  const [pickNewest, setPickNewest] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [gstMode, setGstMode] = useState<InvoiceTaxMode>("EXCLUSIVE");
+  const [gstRate, setGstRate] = useState(18);
+  const invoiceDate = new Date().toISOString().slice(0, 10);
+  const customer = activeCustomers.find((c) => c.id === customerId);
+  const applyTerms = (days: number) => {
+    setTerms(days);
+    setDueAt(termsDueDate(days));
+  };
+  const selectCustomer = (next: Customer | null) => {
+    setCustomerId(next?.id ?? "");
+    applyTerms(next?.paymentTerms ?? 30);
+  };
+  useEffect(() => {
+    if (!pickNewest) return;
+    const newest = [...activeCustomers].sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    )[0];
+    if (newest) {
+      selectCustomer(newest);
+      setPickingCustomer(false);
+    }
+    setPickNewest(false);
+  }, [data.customers.length, pickNewest]);
+  const updateLine = (index: number, patch: Partial<CommerceLine>) =>
+    setLines((value) =>
+      value.map((line, i) => {
+        if (i !== index) return line;
+        const product = data.products.find((p) => p.id === line.productId);
+        const nextQuantity =
+          patch.quantity === undefined
+            ? line.quantity
+            : Math.max(
+                1,
+                Math.min(
+                  Math.trunc(
+                    Number.isFinite(patch.quantity) ? patch.quantity : 1,
+                  ),
+                  availableStock(product),
+                ),
+              );
+        return { ...line, ...patch, quantity: nextQuantity };
+      }),
+    );
+  const removeLine = (index: number) =>
+    setLines((value) => value.filter((_, i) => i !== index));
+  const amounts = lines.map((line) =>
+    invoiceLineAmount(
+      data.products.find((p) => p.id === line.productId),
+      line,
+      gstRate,
+      gstMode,
+    ),
+  );
+  const itemsTotal = amounts.reduce((sum, amount) => sum + amount.listed, 0);
+  const discountTotal = amounts.reduce(
+    (sum, amount) => sum + amount.discount,
+    0,
+  );
+  const subtotal = amounts.reduce((sum, amount) => sum + amount.net, 0);
+  const tax = amounts.reduce((sum, amount) => sum + amount.tax, 0);
+  const total = subtotal + tax;
+  const partyName = customer?.name ?? "Select customer";
+  const partyNote = customer
+    ? customer.contactPerson || customer.customerType
+    : "Choose an existing customer or create a new profile.";
+  const submit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    await mutate(
+      "/invoices",
+      {
+        customerId,
+        dueAt: String(new FormData(e.currentTarget).get("dueAt")),
+        lines,
+        gstMode,
+        gstRate,
+      },
+      "POST",
+      "Invoice created",
+    );
+    close();
+  };
+  return (
+    <div
+      className="modal-wrap"
+      onMouseDown={(e) => e.target === e.currentTarget && close()}
+    >
+      <div className="modal invoice-workspace-modal">
+        <form onSubmit={submit}>
+          <div className="invoice-create-head">
+            <div>
+              <h3>Create Invoice</h3>
+              <p>
+                Build a clear, tax-ready customer invoice from your synced
+                catalog.
+              </p>
             </div>
-            {numericPrice>0&&costError&&<div className="pricing-validation" role="alert"><AlertTriangle/>{costError}</div>}
-            <p className="pricing-help">{priceIncludesTax?`${money(taxAmount)} GST is included. Taxable price: ${money(taxablePrice)}.`:`GST will be added to the selling price. Customer total: ${money(customerPrice)}.`}</p>
-          </section>
-          <aside className="product-summary-card" aria-live="polite">
-            <h4>Price preview</h4><strong>{money(customerPrice)}</strong><span>Customer total including GST</span>
-            <div><small>Taxable price</small><b>{money(taxablePrice)}</b></div>
-            <div><small>GST amount</small><b>{money(taxAmount)}</b></div>
-            <div><small>Gross margin</small><b className={Number.isFinite(numericCost)&&taxablePrice-numericCost<0?'loss':''}>{Number.isFinite(numericCost)?money(taxablePrice-numericCost):'—'}</b></div>
-            <p>{recurring?'Recurring billing · no inventory':'One-time billing · inventory tracked'}</p>
-          </aside>
+            <div className="actions">
+              <button
+                type="button"
+                className="button ghost"
+                onClick={() => setSettingsOpen(true)}
+              >
+                <Settings2 />
+                Settings
+              </button>
+              <button
+                type="button"
+                className="button ghost"
+                onClick={() => {
+                  setLines([]);
+                  selectCustomer(null);
+                  setPickingCustomer(false);
+                }}
+              >
+                Clear Form
+              </button>
+              <button type="button" className="button ghost" onClick={close}>
+                Cancel
+              </button>
+              <button
+                className="button primary"
+                disabled={!customerId || !lines.length}
+              >
+                <FileCheck />
+                Create Invoice
+              </button>
+            </div>
+          </div>
+          <div className="invoice-create-grid">
+            <div className="invoice-party-group">
+              <section
+                className={`invoice-party-card ${customer ? "" : "needs-selection"}`}
+              >
+                <div>
+                  <span>
+                    <UserRound />
+                    Bill To
+                  </span>
+                  <button
+                    type="button"
+                    className="button ghost compact-change"
+                    onClick={() => setPickingCustomer(true)}
+                  >
+                    {customerId ? "Change" : "Select Customer"}
+                  </button>
+                </div>
+                <h2>{partyName}</h2>
+                <p>{partyNote}</p>
+                <div className="contact-card">
+                  <span>
+                    Name{" "}
+                    <b>
+                      {customer?.contactPerson ||
+                        customer?.name ||
+                        "Not selected"}
+                    </b>
+                  </span>
+                  <span>
+                    Phone{" "}
+                    <b>
+                      {customer?.phone
+                        ? `${customer.countryCode} ${customer.phone}`
+                        : "—"}
+                    </b>
+                  </span>
+                  <span>
+                    Email <b>{customer?.email || "Not available"}</b>
+                  </span>
+                </div>
+                {pickingCustomer && (
+                  <CustomerPickerModal
+                    customers={activeCustomers}
+                    selectedId={customerId}
+                    onSelect={selectCustomer}
+                    close={() => setPickingCustomer(false)}
+                    onCreate={() => {
+                      setPickingCustomer(false);
+                      setCreatingCustomer(true);
+                    }}
+                  />
+                )}
+              </section>
+              <section className="invoice-party-card muted-card">
+                <span>
+                  <Send />
+                  Ship To
+                </span>
+                <h2>{partyName}</h2>
+                <p>
+                  {customer?.shippingAddress ||
+                    customer?.billingAddress ||
+                    "Shipping address will appear after customer selection."}
+                </p>
+              </section>
+            </div>
+            <aside className="invoice-side-panel">
+              <label>
+                Invoice Date
+                <input
+                  type="date"
+                  name="invoiceDate"
+                  value={invoiceDate}
+                  readOnly
+                />
+              </label>
+              <label>
+                Due Date
+                <input
+                  type="date"
+                  name="dueAt"
+                  value={dueAt}
+                  onChange={(e) => setDueAt(e.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                Payment Terms
+                <input
+                  type="number"
+                  min="0"
+                  max="180"
+                  value={terms}
+                  onChange={(e) => applyTerms(Number(e.target.value))}
+                />
+                <small>Days</small>
+              </label>
+              <div className="tax-summary-chip">
+                <span>GST treatment</span>
+                <b>
+                  {gstRate}% ·{" "}
+                  {gstMode === "INCLUSIVE"
+                    ? "Price inclusive"
+                    : "Added separately"}
+                </b>
+                <button type="button" onClick={() => setSettingsOpen(true)}>
+                  Change
+                </button>
+              </div>
+            </aside>
+          </div>
+          <div className="invoice-item-actions">
+            <button
+              type="button"
+              className="button primary add-item-button"
+              onClick={() => setAdding(true)}
+            >
+              <Plus />
+              Add Item
+            </button>
+            <div className="search">
+              <Search />
+              <input
+                placeholder="Scan barcode or SKU..."
+                readOnly
+                onClick={() => setAdding(true)}
+              />
+            </div>
+          </div>
+          <div
+            className={`invoice-lines-shell ${lines.length ? "has-lines" : ""}`}
+          >
+            <table>
+              <thead>
+                <tr>
+                  <th>No</th>
+                  <th>Items</th>
+                  <th>HSN/SKU</th>
+                  <th>Qty</th>
+                  <th>Unit</th>
+                  <th>Price/Item</th>
+                  <th>Discount</th>
+                  <th>GST</th>
+                  <th>Amount</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {lines.map((line, index) => {
+                  const product = data.products.find(
+                    (p) => p.id === line.productId,
+                  );
+                  const amount = invoiceLineAmount(
+                    product,
+                    line,
+                    gstRate,
+                    gstMode,
+                  );
+                  return (
+                    <tr key={`${line.productId}-${index}`}>
+                      <td>{index + 1}</td>
+                      <td>
+                        <b>{product?.name}</b>
+                        <small>{product?.description}</small>
+                      </td>
+                      <td>{product?.sku}</td>
+                      <td>
+                        <input
+                          className="qty-input"
+                          type="number"
+                          min="1"
+                          max={
+                            product?.recurring
+                              ? undefined
+                              : availableStock(product)
+                          }
+                          value={line.quantity}
+                          onChange={(e) =>
+                            updateLine(index, {
+                              quantity: Number(e.target.value),
+                            })
+                          }
+                        />
+                      </td>
+                      <td>{product?.unit}</td>
+                      <td>
+                        {invoiceMoney(product?.price ?? 0)}
+                        <small>
+                          {gstMode === "INCLUSIVE" ? "Incl. GST" : "Excl. GST"}
+                        </small>
+                      </td>
+                      <td>
+                        <input
+                          className="qty-input"
+                          aria-label={`Discount for ${product?.name}`}
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={line.discount}
+                          onChange={(e) =>
+                            updateLine(index, {
+                              discount: Number(e.target.value),
+                            })
+                          }
+                        />
+                      </td>
+                      <td>
+                        <b>{invoiceMoney(amount.tax)}</b>
+                        <small>{gstRate}%</small>
+                      </td>
+                      <td>
+                        <b>{invoiceMoney(amount.total)}</b>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label="Remove item"
+                          onClick={() => removeLine(index)}
+                        >
+                          <Trash2 />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {!lines.length && (
+              <Empty text="No items added yet. Click Add Item to start." />
+            )}
+          </div>
+          <div className="invoice-total-bar" aria-label="Invoice totals">
+            <span>
+              Items total <b>{invoiceMoney(itemsTotal)}</b>
+            </span>
+            <span>
+              Discount <b>− {invoiceMoney(discountTotal)}</b>
+            </span>
+            <span>
+              Taxable value <b>{invoiceMoney(subtotal)}</b>
+            </span>
+            <span>
+              GST ({gstRate}%) <b>{invoiceMoney(tax)}</b>
+              <small>
+                {gstMode === "INCLUSIVE"
+                  ? "Included in item prices"
+                  : "Added to taxable value"}
+              </small>
+            </span>
+            <span className="invoice-grand-total">
+              Grand total <b>{invoiceMoney(total)}</b>
+            </span>
+          </div>
+        </form>
+        {settingsOpen && (
+          <Modal
+            title="Invoice tax settings"
+            close={() => setSettingsOpen(false)}
+            className="invoice-settings-modal"
+          >
+            <div className="invoice-settings-form">
+              <p>
+                Choose how catalog prices should be treated for this invoice.
+                The preview and saved invoice use the same calculation.
+              </p>
+              <div className="tax-mode-options">
+                <button
+                  type="button"
+                  className={gstMode === "EXCLUSIVE" ? "active" : ""}
+                  onClick={() => setGstMode("EXCLUSIVE")}
+                >
+                  <b>GST exclusive</b>
+                  <span>GST is added on top of the catalog price.</span>
+                </button>
+                <button
+                  type="button"
+                  className={gstMode === "INCLUSIVE" ? "active" : ""}
+                  onClick={() => setGstMode("INCLUSIVE")}
+                >
+                  <b>GST inclusive</b>
+                  <span>GST is already included in the catalog price.</span>
+                </button>
+              </div>
+              <label>
+                GST rate (%)
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={gstRate}
+                  onChange={(e) =>
+                    setGstRate(
+                      Math.max(0, Math.min(100, Number(e.target.value))),
+                    )
+                  }
+                />
+              </label>
+              <div className="gst-rate-presets">
+                {[0, 5, 12, 18, 28].map((rate) => (
+                  <button
+                    type="button"
+                    className={gstRate === rate ? "active" : ""}
+                    key={rate}
+                    onClick={() => setGstRate(rate)}
+                  >
+                    {rate}%
+                  </button>
+                ))}
+              </div>
+              <div className="invoice-settings-preview">
+                <span>
+                  Taxable value <b>{invoiceMoney(subtotal)}</b>
+                </span>
+                <span>
+                  GST <b>{invoiceMoney(tax)}</b>
+                </span>
+                <span>
+                  Total <b>{invoiceMoney(total)}</b>
+                </span>
+              </div>
+              <button
+                type="button"
+                className="button primary"
+                onClick={() => setSettingsOpen(false)}
+              >
+                <Check />
+                Apply settings
+              </button>
+            </div>
+          </Modal>
+        )}
+        {adding && (
+          <InvoiceItemPicker
+            products={data.products}
+            lines={lines}
+            setLines={setLines}
+            mutate={mutate}
+            close={() => setAdding(false)}
+          />
+        )}{" "}
+        {creatingCustomer && (
+          <CustomerModal
+            actorRole={data.user.role}
+            mutate={mutate}
+            close={() => setCreatingCustomer(false)}
+            onSaved={() => setPickNewest(true)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+function Policies({ data, mutate }: { data: Workspace; mutate: Function }) {
+  return (
+    <Panel title="Discount tiers and approval chain">
+      <div className="policy-grid">
+        {data.policies.map((p) => (
+          <PolicyCard key={p.id} policy={p} mutate={mutate} />
+        ))}
+      </div>
+      <div className="approval-chain">
+        <div>
+          <i>1</i>
+          <span>
+            <b>Within policy</b>
+            <small>No approval required</small>
+          </span>
+        </div>
+        <ChevronRight />
+        <div>
+          <i>2</i>
+          <span>
+            <b>Above line or blended limit</b>
+            <small>Sales Manager review</small>
+          </span>
+        </div>
+        <ChevronRight />
+        <div>
+          <i>3</i>
+          <span>
+            <b>High-risk exception</b>
+            <small>Finance review after Manager</small>
+          </span>
         </div>
       </div>
-      <div className="actions product-form-actions"><button type="button" className="button ghost" onClick={close}>Cancel</button><button className="button primary" disabled={!canSubmit}><PackagePlus/>{product?'Save changes':`Create ${itemLabel}`}</button></div>
-    </form>
-  </Modal>
+    </Panel>
+  );
 }
-function InvoiceItemPicker({products,lines,setLines,mutate,close}:{products:Product[];lines:CommerceLine[];setLines:(fn:(value:CommerceLine[])=>CommerceLine[])=>void;mutate:Function;close:()=>void}){
-  const[query,setQuery]=useState('');
-  const[creating,setCreating]=useState(false);
-  const filtered=products.filter(product=>product.active&&[product.name,product.sku,product.category,product.description].join(' ').toLowerCase().includes(query.toLowerCase()));
-  const setQuantity=(productId:string,quantity:number)=>setLines(current=>{
-    const product=products.find(item=>item.id===productId);
-    const maximum=availableStock(product);
-    const next=Math.max(0,Math.min(Math.trunc(Number.isFinite(quantity)?quantity:0),maximum));
-    const existing=current.find(line=>line.productId===productId);
-    if(next===0)return current.filter(line=>line.productId!==productId);
-    if(existing)return current.map(line=>line.productId===productId?{...line,quantity:next}:line);
-    return [...current,{productId,quantity:next,discount:0}];
-  });
-  const selectedTotal=lines.reduce((sum,line)=>{const product=products.find(item=>item.id===line.productId);return sum+Number(product?.price??0)*line.quantity*(1-line.discount/100)},0);
-  return <div className="modal-wrap invoice-picker-wrap" onMouseDown={event=>event.target===event.currentTarget&&close()}><section className="invoice-item-picker" role="dialog" aria-modal="true" aria-labelledby="invoice-item-picker-title">
-    <header><div><span className="eyebrow">Catalog</span><h2 id="invoice-item-picker-title">Add invoice items</h2><p>Choose products or services, then confirm the quantities.</p></div><button type="button" className="icon-button" aria-label="Close item picker" onClick={close}><X/></button></header>
-    <div className="invoice-picker-toolbar"><div className="search"><Search/><input autoFocus aria-label="Search invoice items" placeholder="Search by item name, SKU, or category" value={query} onChange={event=>setQuery(event.target.value)}/></div><button className="button primary" type="button" onClick={()=>setCreating(true)}><Plus/>Create New Product</button></div>
-    <div className="invoice-picker-columns" aria-hidden="true"><span>Item</span><span>Rate</span><span>Availability</span><span>Quantity</span><span>Line total</span><span/></div>
-    <div className="invoice-picker-list">{filtered.map(product=>{const selected=lines.find(line=>line.productId===product.id);const quantity=selected?.quantity??0;const stock=availableStock(product);const unavailable=!product.recurring&&stock<=0;const total=Number(product.price)*quantity*(1-(selected?.discount??0)/100);return <article key={product.id} className={selected?'selected':''}>
-      <div className="invoice-picker-product"><i><Package/></i><span><b>{product.name}</b><small>{product.sku} · {product.category} · {product.unit}</small></span></div>
-      <div className="invoice-picker-rate"><b>{invoiceMoney(product.price)}</b><small>per {product.unit.toLowerCase()}</small></div>
-      <div className={`invoice-picker-stock ${unavailable?'unavailable':''}`}><b>{product.recurring?'Available':stock}</b><small>{product.recurring?'Service':'in stock'}</small></div>
-      <div className="item-qty-control"><button type="button" aria-label={`Decrease ${product.name}`} disabled={!selected} onClick={()=>setQuantity(product.id,quantity-1)}>−</button><input aria-label={`Quantity for ${product.name}`} type="number" min="0" max={product.recurring?undefined:stock} value={quantity} onChange={event=>setQuantity(product.id,Number(event.target.value))}/><button type="button" aria-label={`Increase ${product.name}`} disabled={unavailable||(!product.recurring&&quantity>=stock)} onClick={()=>setQuantity(product.id,quantity+1)}>+</button></div>
-      <strong className="invoice-picker-total">{invoiceMoney(total)}</strong>
-      <button type="button" className={`item-select-button ${selected?'selected':''}`} disabled={!selected&&unavailable} onClick={()=>setQuantity(product.id,selected?0:1)}>{selected?'Remove':unavailable?'Out of stock':'Add'}</button>
-    </article>})}{!filtered.length&&<Empty text="No matching catalog items. Create a new product to continue."/>}</div>
-    <footer><span><small>{lines.length} item{lines.length===1?'':'s'} selected · before invoice GST</small><b>{invoiceMoney(selectedTotal)}</b></span><div className="actions"><button type="button" className="button ghost" onClick={close}>Cancel</button><button type="button" className="button primary" onClick={close} disabled={!lines.length}>Add to invoice</button></div></footer>
-    {creating&&<CreateProductModal products={products} mutate={mutate} close={()=>setCreating(false)}/>}
-  </section></div>;
-}
-function ToggleField({title,note,checked,setChecked}:{title:string;note:string;checked:boolean;setChecked:(checked:boolean)=>void}){return <label className="toggle-field"><span><b>{title}</b><small>{note}</small></span><input type="checkbox" checked={checked} onChange={e=>setChecked(e.target.checked)}/><i/></label>}
-function AddInvoiceItemsModal({products,lines,setLines,mutate,close}:{products:Product[];lines:CommerceLine[];setLines:(fn:(value:CommerceLine[])=>CommerceLine[])=>void;mutate:Function;close:()=>void}){const[query,setQuery]=useState('');const[creating,setCreating]=useState(false);const active=products.filter(p=>p.active);const filtered=active.filter(p=>[p.name,p.sku,p.category,p.description].join(' ').toLowerCase().includes(query.toLowerCase()));const clamp=(productId:string,quantity:number)=>{const product=products.find(item=>item.id===productId);const max=availableStock(product);return Math.max(0,Math.min(Math.trunc(Number.isFinite(quantity)?quantity:0),max))};const update=(productId:string,quantity:number)=>setLines(value=>{const next=clamp(productId,quantity);const existing=value.find(line=>line.productId===productId);if(next<=0)return value.filter(line=>line.productId!==productId);if(existing)return value.map(line=>line.productId===productId?{...line,quantity:next}:line);return [...value,{productId,quantity:next,discount:0}]});const addProduct=(productId:string)=>update(productId,lines.find(line=>line.productId===productId)?.quantity||1);const selectedTotal=lines.reduce((sum,line)=>sum+lineAmount(products.find(product=>product.id===line.productId),line).total,0);return <div className="modal-wrap" onMouseDown={e=>e.target===e.currentTarget&&close()}><div className="modal add-items-modal"><div className="panel-title"><h3>Add Items</h3><button onClick={close}><X/></button></div><div className="add-items-toolbar"><div className="search"><Search/><input autoFocus placeholder="Search items by name, SKU, or category" value={query} onChange={e=>setQuery(e.target.value)}/></div><button className="button primary" type="button" onClick={()=>setCreating(true)}><Plus/>Create New Product</button></div><div className="selected-items-strip"><span>{lines.length} selected item{lines.length===1?'':'s'}</span><strong>{money(selectedTotal)}</strong></div><div className="table-wrap item-picker-table"><table><thead><tr><th>Item name</th><th>SKU code</th><th>Category</th><th>Sales price</th><th>Stock</th><th>Quantity</th><th>Amount</th><th/></tr></thead><tbody>{filtered.map(product=>{const selected=lines.find(line=>line.productId===product.id);const quantity=selected?.quantity??0;const amount=lineAmount(product,{productId:product.id,quantity,discount:selected?.discount??0});const stock=availableStock(product);const outOfStock=!product.recurring&&stock<=0;return <tr key={product.id} className={selected?'selected-item-row':''}><td><b>{product.name}</b><small>{product.description}</small></td><td>{product.sku}</td><td>{product.category}</td><td>{money(product.price)}</td><td><span className={outOfStock?'stock-empty':''}>{product.recurring?'Service':stock}</span></td><td><div className="item-qty-control"><button type="button" aria-label={`Decrease ${product.name}`} onClick={()=>update(product.id,quantity-1)} disabled={!selected}>-</button><input className="qty-input" type="number" min="0" max={product.recurring?undefined:stock} value={quantity} onChange={e=>update(product.id,Number(e.target.value))}/><button type="button" aria-label={`Increase ${product.name}`} onClick={()=>update(product.id,quantity+1)} disabled={!product.recurring&&quantity>=stock}>+</button></div>{!product.recurring&&<small className="stock-limit-note">Max {stock}</small>}</td><td><b>{money(amount.total)}</b></td><td><button type="button" className={`item-select-button ${selected?'selected':''}`} disabled={!selected&&outOfStock} onClick={()=>selected?update(product.id,0):addProduct(product.id)}>{selected?'Selected':outOfStock?'No Stock':'Add'}</button></td></tr>})}</tbody></table>{!filtered.length&&<Empty text="No items found. Create a new product to add it to this invoice."/>}</div><div className="actions add-items-actions"><button type="button" className="button ghost" onClick={close}>Cancel</button><button type="button" className="button primary" onClick={close} disabled={!lines.length}>Done</button></div>{creating&&<CreateProductModal products={products} mutate={mutate} close={()=>setCreating(false)}/>}</div></div>}
-function CustomerPickerModal({customers,selectedId,onSelect,onCreate,close}:{customers:Customer[];selectedId:string;onSelect:(customer:Customer|null)=>void;onCreate:()=>void;close:()=>void}){
-  const[query,setQuery]=useState('');
-  const filtered=customers.filter(customer=>[customer.name,customer.contactPerson??'',customer.phone??'',customer.email??'',customer.gstin??''].join(' ').toLowerCase().includes(query.toLowerCase()));
-  useEffect(()=>{const dismiss=(event:KeyboardEvent)=>event.key==='Escape'&&close();document.addEventListener('keydown',dismiss);return()=>document.removeEventListener('keydown',dismiss)},[close]);
-  return <div className="customer-picker-layer" onMouseDown={event=>event.target===event.currentTarget&&close()}><section className="customer-picker-popover" role="dialog" aria-modal="true" aria-labelledby="customer-picker-title">
-    <div className="customer-picker-head"><div><span className="eyebrow">Invoice customer</span><h2 id="customer-picker-title">Select customer</h2><p>Choose the billing account for this invoice.</p></div><button type="button" className="icon-button" aria-label="Close customer picker" onClick={close}><X/></button></div>
-    <div className="customer-picker-search"><Search/><input aria-label="Search customers" autoFocus placeholder="Search by name, phone, email, or GSTIN" value={query} onChange={event=>setQuery(event.target.value)}/></div>
-    <div className="customer-picker-list"><small>Customers</small>{filtered.map(customer=><button type="button" key={customer.id} className={`customer-picker-row ${selectedId===customer.id?'active':''}`} onClick={()=>{onSelect(customer);close()}}><i><UserRound/></i><span><b>{customer.name}</b><em>{[customer.email,customer.phone?`${customer.countryCode} ${customer.phone}`:null,customer.gstin].filter(Boolean).join(' · ')||customer.customerType}</em></span><strong>{customer.tier}</strong><ArrowRight/></button>)}{!filtered.length&&<p>No customers match your search.</p>}</div>
-    <button type="button" className="customer-picker-create" onClick={onCreate}><Plus/>Create new customer</button>
-  </section></div>;
-}
-function CreateInvoiceModal({data,mutate,close}:{data:Workspace;mutate:Function;close:()=>void}){
-  const activeCustomers=data.customers.filter(c=>c.active);
-  const termsDueDate=(days:number)=>new Date(Date.now()+days*86400000).toISOString().slice(0,10);
-  const[customerId,setCustomerId]=useState('');
-  const[terms,setTerms]=useState(30);
-  const[dueAt,setDueAt]=useState(termsDueDate(30));
-  const[lines,setLines]=useState<CommerceLine[]>([]);
-  const[adding,setAdding]=useState(false);
-  const[pickingCustomer,setPickingCustomer]=useState(false);
-  const[creatingCustomer,setCreatingCustomer]=useState(false);
-  const[pickNewest,setPickNewest]=useState(false);
-  const[settingsOpen,setSettingsOpen]=useState(false);
-  const[gstMode,setGstMode]=useState<InvoiceTaxMode>('EXCLUSIVE');
-  const[gstRate,setGstRate]=useState(18);
-  const invoiceDate=new Date().toISOString().slice(0,10);
-  const customer=activeCustomers.find(c=>c.id===customerId);
-  const applyTerms=(days:number)=>{setTerms(days);setDueAt(termsDueDate(days))};
-  const selectCustomer=(next:Customer|null)=>{setCustomerId(next?.id??'');applyTerms(next?.paymentTerms??30)};
-  useEffect(()=>{if(!pickNewest)return;const newest=[...activeCustomers].sort((a,b)=>new Date(b.createdAt).getTime()-new Date(a.createdAt).getTime())[0];if(newest){selectCustomer(newest);setPickingCustomer(false)}setPickNewest(false)},[data.customers.length,pickNewest]);
-  const updateLine=(index:number,patch:Partial<CommerceLine>)=>setLines(value=>value.map((line,i)=>{if(i!==index)return line;const product=data.products.find(p=>p.id===line.productId);const nextQuantity=patch.quantity===undefined?line.quantity:Math.max(1,Math.min(Math.trunc(Number.isFinite(patch.quantity)?patch.quantity:1),availableStock(product)));return{...line,...patch,quantity:nextQuantity}}));
-  const removeLine=(index:number)=>setLines(value=>value.filter((_,i)=>i!==index));
-  const amounts=lines.map(line=>invoiceLineAmount(data.products.find(p=>p.id===line.productId),line,gstRate,gstMode));
-  const itemsTotal=amounts.reduce((sum,amount)=>sum+amount.listed,0);
-  const discountTotal=amounts.reduce((sum,amount)=>sum+amount.discount,0);
-  const subtotal=amounts.reduce((sum,amount)=>sum+amount.net,0);
-  const tax=amounts.reduce((sum,amount)=>sum+amount.tax,0);
-  const total=subtotal+tax;
-  const partyName=customer?.name??'Select customer';
-  const partyNote=customer?(customer.contactPerson||customer.customerType):'Choose an existing customer or create a new profile.';
-  const submit=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();await mutate('/invoices',{customerId,dueAt:String(new FormData(e.currentTarget).get('dueAt')),lines,gstMode,gstRate},'POST','Invoice created');close()};
-  return <div className="modal-wrap" onMouseDown={e=>e.target===e.currentTarget&&close()}><div className="modal invoice-workspace-modal">
-    <form onSubmit={submit}>
-      <div className="invoice-create-head"><div><h3>Create Invoice</h3><p>Build a clear, tax-ready customer invoice from your synced catalog.</p></div><div className="actions"><button type="button" className="button ghost" onClick={()=>setSettingsOpen(true)}><Settings2/>Settings</button><button type="button" className="button ghost" onClick={()=>{setLines([]);selectCustomer(null);setPickingCustomer(false)}}>Clear Form</button><button type="button" className="button ghost" onClick={close}>Cancel</button><button className="button primary" disabled={!customerId||!lines.length}><FileCheck/>Create Invoice</button></div></div>
-      <div className="invoice-create-grid">
-        <div className="invoice-party-group">
-          <section className={`invoice-party-card ${customer?'':'needs-selection'}`}><div><span><UserRound/>Bill To</span><button type="button" className="button ghost compact-change" onClick={()=>setPickingCustomer(true)}>{customerId?'Change':'Select Customer'}</button></div><h2>{partyName}</h2><p>{partyNote}</p><div className="contact-card"><span>Name <b>{customer?.contactPerson||customer?.name||'Not selected'}</b></span><span>Phone <b>{customer?.phone?`${customer.countryCode} ${customer.phone}`:'—'}</b></span><span>Email <b>{customer?.email||'Not available'}</b></span></div>{pickingCustomer&&<CustomerPickerModal customers={activeCustomers} selectedId={customerId} onSelect={selectCustomer} close={()=>setPickingCustomer(false)} onCreate={()=>{setPickingCustomer(false);setCreatingCustomer(true)}}/>}</section>
-          <section className="invoice-party-card muted-card"><span><Send/>Ship To</span><h2>{partyName}</h2><p>{customer?.shippingAddress||customer?.billingAddress||'Shipping address will appear after customer selection.'}</p></section>
-        </div>
-        <aside className="invoice-side-panel"><label>Invoice Date<input type="date" name="invoiceDate" value={invoiceDate} readOnly/></label><label>Due Date<input type="date" name="dueAt" value={dueAt} onChange={e=>setDueAt(e.target.value)} required/></label><label>Payment Terms<input type="number" min="0" max="180" value={terms} onChange={e=>applyTerms(Number(e.target.value))}/><small>Days</small></label><div className="tax-summary-chip"><span>GST treatment</span><b>{gstRate}% · {gstMode==='INCLUSIVE'?'Price inclusive':'Added separately'}</b><button type="button" onClick={()=>setSettingsOpen(true)}>Change</button></div></aside>
+function PolicyCard({
+  policy,
+  mutate,
+}: {
+  policy: Workspace["policies"][number];
+  mutate: Function;
+}) {
+  const [max, setMax] = useState(Number(policy.maxDiscount));
+  const [finance, setFinance] = useState(Number(policy.financeThreshold));
+  return (
+    <div className="policy-card">
+      <div>
+        <span className="tier">{policy.tier}</span>
+        <b>Maximum discount</b>
       </div>
-      <div className="invoice-item-actions"><button type="button" className="button primary add-item-button" onClick={()=>setAdding(true)}><Plus/>Add Item</button><div className="search"><Search/><input placeholder="Scan barcode or SKU..." readOnly onClick={()=>setAdding(true)}/></div></div>
-      <div className={`invoice-lines-shell ${lines.length?'has-lines':''}`}><table><thead><tr><th>No</th><th>Items</th><th>HSN/SKU</th><th>Qty</th><th>Unit</th><th>Price/Item</th><th>Discount</th><th>GST</th><th>Amount</th><th/></tr></thead><tbody>{lines.map((line,index)=>{const product=data.products.find(p=>p.id===line.productId);const amount=invoiceLineAmount(product,line,gstRate,gstMode);return <tr key={`${line.productId}-${index}`}><td>{index+1}</td><td><b>{product?.name}</b><small>{product?.description}</small></td><td>{product?.sku}</td><td><input className="qty-input" type="number" min="1" max={product?.recurring?undefined:availableStock(product)} value={line.quantity} onChange={e=>updateLine(index,{quantity:Number(e.target.value)})}/></td><td>{product?.unit}</td><td>{invoiceMoney(product?.price??0)}<small>{gstMode==='INCLUSIVE'?'Incl. GST':'Excl. GST'}</small></td><td><input className="qty-input" aria-label={`Discount for ${product?.name}`} type="number" min="0" max="100" value={line.discount} onChange={e=>updateLine(index,{discount:Number(e.target.value)})}/></td><td><b>{invoiceMoney(amount.tax)}</b><small>{gstRate}%</small></td><td><b>{invoiceMoney(amount.total)}</b></td><td><button type="button" className="icon-button" aria-label="Remove item" onClick={()=>removeLine(index)}><Trash2/></button></td></tr>})}</tbody></table>{!lines.length&&<Empty text="No items added yet. Click Add Item to start."/>}</div>
-      <div className="invoice-total-bar" aria-label="Invoice totals"><span>Items total <b>{invoiceMoney(itemsTotal)}</b></span><span>Discount <b>− {invoiceMoney(discountTotal)}</b></span><span>Taxable value <b>{invoiceMoney(subtotal)}</b></span><span>GST ({gstRate}%) <b>{invoiceMoney(tax)}</b><small>{gstMode==='INCLUSIVE'?'Included in item prices':'Added to taxable value'}</small></span><span className="invoice-grand-total">Grand total <b>{invoiceMoney(total)}</b></span></div>
-    </form>
-    {settingsOpen&&<Modal title="Invoice tax settings" close={()=>setSettingsOpen(false)} className="invoice-settings-modal"><div className="invoice-settings-form"><p>Choose how catalog prices should be treated for this invoice. The preview and saved invoice use the same calculation.</p><div className="tax-mode-options"><button type="button" className={gstMode==='EXCLUSIVE'?'active':''} onClick={()=>setGstMode('EXCLUSIVE')}><b>GST exclusive</b><span>GST is added on top of the catalog price.</span></button><button type="button" className={gstMode==='INCLUSIVE'?'active':''} onClick={()=>setGstMode('INCLUSIVE')}><b>GST inclusive</b><span>GST is already included in the catalog price.</span></button></div><label>GST rate (%)<input type="number" min="0" max="100" step="0.01" value={gstRate} onChange={e=>setGstRate(Math.max(0,Math.min(100,Number(e.target.value))))}/></label><div className="gst-rate-presets">{[0,5,12,18,28].map(rate=><button type="button" className={gstRate===rate?'active':''} key={rate} onClick={()=>setGstRate(rate)}>{rate}%</button>)}</div><div className="invoice-settings-preview"><span>Taxable value <b>{invoiceMoney(subtotal)}</b></span><span>GST <b>{invoiceMoney(tax)}</b></span><span>Total <b>{invoiceMoney(total)}</b></span></div><button type="button" className="button primary" onClick={()=>setSettingsOpen(false)}><Check/>Apply settings</button></div></Modal>}
-    {adding&&<InvoiceItemPicker products={data.products} lines={lines} setLines={setLines} mutate={mutate} close={()=>setAdding(false)}/>} {creatingCustomer&&<CustomerModal actorRole={data.user.role} mutate={mutate} close={()=>setCreatingCustomer(false)} onSaved={()=>setPickNewest(true)}/>}
-  </div></div>
+      <label>
+        <input
+          type="number"
+          min="0"
+          max="100"
+          value={max}
+          onChange={(e) => setMax(Number(e.target.value))}
+        />
+        %
+      </label>
+      <div className="facts">
+        <div>
+          <span>Hardware</span>
+          <b>{policy.hardwareLimit}%</b>
+        </div>
+        <div>
+          <span>Services</span>
+          <b>{policy.servicesLimit}%</b>
+        </div>
+        <div>
+          <span>Subscriptions</span>
+          <b>{policy.subscriptionLimit}%</b>
+        </div>
+      </div>
+      <label>
+        Finance after{" "}
+        <input
+          type="number"
+          min="0"
+          max="100"
+          value={finance}
+          onChange={(e) => setFinance(Number(e.target.value))}
+        />{" "}
+        pts
+      </label>
+      <button
+        className="button ghost"
+        onClick={() =>
+          mutate(
+            `/policies/${policy.id}`,
+            { maxDiscount: max, financeThreshold: finance },
+            "PATCH",
+            "Policy updated",
+          )
+        }
+      >
+        Save policy
+      </button>
+    </div>
+  );
 }
-function Policies({data,mutate}:{data:Workspace;mutate:Function}){return <Panel title="Discount tiers and approval chain"><div className="policy-grid">{data.policies.map(p=><PolicyCard key={p.id} policy={p} mutate={mutate}/>)}</div><div className="approval-chain"><div><i>1</i><span><b>Within policy</b><small>No approval required</small></span></div><ChevronRight/><div><i>2</i><span><b>Above line or blended limit</b><small>Sales Manager review</small></span></div><ChevronRight/><div><i>3</i><span><b>High-risk exception</b><small>Finance review after Manager</small></span></div></div></Panel>}
-function PolicyCard({policy,mutate}:{policy:Workspace['policies'][number];mutate:Function}){const[max,setMax]=useState(Number(policy.maxDiscount));const[finance,setFinance]=useState(Number(policy.financeThreshold));return <div className="policy-card"><div><span className="tier">{policy.tier}</span><b>Maximum discount</b></div><label><input type="number" min="0" max="100" value={max} onChange={e=>setMax(Number(e.target.value))}/>%</label><div className="facts"><div><span>Hardware</span><b>{policy.hardwareLimit}%</b></div><div><span>Services</span><b>{policy.servicesLimit}%</b></div><div><span>Subscriptions</span><b>{policy.subscriptionLimit}%</b></div></div><label>Finance after <input type="number" min="0" max="100" value={finance} onChange={e=>setFinance(Number(e.target.value))}/> pts</label><button className="button ghost" onClick={()=>mutate(`/policies/${policy.id}`,{maxDiscount:max,financeThreshold:finance},'PATCH','Policy updated')}>Save policy</button></div>}
-const accessModules=[['dashboard','Overview'],['quotations','Quotations'],['approvals','Approvals'],['fulfillment','Fulfillment & stock'],['invoices','Invoices'],['health','Deal health'],['reports','Reports'],['products','Products'],['customers','Customers'],['policies','Rules']] as const;
-type AccessModuleId = typeof accessModules[number][0];
-type ProvisionableRole = 'REP'|'MANAGER'|'FINANCE';
-type ManagedRole = ProvisionableRole|'ADMIN';
-const rolePresets:Array<{id:ProvisionableRole;label:string;note:string;modules:AccessModuleId[]}>= [
-  {id:'REP',label:'Sales representative',note:'Creates quotations, owns customer follow-up, and sees deal health.',modules:['dashboard','quotations','health']},
-  {id:'MANAGER',label:'Manager',note:'Reviews commercial exceptions, customers, policies, reports, and team deals.',modules:['dashboard','quotations','approvals','health','reports','customers','policies']},
-  {id:'FINANCE',label:'Finance',note:'Handles approval checks, fulfillment, invoices, and reports.',modules:['dashboard','approvals','fulfillment','invoices','reports']},
+const accessModules = [
+  ["dashboard", "Overview"],
+  ["quotations", "Quotations"],
+  ["approvals", "Approvals"],
+  ["fulfillment", "Fulfillment & stock"],
+  ["invoices", "Invoices"],
+  ["health", "Deal health"],
+  ["reports", "Reports"],
+  ["products", "Products"],
+  ["customers", "Customers"],
+  ["policies", "Rules"],
+] as const;
+type AccessModuleId = (typeof accessModules)[number][0];
+type ProvisionableRole = "REP" | "MANAGER" | "FINANCE";
+type ManagedRole = ProvisionableRole | "ADMIN";
+const rolePresets: Array<{
+  id: ProvisionableRole;
+  label: string;
+  note: string;
+  modules: AccessModuleId[];
+}> = [
+  {
+    id: "REP",
+    label: "Sales representative",
+    note: "Creates quotations, owns customer follow-up, and sees deal health.",
+    modules: ["dashboard", "quotations", "health"],
+  },
+  {
+    id: "MANAGER",
+    label: "Manager",
+    note: "Reviews commercial exceptions, customers, policies, reports, and team deals.",
+    modules: [
+      "dashboard",
+      "quotations",
+      "approvals",
+      "health",
+      "reports",
+      "customers",
+      "policies",
+    ],
+  },
+  {
+    id: "FINANCE",
+    label: "Finance",
+    note: "Handles approval checks, fulfillment, invoices, and reports.",
+    modules: ["dashboard", "approvals", "fulfillment", "invoices", "reports"],
+  },
 ];
-const roleName=(role:string)=>rolePresets.find(r=>r.id===role)?.label??label(role);
-function AccessControl({data,reload}:{data:Workspace;reload:()=>Promise<void>}){
-  const[name,setName]=useState('');
-  const[email,setEmail]=useState('');
-  const[password,setPassword]=useState('');
-  const[role,setRole]=useState<ProvisionableRole>('REP');
-  const[selected,setSelected]=useState<AccessModuleId[]>([...rolePresets[0]!.modules]);
-  const[credentials,setCredentials]=useState<{email:string;loginId:string;password:string}|null>(null);
-  const[editing,setEditing]=useState<Workspace['users'][number]|null>(null);
-  const[viewing,setViewing]=useState<OrganizationMemberDetail|null>(null);
-  const[detailBusy,setDetailBusy]=useState(false);
-  const[busy,setBusy]=useState(false);
-  const[error,setError]=useState('');
-  const activeRole=rolePresets.find(r=>r.id===role)!;
-  const chooseRole=(next:ProvisionableRole)=>{setRole(next);setSelected([...rolePresets.find(r=>r.id===next)!.modules])};
-  const toggleModule=(id:AccessModuleId)=>setSelected(selected.includes(id)?selected.filter(x=>x!==id):[...selected,id]);
-  const viewMember=async(id:string)=>{try{setDetailBusy(true);setError('');setViewing(await request<OrganizationMemberDetail>(`/admin/users/${id}`))}catch(e){setError(e instanceof Error?e.message:'Could not load member details')}finally{setDetailBusy(false)}};
-  const create=async(e:FormEvent)=>{
+const roleName = (role: string) =>
+  rolePresets.find((r) => r.id === role)?.label ?? label(role);
+function AccessControl({
+  data,
+  reload,
+}: {
+  data: Workspace;
+  reload: () => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<ProvisionableRole>("REP");
+  const [selected, setSelected] = useState<AccessModuleId[]>([
+    ...rolePresets[0]!.modules,
+  ]);
+  const [credentials, setCredentials] = useState<{
+    email: string;
+    loginId: string;
+    password: string;
+  } | null>(null);
+  const [editing, setEditing] = useState<Workspace["users"][number] | null>(
+    null,
+  );
+  const [viewing, setViewing] = useState<OrganizationMemberDetail | null>(null);
+  const [detailBusy, setDetailBusy] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const activeRole = rolePresets.find((r) => r.id === role)!;
+  const chooseRole = (next: ProvisionableRole) => {
+    setRole(next);
+    setSelected([...rolePresets.find((r) => r.id === next)!.modules]);
+  };
+  const toggleModule = (id: AccessModuleId) =>
+    setSelected(
+      selected.includes(id)
+        ? selected.filter((x) => x !== id)
+        : [...selected, id],
+    );
+  const viewMember = async (id: string) => {
+    try {
+      setDetailBusy(true);
+      setError("");
+      setViewing(await request<OrganizationMemberDetail>(`/admin/users/${id}`));
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Could not load member details",
+      );
+    } finally {
+      setDetailBusy(false);
+    }
+  };
+  const create = async (e: FormEvent) => {
     e.preventDefault();
-    try{
-      setBusy(true);setError('');
-      const result=await request<{credentials:{email:string;loginId:string;password:string}}>('/admin/users',{method:'POST',body:JSON.stringify({name,email,password,role,moduleAccess:selected})});
-      window.sessionStorage.setItem('dealos_generated_login',JSON.stringify(result.credentials));
+    try {
+      setBusy(true);
+      setError("");
+      const result = await request<{
+        credentials: { email: string; loginId: string; password: string };
+      }>("/admin/users", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          email,
+          password,
+          role,
+          moduleAccess: selected,
+        }),
+      });
+      window.sessionStorage.setItem(
+        "dealos_generated_login",
+        JSON.stringify(result.credentials),
+      );
       setCredentials(result.credentials);
-      setName('');setEmail('');setPassword('');
-      chooseRole('REP');
+      setName("");
+      setEmail("");
+      setPassword("");
+      chooseRole("REP");
       await reload();
-    }catch(e){
-      setError(e instanceof Error?e.message:'Could not create access');
-    }finally{
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create access");
+    } finally {
       setBusy(false);
     }
   };
-  return <><div className="access-layout"><Panel title={`${data.organization.name} · Add user access`}><form className="access-form" onSubmit={create}><label>User name<input required maxLength={120} value={name} onChange={e=>setName(e.target.value)} placeholder="Jordan Davis"/></label><label>Email ID<input type="email" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="jordan@company.com"/></label><label>Password<div className="password-inline"><input required minLength={12} maxLength={128} value={password} onChange={e=>setPassword(e.target.value)} placeholder="Enter or generate a password"/><button className="button ghost" type="button" onClick={()=>setPassword(generatedPassword())}>Generate password</button></div></label><div><b>Business role</b><p className="muted">Select the user's business role. Organization admin login generation is not available here.</p><div className="role-grid">{rolePresets.map(option=><button type="button" className={role===option.id?'selected':''} key={option.id} onClick={()=>chooseRole(option.id)}><span><ShieldCheck/>{option.label}</span><small>{option.note}</small></button>)}</div></div><div><b>Visible modules</b><p className="muted">Role selection starts with a preset. You can add or remove modules before generating access.</p><div className="module-grid">{accessModules.map(([id,text])=><label className={selected.includes(id)?'selected':'disabled'} key={id}><input type="checkbox" checked={selected.includes(id)} onChange={()=>toggleModule(id)}/><span><Check/>{text}</span></label>)}</div></div>{error&&<div className="error">{error}</div>}<button className="button primary" disabled={busy||!password||!selected.length}><UserRound/> {busy?'Generating...':'Generate login'}</button></form>{credentials&&<div className="credential-card" role="status"><span className="eyebrow">LOGIN READY</span><h3>Credentials generated</h3><div><span>Email ID</span><code>{credentials.email}</code></div><div><span>User ID</span><code>{credentials.loginId}</code></div><div><span>Password</span><code>{credentials.password}</code></div><p>The user can sign in with either Email ID or User ID using this password.</p><button className="button primary" onClick={()=>window.location.assign('/sign-in')}>Open sign in</button></div>}</Panel><Panel title="Organization users"><div className="user-access-list">{data.users.map(user=><div className="user-access-button" key={user.id}><span className="avatar">{user.name.split(' ').map(p=>p[0]).join('').slice(0,2)}</span><span><b>{user.name}</b><small>{user.email}{user.loginId?` · User ID ${user.loginId}`:' · Primary admin'} · {roleName(user.role)} · {user.role==='ADMIN'?'Full workspace access':user.moduleAccess.map(label).join(', ')}</small></span><Status value={user.status}/><button type="button" aria-label={`View details for ${user.name}`} onClick={()=>viewMember(user.id)}><Eye/></button><button type="button" aria-label={`Manage access for ${user.name}`} onClick={()=>setEditing(user)}><Settings2/></button></div>)}</div>{detailBusy&&<div className="member-detail-loading"><RefreshCw/> Loading member details…</div>}</Panel>{editing&&<EditUserAccess user={editing} close={()=>setEditing(null)} saved={async()=>{setEditing(null);await reload()}}/>}</div><SalesTeamManagement/>{viewing&&<MemberDetails member={viewing} close={()=>setViewing(null)}/>}</>
+  return (
+    <>
+      <div className="access-layout">
+        <Panel title={`${data.organization.name} · Add user access`}>
+          <form className="access-form" onSubmit={create}>
+            <label>
+              User name
+              <input
+                required
+                maxLength={120}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Jordan Davis"
+              />
+            </label>
+            <label>
+              Email ID
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="jordan@company.com"
+              />
+            </label>
+            <label>
+              Password
+              <div className="password-inline">
+                <input
+                  required
+                  minLength={12}
+                  maxLength={128}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter or generate a password"
+                />
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={() => setPassword(generatedPassword())}
+                >
+                  Generate password
+                </button>
+              </div>
+            </label>
+            <div>
+              <b>Business role</b>
+              <p className="muted">
+                Select the user's business role. Organization admin login
+                generation is not available here.
+              </p>
+              <div className="role-grid">
+                {rolePresets.map((option) => (
+                  <button
+                    type="button"
+                    className={role === option.id ? "selected" : ""}
+                    key={option.id}
+                    onClick={() => chooseRole(option.id)}
+                  >
+                    <span>
+                      <ShieldCheck />
+                      {option.label}
+                    </span>
+                    <small>{option.note}</small>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <b>Visible modules</b>
+              <p className="muted">
+                Role selection starts with a preset. You can add or remove
+                modules before generating access.
+              </p>
+              <div className="module-grid">
+                {accessModules.map(([id, text]) => (
+                  <label
+                    className={selected.includes(id) ? "selected" : "disabled"}
+                    key={id}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(id)}
+                      onChange={() => toggleModule(id)}
+                    />
+                    <span>
+                      <Check />
+                      {text}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            {error && <div className="error">{error}</div>}
+            <button
+              className="button primary"
+              disabled={busy || !password || !selected.length}
+            >
+              <UserRound /> {busy ? "Generating..." : "Generate login"}
+            </button>
+          </form>
+          {credentials && (
+            <div className="credential-card" role="status">
+              <span className="eyebrow">LOGIN READY</span>
+              <h3>Credentials generated</h3>
+              <div>
+                <span>Email ID</span>
+                <code>{credentials.email}</code>
+              </div>
+              <div>
+                <span>User ID</span>
+                <code>{credentials.loginId}</code>
+              </div>
+              <div>
+                <span>Password</span>
+                <code>{credentials.password}</code>
+              </div>
+              <p>
+                The user can sign in with either Email ID or User ID using this
+                password.
+              </p>
+              <button
+                className="button primary"
+                onClick={() => window.location.assign("/sign-in")}
+              >
+                Open sign in
+              </button>
+            </div>
+          )}
+        </Panel>
+        <Panel title="Organization users">
+          <div className="user-access-list">
+            {data.users.map((user) => (
+              <div className="user-access-button" key={user.id}>
+                <span className="avatar">
+                  {user.name
+                    .split(" ")
+                    .map((p) => p[0])
+                    .join("")
+                    .slice(0, 2)}
+                </span>
+                <span>
+                  <b>{user.name}</b>
+                  <small>
+                    {user.email}
+                    {user.loginId
+                      ? ` · User ID ${user.loginId}`
+                      : ` · ${label(user.accessRole ?? user.role)}`}{" "}
+                    · {roleName(user.role)} ·{" "}
+                    {user.role === "ADMIN"
+                      ? "Full workspace access"
+                      : user.moduleAccess.map(label).join(", ")}
+                  </small>
+                </span>
+                <Status value={user.status} />
+                <button
+                  type="button"
+                  aria-label={`View details for ${user.name}`}
+                  onClick={() => viewMember(user.id)}
+                >
+                  <Eye />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Manage access for ${user.name}`}
+                  onClick={() => setEditing(user)}
+                >
+                  <Settings2 />
+                </button>
+              </div>
+            ))}
+          </div>
+          {detailBusy && (
+            <div className="member-detail-loading">
+              <RefreshCw /> Loading member details…
+            </div>
+          )}
+        </Panel>
+        {editing && (
+          <EditUserAccess
+            user={editing}
+            close={() => setEditing(null)}
+            saved={async () => {
+              setEditing(null);
+              await reload();
+            }}
+          />
+        )}
+      </div>
+      <SalesTeamManagement />
+      {viewing && (
+        <MemberDetails member={viewing} close={() => setViewing(null)} />
+      )}
+    </>
+  );
 }
-function EditUserAccess({user,close,saved}:{user:Workspace['users'][number];close:()=>void;saved:()=>Promise<void>}){
-  const roles:Array<{id:ManagedRole;label:string}>=[{id:'REP',label:'Sales representative'},{id:'MANAGER',label:'Manager'},{id:'FINANCE',label:'Finance'},{id:'ADMIN',label:'Admin'}];
-  const initialRole=roles.some(r=>r.id===user.role)?user.role as ManagedRole:'REP';
-  const [status,setStatus]=useState(user.status);
-  const [role,setRole]=useState<ManagedRole>(initialRole);
-  const [modules,setModules]=useState<AccessModuleId[]>(user.role==='ADMIN'?[...accessModules.map(([id])=>id)]:user.moduleAccess as AccessModuleId[]);
-  const [busy,setBusy]=useState(false);
-  const [error,setError]=useState('');
-  const toggle=(id:AccessModuleId)=>setModules(modules.includes(id)?modules.filter(x=>x!==id):[...modules,id]);
-  const submit=async(e:FormEvent)=>{
+function EditUserAccess({
+  user,
+  close,
+  saved,
+}: {
+  user: Workspace["users"][number];
+  close: () => void;
+  saved: () => Promise<void>;
+}) {
+  const roles: Array<{ id: ManagedRole; label: string }> = [
+    { id: "REP", label: "Sales representative" },
+    { id: "MANAGER", label: "Manager" },
+    { id: "FINANCE", label: "Finance" },
+    { id: "ADMIN", label: "Admin" },
+  ];
+  const initialRole = roles.some((r) => r.id === user.role)
+    ? (user.role as ManagedRole)
+    : "REP";
+  const [status, setStatus] = useState(user.status);
+  const [role, setRole] = useState<ManagedRole>(initialRole);
+  const [modules, setModules] = useState<AccessModuleId[]>(
+    user.role === "ADMIN"
+      ? [...accessModules.map(([id]) => id)]
+      : (user.moduleAccess as AccessModuleId[]),
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const toggle = (id: AccessModuleId) =>
+    setModules(
+      modules.includes(id) ? modules.filter((x) => x !== id) : [...modules, id],
+    );
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
-    try{
-      setBusy(true);setError('');
-      await request(`/admin/users/${user.id}`,{method:'PATCH',body:JSON.stringify({status,role,moduleAccess:role==='ADMIN'?accessModules.map(([id])=>id):modules})});
+    try {
+      setBusy(true);
+      setError("");
+      await request(`/admin/users/${user.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status,
+          role,
+          moduleAccess:
+            role === "ADMIN" ? accessModules.map(([id]) => id) : modules,
+        }),
+      });
       await saved();
-    }catch(e){
-      setError(e instanceof Error?e.message:'Could not update user');
-    }finally{
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not update user");
+    } finally {
       setBusy(false);
     }
   };
-  return <Modal title={`Edit ${user.name}`} close={close}><form className="form" onSubmit={submit}><label>Status<select value={status} onChange={e=>setStatus(e.target.value)}><option value="ACTIVE">Active</option><option value="DISABLED">Inactive</option><option value="PENDING">Pending</option></select></label><label>Business role<select value={role} onChange={e=>setRole(e.target.value as ManagedRole)}>{roles.map(option=><option key={option.id} value={option.id}>{option.label}</option>)}</select></label><div><b>Accessible modules</b><p className="muted">{role==='ADMIN'?'Admins receive full workspace access.':'Select the modules this user can open.'}</p><div className="module-grid">{accessModules.map(([id,text])=><label className={(role==='ADMIN'||modules.includes(id))?'selected':'disabled'} key={id}><input type="checkbox" checked={role==='ADMIN'||modules.includes(id)} disabled={role==='ADMIN'} onChange={()=>toggle(id)}/><span><Check/>{text}</span></label>)}</div></div>{error&&<div className="error">{error}</div>}<button className="button primary" disabled={busy||role!=='ADMIN'&&!modules.length}>{busy?'Saving...':'Save changes'}</button></form></Modal>
+  return (
+    <Modal title={`Edit ${user.name}`} close={close}>
+      <form className="form" onSubmit={submit}>
+        <label>
+          Status
+          <select value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="ACTIVE">Active</option>
+            <option value="DISABLED">Inactive</option>
+            <option value="PENDING">Pending</option>
+          </select>
+        </label>
+        <label>
+          Business role
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value as ManagedRole)}
+          >
+            {roles.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div>
+          <b>Accessible modules</b>
+          <p className="muted">
+            {role === "ADMIN"
+              ? "Admins receive full workspace access."
+              : "Select the modules this user can open."}
+          </p>
+          <div className="module-grid">
+            {accessModules.map(([id, text]) => (
+              <label
+                className={
+                  role === "ADMIN" || modules.includes(id)
+                    ? "selected"
+                    : "disabled"
+                }
+                key={id}
+              >
+                <input
+                  type="checkbox"
+                  checked={role === "ADMIN" || modules.includes(id)}
+                  disabled={role === "ADMIN"}
+                  onChange={() => toggle(id)}
+                />
+                <span>
+                  <Check />
+                  {text}
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+        {error && <div className="error">{error}</div>}
+        <button
+          className="button primary"
+          disabled={busy || (role !== "ADMIN" && !modules.length)}
+        >
+          {busy ? "Saving..." : "Save changes"}
+        </button>
+      </form>
+    </Modal>
+  );
 }
-function DealTable({quotes,open,fulfillment=false}:{quotes:Quote[];open:(v:View,id?:string)=>void;fulfillment?:boolean}){return <div className="table-wrap"><table><thead><tr><th>Deal</th><th>Customer</th><th>Value</th><th>Stage</th><th>Risk</th><th/></tr></thead><tbody>{quotes.map(q=><tr key={q.id}><td><b>{q.number}</b></td><td>{q.customer}</td><td>{money(q.total)}</td><td><Status value={quoteStatus(q)}/></td><td>{q.riskScore} pts</td><td><button onClick={()=>open(fulfillment?'fulfillment-detail':'quote',q.id)}>Open <ChevronRight/></button></td></tr>)}</tbody></table>{!quotes.length&&<Empty text="No records match this view."/>}</div>}
-function Metric({label:txt,value,note,tone=''}:{label:string;value:string;note:string;tone?:string}){return <div className={`metric ${tone}`}><span>{txt}</span><strong>{value}</strong><small>{note}</small></div>}
-function Panel({title:txt,children,action}:{title:string;children:ReactNode;action?:ReactNode}){return <div className="panel"><div className="panel-title"><h3>{txt}</h3>{action}</div>{children}</div>}
-function Status({value}:{value:string}){return <span className={`status ${value.toLowerCase()}`}>{label(value)}</span>}
-function Empty({text}:{text:string}){return <div className="empty"><Package/><p>{text}</p></div>}
-function NoModuleAccess({role}:{role:string}){return <div className="empty" role="status"><LockKeyhole/><h2>Access not configured</h2><p>Your {role} account is active, but your organization administrator has not enabled any workspace modules. Contact your administrator to request access.</p></div>}
-function Modal({title:txt,children,close,className=''}:{title:string;children:ReactNode;close:()=>void;className?:string}){const titleId=useMemo(()=>`dialog-${Math.random().toString(36).slice(2)}`,[]);useEffect(()=>{const dismiss=(event:KeyboardEvent)=>event.key==='Escape'&&close();document.addEventListener('keydown',dismiss);return()=>document.removeEventListener('keydown',dismiss)},[close]);return <div className="modal-wrap" onMouseDown={e=>e.target===e.currentTarget&&close()}><div className={`modal ${className}`} role="dialog" aria-modal="true" aria-labelledby={titleId}><div className="panel-title"><h3 id={titleId}>{txt}</h3><button type="button" aria-label={`Close ${txt}`} onClick={close}><X/></button></div>{children}</div></div>}
-function title(view:View){const map:Record<View,string>={dashboard:'Sales dashboard',leads:'Portal Leads','join-requests':'Join requests',quotations:'Quotation pipeline',quote:'Quotation detail',approvals:'Approval queue',approval:'Approval detail',fulfillment:'Fulfillment & stock','fulfillment-detail':'Fulfillment detail',subscriptions:'Subscriptions',billing:'Billing detail',portal:'Customer portal',invoices:'Invoices',invoice:'Invoice detail',health:'Deal health',reports:'Sales reporting',products:'Products',product:'Product details',customers:'Customers',customer:'Customer detail',policies:'Discount governance',access:'User access control'};return map[view]}
-function related(view:View,id:View){return(id==='quotations'&&view==='quote')||(id==='approvals'&&view==='approval')||(id==='fulfillment'&&view==='fulfillment-detail')||(id==='subscriptions'&&view==='billing')||(id==='invoices'&&view==='invoice')||(id==='products'&&view==='product')||(id==='customers'&&view==='customer')}
-function CustomerDetailV2(props:{customer?:Customer;open:(v:View,id?:string)=>void;mutate:Function;role:string;onChanged:()=>Promise<void>}){const customer=props.customer;return <><CustomerDetail {...props}/>{customer&&<CustomerRelationshipCard customer={customer} canChange={['MANAGER','ADMIN'].includes(props.role)} onChanged={props.onChanged}/>} {customer&&<PortalAccessSection customer={customer} role={props.role} onChanged={props.onChanged}/>}</>}
+function DealTable({
+  quotes,
+  open,
+  fulfillment = false,
+}: {
+  quotes: Quote[];
+  open: (v: View, id?: string) => void;
+  fulfillment?: boolean;
+}) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Deal</th>
+            <th>Customer</th>
+            <th>Value</th>
+            <th>Stage</th>
+            <th>Risk</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {quotes.map((q) => (
+            <tr key={q.id}>
+              <td>
+                <b>{q.number}</b>
+              </td>
+              <td>{q.customer}</td>
+              <td>{money(q.total)}</td>
+              <td>
+                <Status value={quoteStatus(q)} />
+              </td>
+              <td>{q.riskScore} pts</td>
+              <td>
+                <button
+                  onClick={() =>
+                    open(fulfillment ? "fulfillment-detail" : "quote", q.id)
+                  }
+                >
+                  Open <ChevronRight />
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!quotes.length && <Empty text="No records match this view." />}
+    </div>
+  );
+}
+function Metric({
+  label: txt,
+  value,
+  note,
+  tone = "",
+}: {
+  label: string;
+  value: string;
+  note: string;
+  tone?: string;
+}) {
+  return (
+    <div className={`metric ${tone}`}>
+      <span>{txt}</span>
+      <strong>{value}</strong>
+      <small>{note}</small>
+    </div>
+  );
+}
+function Panel({
+  title: txt,
+  children,
+  action,
+}: {
+  title: string;
+  children: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="panel">
+      <div className="panel-title">
+        <h3>{txt}</h3>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+}
+function Status({ value }: { value: string }) {
+  return (
+    <span className={`status ${value.toLowerCase()}`}>{label(value)}</span>
+  );
+}
+function Empty({ text }: { text: string }) {
+  return (
+    <div className="empty">
+      <Package />
+      <p>{text}</p>
+    </div>
+  );
+}
+function NoModuleAccess({ role }: { role: string }) {
+  return (
+    <div className="empty" role="status">
+      <LockKeyhole />
+      <h2>Access not configured</h2>
+      <p>
+        Your {role} account is active, but your organization administrator has
+        not enabled any workspace modules. Contact your administrator to request
+        access.
+      </p>
+    </div>
+  );
+}
+function Modal({
+  title: txt,
+  children,
+  close,
+  className = "",
+}: {
+  title: string;
+  children: ReactNode;
+  close: () => void;
+  className?: string;
+}) {
+  const titleId = useMemo(
+    () => `dialog-${Math.random().toString(36).slice(2)}`,
+    [],
+  );
+  useEffect(() => {
+    const dismiss = (event: KeyboardEvent) => event.key === "Escape" && close();
+    document.addEventListener("keydown", dismiss);
+    return () => document.removeEventListener("keydown", dismiss);
+  }, [close]);
+  return (
+    <div
+      className="modal-wrap"
+      onMouseDown={(e) => e.target === e.currentTarget && close()}
+    >
+      <div
+        className={`modal ${className}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+      >
+        <div className="panel-title">
+          <h3 id={titleId}>{txt}</h3>
+          <button type="button" aria-label={`Close ${txt}`} onClick={close}>
+            <X />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+function title(view: View) {
+  const map: Record<View, string> = {
+    dashboard: "Sales dashboard",
+    leads: "Portal Leads",
+    "join-requests": "Join requests",
+    quotations: "Quotation pipeline",
+    quote: "Quotation detail",
+    approvals: "Approval queue",
+    approval: "Approval detail",
+    fulfillment: "Fulfillment & stock",
+    "fulfillment-detail": "Fulfillment detail",
+    subscriptions: "Subscriptions",
+    billing: "Billing detail",
+    portal: "Customer portal",
+    invoices: "Invoices",
+    invoice: "Invoice detail",
+    health: "Deal health",
+    reports: "Sales reporting",
+    products: "Products",
+    product: "Product details",
+    customers: "Customers",
+    customer: "Customer detail",
+    policies: "Discount governance",
+    access: "User access control",
+  };
+  return map[view];
+}
+function related(view: View, id: View) {
+  return (
+    (id === "quotations" && view === "quote") ||
+    (id === "approvals" && view === "approval") ||
+    (id === "fulfillment" && view === "fulfillment-detail") ||
+    (id === "subscriptions" && view === "billing") ||
+    (id === "invoices" && view === "invoice") ||
+    (id === "products" && view === "product") ||
+    (id === "customers" && view === "customer")
+  );
+}
+function CustomerDetailV2(props: {
+  customer?: Customer;
+  open: (v: View, id?: string) => void;
+  mutate: Function;
+  role: string;
+  onChanged: () => Promise<void>;
+}) {
+  const customer = props.customer;
+  return (
+    <>
+      <CustomerDetail {...props} />
+      {customer && (
+        <CustomerRelationshipCard
+          customer={customer}
+          canChange={["MANAGER", "ADMIN"].includes(props.role)}
+          onChanged={props.onChanged}
+        />
+      )}{" "}
+      {customer && (
+        <PortalAccessSection
+          customer={customer}
+          role={props.role}
+          onChanged={props.onChanged}
+        />
+      )}
+    </>
+  );
+}

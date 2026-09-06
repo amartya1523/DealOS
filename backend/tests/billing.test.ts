@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BillingError, changeSubscription, createConfirmationBilling, DEFAULT_CONFIRMATION_INVOICE_DUE_DAYS, recordPayment, reversePayment } from '../src/billing.js';
+import { BillingError, changeSubscription, createConfirmationBilling, DEFAULT_CONFIRMATION_INVOICE_DUE_DAYS, recordPayment, reversePayment, runRecurringBilling } from '../src/billing.js';
 
 describe('confirmation billing', () => {
-  it('creates one combined mixed invoice and one subscription for each recurring line', async () => {
+  it('creates recurring-period invoices without billing unshipped hardware', async () => {
     const invoiceCreate = vi.fn(async ({ data }: any) => ({ id: 'invoice-1', ...data }));
     const subscriptionCreate = vi.fn(async ({ data }: any) => ({ id: 'subscription-1', ...data }));
-    const tx: any = { invoice: { create: invoiceCreate }, subscription: { create: subscriptionCreate }, auditEvent: { create: vi.fn(async () => ({})) } };
+    const tx: any = { invoice: { create: invoiceCreate }, subscription: { create: subscriptionCreate }, billingPeriod: { create: vi.fn(async ({data}:any)=>({id:'period-1',...data})) }, auditEvent: { create: vi.fn(async () => ({})) } };
     const confirmedAt = new Date('2026-01-31T10:00:00.000Z');
     const result = await createConfirmationBilling(tx, {
       organizationId: 'org-1', actorId: 'customer-user', confirmedAt,
@@ -16,12 +16,21 @@ describe('confirmation billing', () => {
         { id: 'line-2', productId: 'plan', quantity: 1, recurring: true, cadence: 'Monthly', snapshot: { name: 'Care plan', unitPrice: '100', discount: 0, net: 100, tax: 18 } },
       ] },
     });
-    expect(result.invoice.amount.toString()).toBe('354');
-    expect(result.invoice.dueAt).toEqual(new Date(confirmedAt.getTime() + DEFAULT_CONFIRMATION_INVOICE_DUE_DAYS * 86_400_000));
-    expect(invoiceCreate.mock.calls[0]![0].data.lines).toHaveLength(2);
+    expect(result.invoice?.amount.toString()).toBe('118');
+    expect(result.invoice?.dueAt).toEqual(new Date(confirmedAt.getTime() + DEFAULT_CONFIRMATION_INVOICE_DUE_DAYS * 86_400_000));
+    expect(invoiceCreate.mock.calls[0]![0].data.lines).toHaveLength(1);
     expect(subscriptionCreate).toHaveBeenCalledTimes(1);
     expect(subscriptionCreate.mock.calls[0]![0].data).toMatchObject({ orderLineId: 'line-2', cadence: 'Monthly' });
     expect(subscriptionCreate.mock.calls[0]![0].data.nextBillAt).toEqual(new Date('2026-02-28T10:00:00.000Z'));
+  });
+});
+
+describe('recurring billing runner',()=>{
+  it('creates one idempotent billing period and advances the subscription',async()=>{
+    const invoiceCreate=vi.fn(async({data}:any)=>({id:'invoice-2',...data}));const subscriptionUpdate=vi.fn(async(args:any)=>args);
+    const tx:any={subscription:{findMany:vi.fn(async()=>[{id:'sub-1',organizationId:'org-1',state:'ACTIVE',nextBillAt:new Date('2026-09-01T00:00:00Z'),cadence:'Monthly',amount:'100',quoteId:'quote-1',orderId:'order-1',customerId:'customer-1',customer:'Acme',productId:'product-1',productName:'Care',customerRecord:{currency:'INR',paymentTerms:15},order:{currency:'INR'}}]),update:subscriptionUpdate},$queryRaw:vi.fn(async()=>[]),billingPeriod:{findUnique:vi.fn(async()=>null),create:vi.fn(async({data}:any)=>({id:'period-1',proration:'0',...data})),update:vi.fn(async()=>({}))},invoice:{create:invoiceCreate},auditEvent:{create:vi.fn(async()=>({}))}};
+    const result=await runRecurringBilling(tx,{organizationId:'org-1',actorId:'admin-1',now:new Date('2026-09-06T00:00:00Z')});
+    expect(result.processed).toBe(1);expect(invoiceCreate).toHaveBeenCalledTimes(1);expect(subscriptionUpdate.mock.calls[0]![0].data.nextBillAt).toEqual(new Date('2026-10-01T00:00:00Z'));
   });
 });
 
@@ -83,12 +92,13 @@ describe('subscription governance', () => {
     const tx: any = {
       $queryRaw: vi.fn(async () => []),
       subscription: { findFirst: vi.fn(async () => ({ id: 'sub-1', organizationId: 'org-1', version: 2, state: 'ACTIVE', amount: '100.00', cancelledAt: null })), update: vi.fn(async ({ data }: any) => ({ id: 'sub-1', version: 3, state: data.state, amount: data.amount })) },
+      billingPeriod:{findFirst:vi.fn(async()=>null)},
       subscriptionChange: { create: vi.fn(async ({ data }: any) => { changes.push(data); return data; }) },
       auditEvent: { create: vi.fn(async () => ({})) },
     };
     await changeSubscription(tx, { organizationId: 'org-1', actorId: 'admin-1', subscriptionId: 'sub-1', expectedVersion: 2, amount: 125, reason: 'Annual commercial review', effectiveAt: new Date('2026-10-01') });
     expect(changes[0]).toMatchObject({ kind: 'AMOUNT_CHANGED', previousAmount: '100.00', previousState: 'ACTIVE', newState: 'ACTIVE', reason: 'Annual commercial review' });
-    expect(tx).not.toHaveProperty('invoice.update');
+    expect(changes).toHaveLength(1);
   });
 
   it('rejects stale subscription changes', async () => {

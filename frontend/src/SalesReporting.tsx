@@ -50,7 +50,7 @@ export function SalesReporting({ data, open }: { data: Workspace; open: (view: R
   const comparison = period === "ALL" ? "All available history" : previous.length ? `${filtered.length >= previous.length ? "+" : ""}${Math.round((filtered.length - previous.length) / previous.length * 100)}% vs previous period` : "No quotations in previous period";
   const report = useMemo(() => buildReport(filtered), [filtered]);
   const resetFilters = () => { setPeriod("MONTH"); setOwner("ALL"); setStatus("ALL"); setProduct("ALL"); };
-  const exportXls = () => downloadSpreadsheet(filtered, { period, owner: owners.find(item => item.id === owner)?.name ?? "All teams", status: status === "ALL" ? "All statuses" : readable(status), product: product === "ALL" ? "All products" : product.startsWith("CATEGORY:") ? product.slice(9) : products.find(item => item.id === product.slice(8))?.name ?? "Product" });
+  const exportXlsx = async () => { const params=new URLSearchParams({format:'xlsx'});const range=periodRange(period);if(range){params.set('from',isoDay(range.start.toISOString()));params.set('to',isoDay(new Date(range.end.getTime()-1).toISOString()))}if(owner!=='ALL')params.set('repId',owner);if(product.startsWith('PRODUCT:'))params.set('productId',product.slice(8));const response=await fetch(`/api/v1/reports/sales/export?${params}`,{credentials:'include'});if(!response.ok)throw new Error('Could not export the workbook.');const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');link.href=url;link.download=`dealos-sales-report-${new Date().toISOString().slice(0,10)}.xlsx`;link.click();URL.revokeObjectURL(url); };
   const exportPdf = () => { const original = document.title; document.title = `DealOS Sales Report — ${new Date().toISOString().slice(0, 10)}`; window.print(); document.title = original; };
 
   return <div className="reports-dashboard">
@@ -61,7 +61,7 @@ export function SalesReporting({ data, open }: { data: Workspace; open: (view: R
         <label>Approval status<select aria-label="Approval status" value={status} onChange={event => setStatus(event.target.value)}><option value="ALL">All statuses</option><option value="PENDING_APPROVAL">Pending approval</option><option value="APPROVED">Approved</option><option value="NEGOTIATION">Negotiation</option><option value="CONFIRMED">Confirmed</option><option value="DRAFT">Draft</option></select></label>
         <label>Product / category<select aria-label="Product or category" value={product} onChange={event => setProduct(event.target.value)}><option value="ALL">All products and categories</option>{categories.map(category => <option key={category} value={`CATEGORY:${category}`}>Category · {category}</option>)}{products.map(item => <option key={item.id} value={`PRODUCT:${item.id}`}>Product · {item.name}</option>)}</select></label>
       </div>
-      <div className="report-export-actions"><button className="button quiet" onClick={resetFilters}><FilterX/>Reset</button><button className="button ghost" disabled={!filtered.length} onClick={exportPdf}><Printer/>Export PDF</button><button className="button ghost" disabled={!filtered.length} onClick={exportXls}><FileSpreadsheet/>Export XLS</button></div>
+      <div className="report-export-actions"><button className="button quiet" onClick={resetFilters}><FilterX/>Reset</button><button className="button ghost" disabled={!filtered.length} onClick={exportPdf}><Printer/>Export PDF</button><button className="button ghost" disabled={!filtered.length} onClick={()=>void exportXlsx()}><FileSpreadsheet/>Export XLSX</button></div>
     </section>
 
     {!filtered.length ? <ReportEmpty reset={resetFilters}/> : <>
@@ -115,12 +115,3 @@ function buildReport(quotes: Quote[]) {
 }
 
 function formatWait(hours: number) { if (!hours) return "Just now"; if (hours < 24) return `${Math.round(hours)}h`; return `${Math.round(hours / 24)}d`; }
-
-function downloadSpreadsheet(quotes: Quote[], filters: Record<string, string>) {
-  const escape = (value: unknown) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-  const rows = quotes.map(quote => `<tr><td>${escape(quote.number)}</td><td>${escape(quote.customer)}</td><td>${escape(quote.owner?.name ?? "Unassigned")}</td><td>${escape(readable(quote.stage))}</td><td>${Number(quote.total)}</td><td>${escape(isoDay(quoteCreatedAt(quote)))}</td></tr>`).join("");
-  const summary = Object.entries(filters).map(([key, value]) => `<tr><th>${escape(readable(key))}</th><td>${escape(value)}</td></tr>`).join("");
-  const html = `<html><head><meta charset="utf-8"></head><body><table>${summary}</table><br/><table border="1"><thead><tr><th>Quotation</th><th>Customer</th><th>Representative</th><th>Status</th><th>Value (INR)</th><th>Created</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
-  const url = URL.createObjectURL(new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" }));
-  const link = document.createElement("a"); link.href = url; link.download = `dealos-sales-report-${new Date().toISOString().slice(0, 10)}.xls`; link.click(); URL.revokeObjectURL(url);
-}

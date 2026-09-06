@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SalesReporting } from "./SalesReporting";
 import type { Quote, Workspace } from "./api";
@@ -18,6 +18,7 @@ beforeEach(() => {
   URL.createObjectURL = vi.fn(() => "blob:report");
   URL.revokeObjectURL = vi.fn();
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+  vi.stubGlobal('fetch',vi.fn(async()=>new Response(new Uint8Array([80,75]),{status:200,headers:{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}})));
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -44,15 +45,15 @@ describe("Sales Reporting", () => {
     expect(screen.getByRole("heading", { name: "No quotations found for the selected filters." })).toBeInTheDocument();
   });
 
-  it("exports the currently filtered report to print/PDF and XLS", () => {
+  it("exports the currently filtered report to print/PDF and native XLSX", async () => {
     render(<SalesReporting data={workspace} open={vi.fn()}/>);
     fireEvent.change(screen.getByLabelText("Approval status"), { target: { value: "CONFIRMED" } });
     fireEvent.click(screen.getByRole("button", { name: /Export PDF/ }));
     expect(window.print).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: /Export XLS/ }));
-    expect(URL.createObjectURL).toHaveBeenCalledOnce();
+    await waitFor(()=>expect(URL.createObjectURL).toHaveBeenCalledOnce());
     const spreadsheet = (URL.createObjectURL as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Blob;
-    expect(spreadsheet.type).toContain("application/vnd.ms-excel");
+    expect(spreadsheet.type).toContain("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledOnce();
   });
 });

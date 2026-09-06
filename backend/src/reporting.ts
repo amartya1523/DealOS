@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import ExcelJS from 'exceljs';
 
 export type SalesReportFilters = { from?: Date; to?: Date; repId?: string; status?: string; productId?: string };
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -29,12 +30,23 @@ export async function aggregateSales(tx: Prisma.TransactionClient, organizationI
   return { filters: { from: filters.from?.toISOString() ?? null, to: filters.to?.toISOString() ?? null, repId: filters.repId ?? null, status: filters.status ?? null, productId: filters.productId ?? null }, count: rows.length, totalsByCurrency, rows };
 }
 
-const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
 const spreadsheetText = (value: unknown) => /^[=+\-@]/.test(String(value ?? '')) ? `'${String(value)}` : String(value ?? '');
 
-export function reportAsXls(report: Awaited<ReturnType<typeof aggregateSales>>) {
-  const rows = report.rows.map((row) => `<tr><td>${escapeHtml(spreadsheetText(row.orderNumber))}</td><td>${escapeHtml(spreadsheetText(row.quoteNumber))}</td><td>${escapeHtml(spreadsheetText(row.customer))}</td><td>${escapeHtml(spreadsheetText(row.rep.name))}</td><td>${escapeHtml(row.status)}</td><td>${escapeHtml(row.currency)}</td><td>${row.total}</td><td>${row.invoiced}</td><td>${row.paid}</td><td>${row.outstanding}</td><td>${escapeHtml(row.createdAt.toISOString())}</td></tr>`).join('');
-  return Buffer.from(`<!doctype html><html><head><meta charset="utf-8"></head><body><table><thead><tr><th>Order</th><th>Quotation</th><th>Customer</th><th>Representative</th><th>Status</th><th>Currency</th><th>Sales</th><th>Invoiced</th><th>Paid</th><th>Outstanding</th><th>Confirmed at</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
+export async function reportAsXls(report: Awaited<ReturnType<typeof aggregateSales>>) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'DealOS';
+  workbook.created = new Date();
+  const sheet = workbook.addWorksheet('Sales');
+  sheet.columns = [
+    {header:'Order',key:'order',width:18},{header:'Quotation',key:'quote',width:18},{header:'Customer',key:'customer',width:28},
+    {header:'Representative',key:'representative',width:24},{header:'Status',key:'status',width:20},{header:'Currency',key:'currency',width:10},
+    {header:'Sales',key:'sales',width:14},{header:'Invoiced',key:'invoiced',width:14},{header:'Paid',key:'paid',width:14},{header:'Outstanding',key:'outstanding',width:14},{header:'Confirmed at',key:'confirmedAt',width:24},
+  ];
+  for(const row of report.rows)sheet.addRow({order:spreadsheetText(row.orderNumber),quote:spreadsheetText(row.quoteNumber),customer:spreadsheetText(row.customer),representative:spreadsheetText(row.rep.name),status:row.status,currency:row.currency,sales:row.total,invoiced:row.invoiced,paid:row.paid,outstanding:row.outstanding,confirmedAt:row.createdAt});
+  sheet.getRow(1).font={bold:true,color:{argb:'FFFFFFFF'}};sheet.getRow(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF1F6B5C'}};sheet.views=[{state:'frozen',ySplit:1}];sheet.autoFilter='A1:K1';
+  ['G','H','I','J'].forEach(column=>{sheet.getColumn(column).numFmt='#,##0.00'});sheet.getColumn('K').numFmt='yyyy-mm-dd hh:mm';
+  const bytes=await workbook.xlsx.writeBuffer();
+  return Buffer.from(bytes);
 }
 
 const pdfText = (value: unknown) => String(value ?? '').normalize('NFKD').replace(/[^\x20-\x7E]/g, '').replace(/([\\()])/g, '\\$1');

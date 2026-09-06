@@ -14,6 +14,11 @@ const fetchMock = vi.fn();
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   delete window.Razorpay;
+  vi.stubGlobal("IntersectionObserver", class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  });
   window.scrollTo = vi.fn();
   window.localStorage.clear();
   fetchMock.mockReset();
@@ -38,6 +43,12 @@ describe("DealOS public routes", () => {
     expect(
       screen.getByRole("heading", { name: "See the rule. See the reason." }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "From approved quote to paid invoice. One closed loop." }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Razorpay checkout")).toBeInTheDocument();
+    expect(screen.getByText("Customer approved")).toBeInTheDocument();
+    expect(screen.getByText("₹0 outstanding")).toBeInTheDocument();
     expect(screen.getByText("Revision 06 · Draft")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Pause motion" }));
     expect(
@@ -290,7 +301,19 @@ describe("DealOS public routes", () => {
       "/api/v1/policies/p1",
       expect.objectContaining({
         method: "PATCH",
-        body: JSON.stringify({ maxDiscount: 14, hardwareLimit: 14, servicesLimit: 9, subscriptionLimit: 8, financeThreshold: 4, aggregateDiscountLimit: 20, minimumMarginPercent: 12, reason: "Margin protection review." }),
+        body: JSON.stringify({
+          maxDiscount: 14,
+          hardwareLimit: 14,
+          servicesLimit: 9,
+          subscriptionLimit: 8,
+          financeThreshold: 4,
+          aggregateDiscountLimit: 20,
+          minimumMarginPercent: 12,
+          approvalSequence: ["Sales Manager", "Finance"],
+          managerReviewerId: null,
+          financeReviewerId: null,
+          reason: "Margin protection review.",
+        }),
       }),
     ));
   });
@@ -530,7 +553,7 @@ describe("DealOS public routes", () => {
     fireEvent.change(screen.getByLabelText("Receipt reason"), { target: { value: "PO-1042 received at dock" } });
     fireEvent.click(screen.getByRole("button", { name: "Record Receipt & Check Backorder" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/fulfillment/o1/receive", expect.objectContaining({ method: "POST", body: JSON.stringify({ warehouseId: "w1", productId: "p1", quantity: 3, reason: "PO-1042 received at dock" }) })));
-    fireEvent.click(screen.getByRole("row", { name: /SO-1042.*Acme Corp.*Split Pending/ }));
+    fireEvent.click(screen.getByRole("row", { name: /SO-1042.*Acme Corp.*Confirmed/ }));
     expect(await screen.findByRole("heading", { name: "Fulfillment Detail: SO-1042 (Acme Corp)" })).toBeInTheDocument();
     expect(await screen.findByRole("row", { name: /Main Warehouse.*4 units.*1.*₹45/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Accept Suggested Split" })).toBeEnabled();

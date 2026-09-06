@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUpRight, AudioWaveform, Boxes, Check, FileText, Menu, Mic, Pause, Play, Radio, ReceiptText, ShieldCheck, Sparkles, Smartphone, X, Zap } from "lucide-react";
+import { ArrowDown, ArrowUpRight, AudioWaveform, BadgeCheck, Boxes, Check, CreditCard, FileText, Landmark, LockKeyhole, Menu, Mic, Pause, Play, Radio, ReceiptText, ShieldCheck, Sparkles, Smartphone, WalletCards, X, Zap } from "lucide-react";
+import { motion, useReducedMotion, useScroll, useTransform } from "framer-motion";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { Brand } from "./Brand";
@@ -33,6 +34,64 @@ function StatePanel({ index }: { index: number }) {
     {index === 3 && <div className="billing-ui"><div><small>ONE-TIME</small><strong>₹1,16,16,000</strong><span>Due 04 Oct</span></div><div><small>RECURRING</small><strong>₹1,04,000<em>/mo</em></strong><span>Next bill 04 Nov</span></div><p><ReceiptText /> Payment evidence and balances remain auditable.</p></div>}
     <div className="state-panel-foot"><span>{state.meta}</span><span>0{index + 1} / 04</span></div>
   </div>;
+}
+
+const paymentSteps = [
+  ["01", "Approved quote", "The accepted revision becomes the billing source."],
+  ["02", "Customer portal", "The customer reviews the exact invoice and amount due."],
+  ["03", "Razorpay checkout", "UPI, cards, and netbanking complete the payment."],
+  ["04", "Ledger reconciled", "Verified settlement updates the invoice in DealOS."],
+];
+
+function CustomerPaymentJourney({ paused }: { paused: boolean }) {
+  const section = useRef<HTMLElement>(null);
+  const reducedMotion = useReducedMotion();
+  const allowMotion = !paused && !reducedMotion;
+  const { scrollYProgress } = useScroll({ target: section, offset: ["start end", "end start"] });
+  const invoiceY = useTransform(scrollYProgress, [0, 1], [80, -70]);
+  const portalY = useTransform(scrollYProgress, [0, 1], [135, -95]);
+  const paymentY = useTransform(scrollYProgress, [0, 1], [190, -120]);
+  const railScale = useTransform(scrollYProgress, [.18, .75], [0, 1]);
+  const reveal = allowMotion ? { initial: { opacity: 0, y: 28 }, whileInView: { opacity: 1, y: 0 }, viewport: { once: true, amount: .35 }, transition: { duration: .7, ease: [0.22, 1, 0.36, 1] as const } } : {};
+
+  return <motion.section ref={section} className="payment-journey" id="customer-portal" aria-labelledby="payment-journey-title">
+    <div className="payment-grid" aria-hidden="true" />
+    <div className="payment-copy">
+      <motion.span className="section-index inverse" {...reveal}>CUSTOMER PORTAL / CLOSED PAYMENT LOOP</motion.span>
+      <motion.h2 id="payment-journey-title" {...reveal}>From approved quote<br />to paid invoice.<br /><em>One closed loop.</em></motion.h2>
+      <motion.p {...reveal}>DealOS keeps the customer-facing decision and the finance record connected. Customers review the exact commercial record, approve it, and complete payment through Razorpay—without the team rebuilding context in another system.</motion.p>
+      <div className="payment-step-list">
+        {paymentSteps.map(([number, title, detail], index) => <motion.div key={number} {...(allowMotion ? { initial: { opacity: 0, x: -22 }, whileInView: { opacity: 1, x: 0 }, viewport: { once: true, amount: .7 }, transition: { delay: index * .1, duration: .55 } } : {})}>
+          <span>{number}</span><i><Check /></i><p><b>{title}</b><small>{detail}</small></p>
+        </motion.div>)}
+      </div>
+    </div>
+    <div className="payment-stage" aria-label="Example customer portal and Razorpay payment flow">
+      <motion.div className="payment-rail" style={{ scaleY: allowMotion ? railScale : 1 }} aria-hidden="true" />
+      <motion.article className="invoice-snippet" style={{ y: allowMotion ? invoiceY : 0, rotate: -2 }} whileHover={allowMotion ? { rotate: 0, scale: 1.015 } : undefined}>
+        <div className="snippet-head"><span><ReceiptText /> DEALOS / INVOICE</span><b>ISSUED</b></div>
+        <div className="invoice-id"><span><small>INVOICE</small><strong>INV-1048</strong></span><span><small>DUE</small><b>04 OCT 2026</b></span></div>
+        <div className="invoice-customer"><small>BILL TO</small><b>Aranya Systems</b><span>Approved quotation Q-1048 · Revision 06</span></div>
+        <div className="invoice-total"><span>Amount due</span><strong>₹1,28,64,000</strong></div>
+      </motion.article>
+      <motion.article className="portal-snippet" style={{ y: allowMotion ? portalY : 0, rotate: 1.4 }} whileHover={allowMotion ? { rotate: 0, scale: 1.015 } : undefined}>
+        <div className="portal-browser"><i /><i /><i /><span>customer.dealos.app</span><LockKeyhole /></div>
+        <div className="portal-brand"><span><i>D</i> DealOS</span><b>CUSTOMER PORTAL</b></div>
+        <div className="portal-title"><span><small>READY FOR PAYMENT</small><strong>Invoice INV-1048</strong></span><BadgeCheck /></div>
+        <div className="portal-status"><span><Check /> Customer approved</span><time>Today · 10:42</time></div>
+        <div className="portal-pay">Pay ₹1,28,64,000 <ArrowUpRight /></div>
+      </motion.article>
+      <motion.article className="razorpay-snippet" style={{ y: allowMotion ? paymentY : 0, rotate: -1.2 }} whileHover={allowMotion ? { rotate: 0, scale: 1.02 } : undefined}>
+        <div className="razorpay-head"><span className="razorpay-mark">R</span><span><b>Razorpay</b><small>Secure checkout</small></span><ShieldCheck /></div>
+        <div className="razorpay-amount"><small>PAYING DEALOS INVOICE</small><strong>₹1,28,64,000</strong></div>
+        <div className="payment-methods"><span><WalletCards /> UPI</span><span><CreditCard /> Card</span><span><Landmark /> Netbanking</span></div>
+        <div className="payment-success"><BadgeCheck /><span><small>PAYMENT VERIFIED</small><b>Captured successfully</b></span></div>
+      </motion.article>
+      <motion.div className="reconciled-note" style={{ y: allowMotion ? invoiceY : 0 }} initial={allowMotion ? { opacity: 0, scale: .85 } : undefined} whileInView={allowMotion ? { opacity: 1, scale: 1 } : undefined} viewport={{ once: true, amount: .7 }}>
+        <span><Check /></span><p><small>BACK IN DEALOS</small><b>₹0 outstanding</b><em>Reconciled just now</em></p>
+      </motion.div>
+    </div>
+  </motion.section>;
 }
 
 export function Landing() {
@@ -74,12 +133,13 @@ export function Landing() {
 
   return <div ref={root} className={`ledger-site ${paused ? "motion-paused" : ""}`}>
     <a className="skip-link" href="#content">Skip to content</a>
-    <nav className="ledger-nav"><Brand /><div className={`ledger-links ${menu ? "open" : ""}`}><a href="#problem" onClick={() => setMenu(false)}>The problem</a><a href="#system" onClick={() => setMenu(false)}>How it works</a><a href="/directory" onClick={() => setMenu(false)}>Business directory</a><a href="#proof" onClick={() => setMenu(false)}>Inside DealOS</a><a className="mobile-signin" href="/sign-in">Sign in <ArrowUpRight /></a></div><div className="nav-actions"><a className="signin" href="/sign-in">Sign in</a><a className="signal-button small" href="/sign-up">Create organization <ArrowUpRight /></a><button className="menu-button" aria-label={menu ? "Close navigation" : "Open navigation"} aria-expanded={menu} onClick={() => setMenu(!menu)}>{menu ? <X /> : <Menu />}</button></div></nav>
+    <nav className="ledger-nav"><Brand /><div className={`ledger-links ${menu ? "open" : ""}`}><a href="#problem" onClick={() => setMenu(false)}>The problem</a><a href="#system" onClick={() => setMenu(false)}>How it works</a><a href="#customer-portal" onClick={() => setMenu(false)}>Customer portal</a><a href="#continuity" onClick={() => setMenu(false)}>Mobile + voice</a><a href="/directory" onClick={() => setMenu(false)}>Business directory</a><a href="#proof" onClick={() => setMenu(false)}>Inside DealOS</a><a className="mobile-signin" href="/sign-in">Sign in <ArrowUpRight /></a></div><div className="nav-actions"><a className="signin" href="/sign-in">Sign in</a><a className="signal-button small" href="/sign-up">Create organization <ArrowUpRight /></a><button className="menu-button" aria-label={menu ? "Close navigation" : "Open navigation"} aria-expanded={menu} onClick={() => setMenu(!menu)}>{menu ? <X /> : <Menu />}</button></div></nav>
     <main id="content">
       <section className="ledger-hero"><div className="hero-grid" aria-hidden="true" /><div className="hero-outline" aria-hidden="true"><span>LIVE / COMMERCIAL RECORD</span><i /><b>Q-1048</b></div><div className="hero-copy"><div className="ledger-kicker"><span>DEAL OPERATIONS / ONE SOURCE OF TRUTH</span><span>EST. 2026</span></div><h1 className="ledger-title" aria-label="The deal is a system. Run it like one."><span>THE DEAL IS</span><span>A SYSTEM<span className="signal-dot">.</span></span><span>RUN IT LIKE ONE.</span></h1><div className="ledger-hero-foot"><p>Quote, govern, commit, and bill from one living commercial record.</p><a className="signal-button" href="/sign-up">Open your deal room <ArrowUpRight /></a><a className="scroll-cue" href="#problem"><ArrowDown /><span>See where deals drift</span></a></div></div><div className="deal-stack" aria-label="Example DealOS quotation"><div className="stack-shadow"><span>REV / 05</span></div><div className="stack-note"><Sparkles /><span>Margin healthy after suggested support plan</span></div><div className="stack-audit"><ShieldCheck /><span>AUDIT READY</span><b>06 events</b></div><DealFrame /></div><div className="hero-index" aria-hidden="true"><span>01</span><i /><span>06</span></div></section>
-      <section className="operations-band" aria-label="DealOS workflow"><div className="operations-band-track">{[0,1,2].map(index => <span key={index}>QUOTE <i>↗</i> POLICY <i>↗</i> APPROVAL <i>↗</i> INVENTORY <i>↗</i> BILLING <i>↗</i> AUDIT <i>↗</i></span>)}</div></section>
+      <section className="operations-band" aria-label="DealOS workflow"><div className="operations-band-track">{[0,1,2].map(index => <span key={index}>QUOTE <i>↗</i> POLICY <i>↗</i> APPROVAL <i>↗</i> PORTAL <i>↗</i> RAZORPAY <i>↗</i> RECONCILE <i>↗</i></span>)}</div></section>
       <section className="problem-section" id="problem"><div className="section-intro"><span className="section-index">01 / THE HANDOFF PROBLEM</span><h2>Every team has a piece.<br /><em>Nobody has the deal.</em></h2><p>Commercial truth drifts when decisions live in separate tools. DealOS keeps the context attached.</p></div><div className="problem-grid">{[["SALES", "The price changed.", "The approval did not."], ["FINANCE", "The discount arrived.", "The reason did not."], ["OPERATIONS", "The order arrived.", "The stock promise did not."], ["CUSTOMER", "The revision arrived.", "The history did not."]].map(([role, lead, tail], index) => <article className="problem-card" key={role}><span>0{index + 1} · {role}</span><h3>{lead}<br /><em>{tail}</em></h3><i aria-hidden="true" /></article>)}</div></section>
       <section className="deal-story" id="system"><div className="story-copy-wrap"><span className="section-index inverse">02 / ONE LIVING RECORD</span>{states.map((state, index) => <div className={`state-copy ${index === 0 ? "active" : ""}`} key={state.label}><span>0{index + 1} · {state.label}</span><h2>{state.title.split("\n").map(line => <span key={line}>{line}</span>)}</h2><p>{state.copy}</p></div>)}<div className="state-rail" aria-label={`Step ${active + 1} of 4`}>{states.map((state, index) => <span key={state.label} className={index <= active ? "on" : ""}><i />{state.label}</span>)}</div></div><div className="story-visual"><div className="story-depth story-depth-one" aria-hidden="true"><span>POLICY / V3.2</span></div><div className="story-depth story-depth-two" aria-hidden="true"><span>REVISION / 06</span></div><StatePanel index={active} /></div></section>
+      <CustomerPaymentJourney paused={paused} />
       <section className="continuity-section" id="continuity"><div className="continuity-copy"><span className="section-index">03 / ONE DEAL, EVERY SURFACE</span><h2>The record moves.<br /><em>The truth stays put.</em></h2><p>Review a revision on desktop, approve it from your phone, and return to the same live context. DealOS synchronizes decisions—not just screens.</p><div className="sync-ledger"><div><Radio /><span><b>Instant state</b><small>Every approved change reaches every surface.</small></span><em>LIVE</em></div><div><ShieldCheck /><span><b>Revision-safe</b><small>Voice, mobile, and web act on the same version.</small></span><em>06</em></div><div><Zap /><span><b>Action-ready</b><small>Open directly to the decision that needs you.</small></span><em>NOW</em></div></div></div><div className="mobile-stage"><div className="sync-orbit" aria-hidden="true"><span>WEB</span><span>VOICE</span><span>MOBILE</span></div><img className="mobile-product-art" src="/images/dealos-mobile-product.png" alt="DealOS mobile app showing a live deal and approval timeline"/><div className="continuity-note note-one"><Check /><span><small>FINANCE APPROVAL</small><b>Synced just now</b></span></div><div className="continuity-note note-two"><Smartphone /><span><small>CONTINUE ON MOBILE</small><b>Q-1048 is live</b></span></div></div></section>
       <section className="voice-section"><div className="voice-visual"><div className={`voice-disc ${listening ? "listening" : ""}`}><div className="voice-rings" aria-hidden="true"><i /><i /><i /></div><AudioWaveform /><span>DEALOS / VOICE</span></div><div className="voice-transcript"><small>{listening ? "LISTENING · LIVE DEAL Q-1048" : "VOICE AGENT · READY"}</small><p>{listening ? "“What is blocking the Aranya deal?”" : "Ask DealOS before the next meeting."}</p><div><span>{listening ? "Finance review is pending. The service discount exceeds policy by 8 points." : "Context, policy, inventory, and approvals—without opening another tab."}</span></div></div></div><div className="voice-copy"><span className="section-index inverse">04 / TALK TO THE RECORD</span><h2>Ask the deal.<br /><em>Hear the answer.</em></h2><p>The voice agent reads the same governed record as your team. It can summarize risk, identify the next reviewer, and prepare you for the call without inventing a second source of truth.</p><button className={`voice-button ${listening ? "active" : ""}`} onClick={() => setListening(!listening)} aria-pressed={listening}><Mic />{listening ? "Stop listening" : "Try the voice agent"}<span>{listening ? "LIVE" : "PRESS TO SPEAK"}</span></button></div></section>
       <section className="proof-section" id="proof"><div className="proof-watermark" aria-hidden="true">CONTROL / WITHOUT THE CHASE</div><div className="section-intro proof-intro"><span className="section-index">05 / WORK THAT EXPLAINS ITSELF</span><h2>See the rule.<br /><em>See the reason.</em></h2><p>The interface stays quiet until something needs attention—then it shows exactly what changed and what happens next.</p></div><div className="proof-grid"><article className="proof-frame proof-risk"><span className="frame-coordinate">01 — RISK</span><div className="proof-label"><span>BLENDED RISK</span><ShieldCheck /></div><strong>8.0</strong><small>points above ceiling</small><div className="risk-bars"><span><i />Hardware · within policy</span><span><i />Services · finance review</span><span><i />Support · within policy</span></div><p>One thin-margin line cannot disappear inside the average.</p></article><article className="proof-frame proof-route"><span className="frame-coordinate">02 — STOCK</span><div className="proof-label"><span>FULFILLMENT PREVIEW</span><Boxes /></div><div className="mini-map"><span className="origin">ORDER<br /><b>24</b></span><i /><span>MUMBAI<br /><b>18</b></span><i /><span>PUNE<br /><b>6</b></span></div><div className="proof-summary"><span>2 shipments</span><span>₹27,300 estimated</span><b>0 backordered</b></div></article><article className="proof-frame proof-bill"><span className="frame-coordinate">03 — BILLING</span><div className="proof-label"><span>HYBRID BILLING</span><ReceiptText /></div><div className="bill-row"><span>Hardware + service<small>One-time invoice</small></span><b>₹1,16,16,000</b></div><div className="bill-row"><span>Priority support<small>Monthly schedule</small></span><b>₹1,04,000<em>/mo</em></b></div><div className="bill-timeline"><i /><i /><i /><i /><span>OCT</span><span>NOV</span><span>DEC</span><span>JAN</span></div></article><article className="proof-frame proof-portal"><span className="frame-coordinate">04 — PORTAL</span><div className="proof-label"><span>CUSTOMER PORTAL</span><FileText /></div><blockquote>“Can we move the service discount to 18% if we confirm this week?”</blockquote><div className="portal-response"><span>Terms changed</span><b>Reapproval started automatically</b></div><p>Negotiation stays on the record—not in an email thread.</p></article></div></section>

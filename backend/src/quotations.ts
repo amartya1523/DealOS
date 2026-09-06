@@ -30,6 +30,7 @@ export const customerListQuerySchema = z.object({
 export const createQuotationSchema = z.object({
   customerId: z.string().uuid(),
   ownerId: z.string().uuid().optional(),
+  priceListId: z.string().uuid().nullable().optional(),
   validUntil: z.string().datetime().optional(),
   promisedDeliveryAt: z.string().datetime().optional(),
   terms: z.string().trim().max(5000).optional(),
@@ -80,6 +81,7 @@ export type CreateDraftInput = {
   auditAction?: string;
   auditReason?: string;
   requestId?: string;
+  priceListId?: string | null;
 };
 
 export async function createDraft(tx: Prisma.TransactionClient, input: CreateDraftInput) {
@@ -144,6 +146,7 @@ export async function createDraft(tx: Prisma.TransactionClient, input: CreateDra
     ownerId,
     createdById: input.createdById ?? ownerId,
     teamId,
+    priceListId: input.priceListId ?? customer.defaultPriceListId,
     total: calculation?.total ?? 0,
     taxTotal: calculation?.taxTotal ?? 0,
     totalsByCadence: (calculation?.totalsByCadence ?? {}) as Prisma.InputJsonValue,
@@ -195,6 +198,7 @@ export async function createDraft(tx: Prisma.TransactionClient, input: CreateDra
 
 export const quotationLineInputSchema = z.object({
   productId: z.string().uuid(),
+  variantId: z.string().uuid().nullable().optional(),
   quantity: z.number().int().positive(),
   discount: z.number().min(0).max(100),
 }).strict();
@@ -203,6 +207,7 @@ export const quoteDraftSchema = z.object({
   revisionId: z.string().uuid(),
   expectedVersion: z.number().int().nonnegative(),
   orderDiscount: z.number().min(0).max(100),
+  priceListId: z.string().uuid().nullable().optional(),
   lines: z.array(quotationLineInputSchema).min(1).max(200),
   validUntil: z.string().datetime().nullable().optional(),
   promisedDeliveryAt: z.string().datetime().nullable().optional(),
@@ -223,9 +228,11 @@ export const quotePreviewSchema = z.object({
   orderDiscount: z.number().min(0).max(100),
   lines: z.array(z.object({
     variantId: z.string().uuid(),
+    productVariantId: z.string().uuid().nullable().optional(),
     quantity: z.number().int().positive(),
     lineDiscount: z.number().min(0).max(100),
   }).strict()).min(1).max(200),
+  priceListId: z.string().uuid().nullable().optional(),
 }).strict();
 
 type DiscountPolicyLimits = {

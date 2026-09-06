@@ -33,7 +33,7 @@ describe('order confirmation eligibility', () => {
     const first=await confirmEligibleRevision(tx,input);
     const second=await confirmEligibleRevision(tx,input);
     expect(first).toMatchObject({orderId:'order-1',revisionId:'revision-1',replayed:false});
-    expect(first).toMatchObject({invoiceId:'invoice-1',subscriptionIds:[]});
+    expect(first).toMatchObject({invoiceId:null,subscriptionIds:[],hardwareBillingState:'AWAITING_SHIPMENT'});
     expect(second).toMatchObject({orderId:'order-1',revisionId:'revision-1',replayed:true});
     expect(tx.order.create).toHaveBeenCalledTimes(1);
     expect(tx.order.create.mock.calls[0][0].data.lines.create[0]).toMatchObject({quantity:2,snapshot:{name:'Frozen product'}});
@@ -61,6 +61,6 @@ describe('order confirmation eligibility', () => {
     const [first,second]=await Promise.all([confirmEligibleRevision(tx,input),confirmEligibleRevision(tx,input)]);
     expect([first.replayed,second.replayed].sort()).toEqual([false,true]);
     expect(tx.order.create).toHaveBeenCalledTimes(1);
-    expect(tx.invoice.create).toHaveBeenCalledTimes(1);
+    expect(tx.invoice.create).not.toHaveBeenCalled();
   });
 });
