@@ -85,14 +85,15 @@ Usability questions: Can you tell where you are, what the next useful action is,
 
 Stay signed in as `admin@dealos.demo` and open **User access → Sales teams**.
 
-1. Click **Create team**, enter `Field Sales Test`, select Maya Shah as manager, tick both Aarav Mehta and Leena Iyer, and click **Create team**.
-2. Confirm the new card says **2 sales representatives** and lists both names.
-3. Click **Edit team**, untick Leena, and save. Confirm the card now lists only Aarav and says **1 sales representative**.
-4. Edit the new team again, add Leena back, and save. This verifies that the same Rep can participate in more than one team.
-5. Edit **Enterprise Sales**, untick Aarav, and try to save. The save must be rejected with a message telling you to reassign Aarav's customer or active deal work first. Tick him again or cancel so the seeded workflow is unchanged.
-6. Refresh the page and confirm every successful membership change persisted. Run the reset in section 10 when you want to remove the test team and restore the original seed.
+1. Click **New team**, enter `Field Sales Test`, and select Maya Shah as manager.
+2. In **Add a sales representative**, select Aarav Mehta and click **Add representative**. Repeat for Leena Verma, then click **Create team**.
+3. Confirm the new card says **2 sales representatives** and lists both names.
+4. Click **Edit team**, remove Leena with the × button, and save. Confirm the card now lists only Aarav and says **1 sales representative**.
+5. Edit the new team again, select Leena from the dropdown, click **Add representative**, and save. This verifies that the same Rep can participate in more than one team.
+6. Edit **Enterprise Sales**, remove Aarav, and try to save. The save must be rejected with a message telling you to reassign Aarav's customer or active deal work first. Add him again or cancel so the seeded workflow is unchanged.
+7. Refresh the page and confirm every successful membership change persisted. Run the reset in section 10 when you want to remove the test team and restore the original seed.
 
-Pass condition: an Admin can create or edit a team without leaving User access, select multiple active Reps with checkboxes, choose an optional manager, and understand exactly how to recover from a protected removal. Pending users and non-Rep roles never appear in the Rep picker.
+Pass condition: an Admin can create or edit a team without leaving User access, repeatedly select active Reps from one dropdown, see and remove the added members, choose an optional manager, and understand exactly how to recover from a protected removal. Inactive users and non-Rep roles never appear in the Rep picker.
 
 ## 4. Run the complete happy path with Q-0102
 

@@ -202,7 +202,7 @@ DTO additions must be documented before exposing them. Nested domain DTOs use Da
 - **Authentication:** Active database-backed session required.
 - **Request:** none.
 - **Validation:** Manager sees assigned teams only.
-- **Response:** 200 `{items:Array<{id,name,managerId,representatives:Array<{id,name}>}>}`. Managers receive only teams they manage; Admin receives all organization teams.
+- **Response:** 200 `{items:Array<{id,name,managerId,manager:{id,name}|null,representatives:Array<{id,name}>}>,canManage,options:{representatives:Array<{id,name}>,managers:Array<{id,name}>}}`. Managers receive only teams they manage and no management options; Admin receives all organization teams plus the active, organization-scoped Rep and Manager/Admin choices used by the team editor.
 - **Errors:** common error contract above; validation, permission, lifecycle and concurrency conditions are enforced before commit.
 - **Business rules:** R-004.
 
