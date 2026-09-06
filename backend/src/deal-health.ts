@@ -21,7 +21,7 @@ export async function evaluateAlerts(tx: Prisma.TransactionClient, organizationI
       candidates.push({ kind: 'DISCOUNT_ANOMALY', title: `${quote.number} exceeds discount policy`, detail: `The current immutable revision has a persisted discount-risk score of ${risk.toFixed(2)}.`, severity: risk > 5 ? 'high' : 'medium', resourceId: quote.id, evaluationKey: `${organizationId}:${quote.id}:DISCOUNT_ANOMALY` });
     }
     const promisedAt = quote.currentRevision?.promisedDeliveryAt;
-    if (quote.stage === 'CONFIRMED' && promisedAt && promisedAt < now && quote.order && !['FULFILLED', 'CANCELLED'].includes(quote.order.state)) {
+    if (quote.stage === 'CONFIRMED' && promisedAt && promisedAt < now && quote.order && !['SHIPPED', 'CANCELLED'].includes(quote.order.state)) {
       candidates.push({ kind: 'DELIVERY_SLIPPAGE', title: `${quote.number} missed its promised delivery date`, detail: `Promised ${promisedAt.toISOString().slice(0, 10)}; current fulfillment is ${quote.order.fulfillment?.state ?? 'not allocated'}.`, severity: 'high', resourceId: quote.id, evaluationKey: `${organizationId}:${quote.id}:DELIVERY_SLIPPAGE` });
     }
   }

@@ -58,7 +58,7 @@ async function main() {
   assert.equal(stockChangedDetails.availability?.[0]?.available, 1, 'STOCK_CHANGED must include fresh availability');
   assert.equal((await db.stockBalance.findUniqueOrThrow({ where: { warehouseId_productId: { warehouseId: warehouse.id, productId: product.id } } })).reserved, 4, 'race must never over-reserve');
   const winningInput = race[0]?.status === 'fulfilled' ? firstInput : secondInput;
-  assert.equal((await db.order.findUniqueOrThrow({ where: { id: winningInput.orderId } })).state, 'FULFILLED', 'full reservation must set FULFILLED');
+  assert.equal((await db.order.findUniqueOrThrow({ where: { id: winningInput.orderId } })).state, 'ALLOCATED', 'full reservation must set ALLOCATED');
   const retry = await db.$transaction((tx) => reserveStock(tx, winningInput));
   assert.equal(retry.replayed, true, 'same-key retry must replay');
   assert.equal((await db.stockBalance.findUniqueOrThrow({ where: { warehouseId_productId: { warehouseId: warehouse.id, productId: product.id } } })).reserved, 4, 'retry must not double-reserve');
@@ -87,11 +87,11 @@ async function main() {
   const partialOrder = await createOrder(db, { organizationId: organization.id, actorId: actor.id, customerId: customer.id, productId: partialProduct.id, quantity: 5, suffix: 'PARTIAL' });
   const partialPreview: any = await previewSplit(db, { organizationId: organization.id, orderId: partialOrder.id });
   await db.$transaction((tx) => reserveStock(tx, reservationInput(partialOrder.id, partialPreview, 'pg-partial-reservation')));
-  assert.equal((await db.order.findUniqueOrThrow({ where: { id: partialOrder.id } })).state, 'PARTIALLY_FULFILLED');
+  assert.equal((await db.order.findUniqueOrThrow({ where: { id: partialOrder.id } })).state, 'PARTIALLY_ALLOCATED');
   assert.equal((await db.backorder.findUniqueOrThrow({ where: { orderLineId: partialOrder.lines[0]!.id } })).remainingQuantity, 3);
   const receipt: any = await db.$transaction((tx) => receiveStock(tx, { organizationId: organization.id, actorId: actor.id, orderId: partialOrder.id, idempotencyKey: 'pg-receipt-consolidate', warehouseId: partialWarehouse.id, productId: partialProduct.id, quantity: 3, reference: 'GRN-1', reason: 'Cover the outstanding backorder.' }));
   assert.equal(receipt.consolidated, true);
-  assert.equal((await db.order.findUniqueOrThrow({ where: { id: partialOrder.id } })).state, 'FULFILLED');
+  assert.equal((await db.order.findUniqueOrThrow({ where: { id: partialOrder.id } })).state, 'ALLOCATED');
   assert.equal((await db.backorder.findUniqueOrThrow({ where: { orderLineId: partialOrder.lines[0]!.id } })).remainingQuantity, 0);
   assert.equal((await db.stockMovement.count({ where: { orderId: partialOrder.id, kind: 'RECEIPT' } })), 1, 'receipt must be a persisted movement');
 
@@ -106,7 +106,7 @@ async function main() {
   const afterConcurrent = await db.stockBalance.findUniqueOrThrow({ where: { warehouseId_productId: { warehouseId: partialWarehouse.id, productId: partialProduct.id } } });
   assert.equal(afterConcurrent.reserved - beforeConcurrent, 4, 'receipt/consolidation race must reserve the backorder once');
   assert(afterConcurrent.reserved <= afterConcurrent.onHand, 'reserved must remain at or below on-hand');
-  assert.equal((await db.order.findUniqueOrThrow({ where: { id: concurrentOrder.id } })).state, 'FULFILLED');
+  assert.equal((await db.order.findUniqueOrThrow({ where: { id: concurrentOrder.id } })).state, 'ALLOCATED');
 
   process.env.DATABASE_URL = testUrl.toString();
   const sessionToken = crypto.randomBytes(32).toString('hex');

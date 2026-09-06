@@ -78,8 +78,12 @@ enum ProposalState {
 
 enum OrderState {
   CONFIRMED
+  PARTIALLY_ALLOCATED
+  ALLOCATED
   PARTIALLY_FULFILLED
   FULFILLED
+  PARTIALLY_SHIPPED
+  SHIPPED
   CANCELLED
 }
 
@@ -87,6 +91,8 @@ enum FulfillmentState {
   SPLIT_PENDING
   RESERVED
   PARTIAL
+  PARTIALLY_ALLOCATED
+  ALLOCATED
   FULFILLED
   BACKORDER
 }
@@ -98,6 +104,7 @@ enum BackorderState {
 
 enum StockMovementKind {
   RECEIPT
+  SHIPMENT
 }
 
 enum SubscriptionState {
@@ -108,9 +115,30 @@ enum SubscriptionState {
 
 enum SubscriptionChangeKind {
   AMOUNT_CHANGED
+  PRORATED
   PAUSED
   RESUMED
   CANCELLED
+}
+
+enum ShipmentState {
+  DRAFT
+  SHIPPED
+}
+
+enum BillingPeriodState {
+  OPEN
+  INVOICED
+}
+
+enum NotificationState {
+  UNREAD
+  READ
+}
+
+enum RecommendationActionKind {
+  ACCEPTED
+  DISMISSED
 }
 
 enum InvoiceState {
@@ -218,6 +246,9 @@ model User {
   assignedLeads            Lead[]                   @relation("LeadAssignedRep")
   requestAlerts            Alert[]                  @relation("AlertRecipient")
   directoryRequestsDecided DirectoryJoinRequest[]   @relation("DirectoryJoinRequestDecider")
+  notifications            Notification[]
+  passwordResetTokens      PasswordResetToken[]
+  recommendationActions    RecommendationAction[]
   createdAt                DateTime                 @default(now())
 }
 
@@ -238,8 +269,8 @@ model Organization {
   stockMovements        StockMovement[]
   subscriptions         Subscription[]
   invoices              Invoice[]
-  payments         Payment[]
-  paymentWebhooks  PaymentWebhookEvent[]
+  payments              Payment[]
+  paymentWebhooks       PaymentWebhookEvent[]
   alerts                Alert[]
   portalRequests        PortalRequest[]
   leads                 Lead[]
@@ -247,9 +278,16 @@ model Organization {
   privilegedAudits      PrivilegedAudit[]
   directoryProfile      OrganizationProfile?
   directoryJoinRequests DirectoryJoinRequest[]
+  priceLists            PriceList[]
+  shipments             Shipment[]
+  billingPeriods        BillingPeriod[]
+  creditNotes           CreditNote[]
+  notifications         Notification[]
+  passwordResetTokens   PasswordResetToken[]
   rfqHandlingMode       RfqHandlingMode          @default(LEAD_FIRST)
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
+  productVariants       ProductVariant[]
 }
 
 model Customer {
@@ -284,6 +322,8 @@ model Customer {
   portalRequests       PortalRequest[]
   leads                Lead[]
   directoryJoinRequest DirectoryJoinRequest?
+  defaultPriceListId   String?
+  defaultPriceList     PriceList?               @relation(fields: [defaultPriceListId], references: [id], onDelete: SetNull)
   createdAt            DateTime                 @default(now())
   updatedAt            DateTime                 @updatedAt
 
@@ -419,33 +459,93 @@ model OrganizationInvitation {
 }
 
 model Product {
-  id                 String              @id @default(uuid())
-  organizationId     String
-  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  name               String
-  sku                String              @unique
-  category           String
-  description        String
-  unit               String
-  brand              String?
-  price              Decimal             @db.Decimal(12, 2)
-  cost               Decimal             @db.Decimal(12, 2)
-  taxRate            Decimal             @db.Decimal(5, 2)
-  recurring          Boolean             @default(false)
-  cadence            String?
-  active             Boolean             @default(true)
-  storeVisible       Boolean             @default(true)
-  featured           Boolean             @default(false)
-  quoteLines         QuoteLine[]
-  orderLines         OrderLine[]
-  subscriptions      Subscription[]
-  stocks             StockBalance[]
-  backorders         Backorder[]
-  stockMovements     StockMovement[]
-  portalRequestLines PortalRequestLine[]
-  directoryInterests DirectoryJoinRequest[]
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
+  id                    String                 @id @default(uuid())
+  organizationId        String
+  organization          Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name                  String
+  sku                   String                 @unique
+  category              String
+  description           String
+  unit                  String
+  brand                 String?
+  price                 Decimal                @db.Decimal(12, 2)
+  cost                  Decimal                @db.Decimal(12, 2)
+  taxRate               Decimal                @db.Decimal(5, 2)
+  recurring             Boolean                @default(false)
+  cadence               String?
+  active                Boolean                @default(true)
+  storeVisible          Boolean                @default(true)
+  featured              Boolean                @default(false)
+  quoteLines            QuoteLine[]
+  orderLines            OrderLine[]
+  subscriptions         Subscription[]
+  stocks                StockBalance[]
+  backorders            Backorder[]
+  stockMovements        StockMovement[]
+  portalRequestLines    PortalRequestLine[]
+  directoryInterests    DirectoryJoinRequest[]
+  variants              ProductVariant[]
+  priceListItems        PriceListItem[]
+  recommendationActions RecommendationAction[]
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+}
+
+model ProductVariant {
+  id             String          @id @default(uuid())
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name           String
+  sku            String          @unique
+  attributes     Json            @default("{}")
+  priceDelta     Decimal         @default(0) @db.Decimal(12, 2)
+  costDelta      Decimal         @default(0) @db.Decimal(12, 2)
+  active         Boolean         @default(true)
+  quoteLines     QuoteLine[]
+  priceListItems PriceListItem[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([productId, name])
+  @@index([organizationId, productId, active])
+}
+
+model PriceList {
+  id             String          @id @default(uuid())
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  customerTier   String?
+  currency       String
+  active         Boolean         @default(true)
+  effectiveFrom  DateTime        @default(now())
+  effectiveTo    DateTime?
+  items          PriceListItem[]
+  customers      Customer[]
+  quotes         Quote[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([organizationId, name, currency])
+  @@index([organizationId, customerTier, currency, active])
+}
+
+model PriceListItem {
+  id          String          @id @default(uuid())
+  priceListId String
+  priceList   PriceList       @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId   String?
+  variant     ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  unitPrice   Decimal         @db.Decimal(12, 2)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@unique([priceListId, productId, variantId])
+  @@index([productId, variantId])
 }
 
 model DiscountPolicy {
@@ -464,50 +564,56 @@ model DiscountPolicy {
   publishedAt            DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
   approvalCases          ApprovalCase[]
+  approvalSequence       String[]       @default(["Sales Manager", "Finance"])
+  managerReviewerId      String?
+  financeReviewerId      String?
 
   @@unique([organizationId, tier])
 }
 
 model Quote {
-  id                  String              @id @default(uuid())
-  organizationId      String
-  organization        Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  number              String              @unique
-  customer            String
-  customerId          String
-  customerRecord      Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  customerTier        String
-  ownerId             String
-  owner               User                @relation("QuoteOwner", fields: [ownerId], references: [id])
-  createdById         String
-  createdBy           User                @relation("QuoteCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  teamId              String?
-  team                SalesTeam?          @relation(fields: [teamId], references: [id], onDelete: SetNull)
-  stage               QuoteStage          @default(DRAFT)
-  version             Int                 @default(1)
-  orderDiscount       Decimal             @default(0) @db.Decimal(5, 2)
-  total               Decimal             @default(0) @db.Decimal(14, 2)
-  margin              Decimal             @default(0) @db.Decimal(14, 2)
-  riskScore           Decimal             @default(0) @db.Decimal(8, 2)
-  taxTotal            Decimal             @default(0) @db.Decimal(14, 2)
-  totalsByCadence     Json                @default("{}")
-  sentAt              DateTime?
-  currentRevisionId   String?             @unique
-  currentRevision     QuoteRevision?      @relation("CurrentQuoteRevision", fields: [currentRevisionId], references: [id], onDelete: Restrict)
-  lastActivity        DateTime            @default(now())
-  lines               QuoteLine[]
-  approvals           Approval[]
-  approvalCases       ApprovalCase[]
-  fulfillment         Fulfillment?
-  invoices            Invoice[]
-  negotiation         Negotiation[]
-  revisions           QuoteRevision[]     @relation("QuoteRevisions")
-  acceptance          CustomerAcceptance?
-  order               Order?
-  sourcePortalRequest PortalRequest?      @relation("PortalRequestQuotation")
-  convertedLead       Lead?               @relation("LeadQuotation")
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
+  id                    String                 @id @default(uuid())
+  organizationId        String
+  organization          Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  number                String                 @unique
+  customer              String
+  customerId            String
+  customerRecord        Customer               @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  customerTier          String
+  ownerId               String
+  owner                 User                   @relation("QuoteOwner", fields: [ownerId], references: [id])
+  createdById           String
+  createdBy             User                   @relation("QuoteCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  teamId                String?
+  team                  SalesTeam?             @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  stage                 QuoteStage             @default(DRAFT)
+  version               Int                    @default(1)
+  orderDiscount         Decimal                @default(0) @db.Decimal(5, 2)
+  total                 Decimal                @default(0) @db.Decimal(14, 2)
+  margin                Decimal                @default(0) @db.Decimal(14, 2)
+  riskScore             Decimal                @default(0) @db.Decimal(8, 2)
+  taxTotal              Decimal                @default(0) @db.Decimal(14, 2)
+  totalsByCadence       Json                   @default("{}")
+  sentAt                DateTime?
+  currentRevisionId     String?                @unique
+  currentRevision       QuoteRevision?         @relation("CurrentQuoteRevision", fields: [currentRevisionId], references: [id], onDelete: Restrict)
+  lastActivity          DateTime               @default(now())
+  lines                 QuoteLine[]
+  approvals             Approval[]
+  approvalCases         ApprovalCase[]
+  fulfillment           Fulfillment?
+  invoices              Invoice[]
+  negotiation           Negotiation[]
+  revisions             QuoteRevision[]        @relation("QuoteRevisions")
+  acceptance            CustomerAcceptance?
+  order                 Order?
+  sourcePortalRequest   PortalRequest?         @relation("PortalRequestQuotation")
+  convertedLead         Lead?                  @relation("LeadQuotation")
+  priceListId           String?
+  priceList             PriceList?             @relation(fields: [priceListId], references: [id], onDelete: Restrict)
+  recommendationActions RecommendationAction[]
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
 
   @@index([organizationId, stage, lastActivity, id])
   @@index([organizationId, ownerId, lastActivity, id])
@@ -580,17 +686,19 @@ model QuoteRevision {
 }
 
 model QuoteLine {
-  id              String   @id @default(uuid())
+  id              String          @id @default(uuid())
   quoteId         String
-  quote           Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  quote           Quote           @relation(fields: [quoteId], references: [id], onDelete: Cascade)
   productId       String
-  product         Product  @relation(fields: [productId], references: [id])
+  product         Product         @relation(fields: [productId], references: [id])
+  variantId       String?
+  variant         ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Restrict)
   quantity        Int
-  unitPrice       Decimal  @db.Decimal(12, 2)
-  unitCost        Decimal  @db.Decimal(12, 2)
-  discount        Decimal  @db.Decimal(5, 2)
-  allowedDiscount Decimal  @default(0) @db.Decimal(5, 2)
-  createdAt       DateTime @default(now())
+  unitPrice       Decimal         @db.Decimal(12, 2)
+  unitCost        Decimal         @db.Decimal(12, 2)
+  discount        Decimal         @db.Decimal(5, 2)
+  allowedDiscount Decimal         @default(0) @db.Decimal(5, 2)
+  createdAt       DateTime        @default(now())
 }
 
 model Approval {
@@ -775,6 +883,7 @@ model Subscription {
   version        Int                  @default(1)
   cancelledAt    DateTime?
   changes        SubscriptionChange[]
+  billingPeriods BillingPeriod[]
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 }
@@ -798,29 +907,33 @@ model SubscriptionChange {
 }
 
 model Invoice {
-  id             String        @id @default(uuid())
+  id             String         @id @default(uuid())
   organizationId String
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  number         String        @unique
-  billingKey     String?       @unique
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  number         String         @unique
+  billingKey     String?        @unique
   quoteId        String
-  quote          Quote         @relation(fields: [quoteId], references: [id])
+  quote          Quote          @relation(fields: [quoteId], references: [id])
   customer       String
   customerId     String
-  customerRecord Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  customerRecord Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
   orderId        String?
-  order          Order?        @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  currency       String        @default("INR")
-  amount         Decimal       @db.Decimal(14, 2)
-  paidAmount     Decimal       @default(0) @db.Decimal(14, 2)
-  state          InvoiceState  @default(UNPAID)
+  order          Order?         @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  currency       String         @default("INR")
+  amount         Decimal        @db.Decimal(14, 2)
+  paidAmount     Decimal        @default(0) @db.Decimal(14, 2)
+  state          InvoiceState   @default(UNPAID)
   dueAt          DateTime
   lines          Json
-  version        Int           @default(1)
+  version        Int            @default(1)
   payments       Payment[]
   notes          InvoiceNote[]
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  shipmentId     String?
+  shipment       Shipment?      @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  billingPeriod  BillingPeriod?
+  credits        CreditNote[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 }
 
 model InvoiceNote {
@@ -936,25 +1049,142 @@ model Order {
   stockMovements StockMovement[]
   subscriptions  Subscription[]
   invoices       Invoice[]
+  shipments      Shipment[]
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 }
 
 model OrderLine {
-  id           String        @id @default(uuid())
-  orderId      String
-  order        Order         @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  quoteLineId  String        @unique
-  productId    String
-  product      Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
-  quantity     Int
-  snapshot     Json
-  recurring    Boolean
-  cadence      String?
-  subscription Subscription?
-  reservations Reservation[]
-  backorder    Backorder?
-  createdAt    DateTime      @default(now())
+  id            String         @id @default(uuid())
+  orderId       String
+  order         Order          @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  quoteLineId   String         @unique
+  productId     String
+  product       Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quantity      Int
+  snapshot      Json
+  recurring     Boolean
+  cadence       String?
+  subscription  Subscription?
+  reservations  Reservation[]
+  backorder     Backorder?
+  shipmentLines ShipmentLine[]
+  createdAt     DateTime       @default(now())
+}
+
+model Shipment {
+  id             String         @id @default(uuid())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  orderId        String
+  order          Order          @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  number         String         @unique
+  state          ShipmentState  @default(DRAFT)
+  carrier        String?
+  trackingNumber String?
+  shippedAt      DateTime?
+  lines          ShipmentLine[]
+  invoices       Invoice[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([organizationId, state, createdAt])
+  @@index([orderId, createdAt])
+}
+
+model ShipmentLine {
+  id          String    @id @default(uuid())
+  shipmentId  String
+  shipment    Shipment  @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  orderLineId String
+  orderLine   OrderLine @relation(fields: [orderLineId], references: [id], onDelete: Restrict)
+  quantity    Int
+  createdAt   DateTime  @default(now())
+
+  @@unique([shipmentId, orderLineId])
+  @@index([orderLineId])
+}
+
+model BillingPeriod {
+  id             String             @id @default(uuid())
+  organizationId String
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  subscriptionId String
+  subscription   Subscription       @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  periodStart    DateTime
+  periodEnd      DateTime
+  amount         Decimal            @db.Decimal(12, 2)
+  proration      Decimal            @default(0) @db.Decimal(12, 2)
+  state          BillingPeriodState @default(OPEN)
+  invoiceId      String?            @unique
+  invoice        Invoice?           @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@unique([subscriptionId, periodStart, periodEnd])
+  @@index([organizationId, state, periodEnd])
+}
+
+model CreditNote {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  invoiceId      String
+  invoice        Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  number         String       @unique
+  amount         Decimal      @db.Decimal(12, 2)
+  reason         String
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, invoiceId])
+}
+
+model Notification {
+  id             String            @id @default(uuid())
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  recipientId    String
+  recipient      User              @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  title          String
+  body           String
+  resourceType   String
+  resourceId     String
+  state          NotificationState @default(UNREAD)
+  dedupeKey      String?           @unique
+  readAt         DateTime?
+  createdAt      DateTime          @default(now())
+
+  @@index([recipientId, state, createdAt])
+}
+
+model PasswordResetToken {
+  id             String        @id @default(uuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash      String        @unique
+  expiresAt      DateTime
+  usedAt         DateTime?
+  createdAt      DateTime      @default(now())
+
+  @@index([userId, expiresAt])
+}
+
+model RecommendationAction {
+  id        String                   @id @default(uuid())
+  quoteId   String
+  quote     Quote                    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product                  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  actorId   String
+  actor     User                     @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  action    RecommendationActionKind
+  reason    String?
+  createdAt DateTime                 @default(now())
+
+  @@unique([quoteId, productId])
+  @@index([actorId, createdAt])
 }
 
 model IdempotencyRecord {

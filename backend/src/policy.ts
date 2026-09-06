@@ -10,6 +10,9 @@ export const discountPolicyUpdateSchema = z.object({
   financeThreshold: percentage,
   aggregateDiscountLimit: percentage,
   minimumMarginPercent: z.number().min(-100).max(100),
+  approvalSequence:z.array(z.enum(['Sales Manager','Finance'])).length(2).refine(values=>new Set(values).size===2,'Approval sequence must include Sales Manager and Finance exactly once.').optional(),
+  managerReviewerId:z.string().uuid().nullable().optional(),
+  financeReviewerId:z.string().uuid().nullable().optional(),
   reason: z.string().trim().min(5).max(240),
 }).strict().superRefine((values, context) => {
   for (const [field, value] of [

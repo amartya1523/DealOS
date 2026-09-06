@@ -20,6 +20,7 @@
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
+    "exceljs": "^4.4.0",
     "express": "^5.1.0",
     "google-auth-library": "^10.9.1",
     "helmet": "^8.1.0",
@@ -36,6 +37,10 @@
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",
     "vitest": "^3.1.2"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.0",
+    "uuid": "^11.1.1"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

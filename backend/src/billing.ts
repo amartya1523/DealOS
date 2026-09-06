@@ -52,28 +52,12 @@ type ConfirmationBillingInput = {
 };
 
 export async function createConfirmationBilling(tx: Prisma.TransactionClient, input: ConfirmationBillingInput) {
-  const invoiceLines = input.order.lines.map((line) => customerSafeInvoiceLine(line.snapshot, line.quantity, line.productId, line.cadence));
-  const invoice = await tx.invoice.create({
-    data: {
-      organizationId: input.organizationId,
-      number: `INV-${input.order.number.replace(/^SO-/, '')}`,
-      billingKey: `ORDER_CONFIRMATION:${input.order.id}`,
-      quoteId: input.quote.id,
-      customer: input.quote.customer,
-      customerId: input.quote.customerId,
-      orderId: input.order.id,
-      currency: input.revision.currency,
-      amount: decimal(input.revision.total),
-      dueAt: addDays(input.confirmedAt, DEFAULT_CONFIRMATION_INVOICE_DUE_DAYS),
-      lines: asJson(invoiceLines),
-    },
-  });
-
   const recurring = input.order.lines.filter((line) => line.recurring && line.cadence);
-  const subscriptions = await Promise.all(recurring.map((line) => {
+  const created = await Promise.all(recurring.map(async (line, index) => {
     const snapshot = record(line.snapshot);
     const amount = decimal(snapshot.net).add(decimal(snapshot.tax)).toDecimalPlaces(2);
-    return tx.subscription.create({ data: {
+    const nextBillAt = nextBillingDate(input.confirmedAt, line.cadence!);
+    const subscription = await tx.subscription.create({ data: {
       organizationId: input.organizationId,
       customer: input.quote.customer,
       customerId: input.quote.customerId,
@@ -84,15 +68,52 @@ export async function createConfirmationBilling(tx: Prisma.TransactionClient, in
       productName: String(snapshot.name ?? snapshot.description ?? 'Recurring plan'),
       cadence: line.cadence!,
       amount,
-      nextBillAt: nextBillingDate(input.confirmedAt, line.cadence!),
+      nextBillAt,
     } });
+    const invoiceLine = customerSafeInvoiceLine(line.snapshot, line.quantity, line.productId, line.cadence);
+    const invoice = await tx.invoice.create({ data: {
+      organizationId: input.organizationId,
+      number: `INV-R-${input.order.number.replace(/^SO-/, '')}-${index + 1}`,
+      billingKey: `SUBSCRIPTION:${subscription.id}:${input.confirmedAt.toISOString()}`,
+      quoteId: input.quote.id,
+      customer: input.quote.customer,
+      customerId: input.quote.customerId,
+      orderId: input.order.id,
+      currency: input.revision.currency,
+      amount,
+      dueAt: addDays(input.confirmedAt, DEFAULT_CONFIRMATION_INVOICE_DUE_DAYS),
+      lines: asJson([{ ...invoiceLine, billingPeriodStart: input.confirmedAt.toISOString(), billingPeriodEnd: nextBillAt.toISOString() }]),
+    } });
+    await tx.billingPeriod.create({data:{organizationId:input.organizationId,subscriptionId:subscription.id,periodStart:input.confirmedAt,periodEnd:nextBillAt,amount,state:'INVOICED',invoiceId:invoice.id}});
+    return {subscription,invoice};
   }));
-
-  await tx.auditEvent.create({ data: { organizationId: input.organizationId, actorId: input.actorId, action: 'INVOICE_ISSUED_ON_CONFIRMATION', resource: 'Invoice', resourceId: invoice.id, revisionId: input.revision.id, requestId: input.requestId, reason: `Combined first invoice for ${input.order.number}; ${DEFAULT_CONFIRMATION_INVOICE_DUE_DAYS}-day proposed default.` } });
+  const subscriptions=created.map(item=>item.subscription);
+  const invoices=created.map(item=>item.invoice);
   for (const subscription of subscriptions) {
     await tx.auditEvent.create({ data: { organizationId: input.organizationId, actorId: input.actorId, action: 'SUBSCRIPTION_CREATED', resource: 'Subscription', resourceId: subscription.id, revisionId: input.revision.id, requestId: input.requestId, reason: `Created from recurring order line on ${input.order.number}.` } });
   }
-  return { invoice, subscriptions };
+  for(const invoice of invoices)await tx.auditEvent.create({data:{organizationId:input.organizationId,actorId:input.actorId,action:'RECURRING_PERIOD_INVOICED',resource:'Invoice',resourceId:invoice.id,revisionId:input.revision.id,requestId:input.requestId,reason:`Recurring service invoice for ${input.order.number}; hardware is invoiced only when shipped.`}});
+  return { invoice: invoices[0] ?? null, invoices, subscriptions };
+}
+
+export async function runRecurringBilling(tx:Prisma.TransactionClient,input:{organizationId:string;actorId:string;now:Date;requestId?:string}){
+  const due=await tx.subscription.findMany({where:{organizationId:input.organizationId,state:'ACTIVE',quoteId:{not:null},customerId:{not:null},nextBillAt:{lte:input.now}},include:{customerRecord:true,order:true}});
+  const results=[];
+  for(const subscription of due){
+    await tx.$queryRaw`SELECT "id" FROM "Subscription" WHERE "id" = ${subscription.id} FOR UPDATE`;
+    const periodStart=subscription.nextBillAt;
+    const periodEnd=nextBillingDate(periodStart,subscription.cadence);
+    const existing=await tx.billingPeriod.findUnique({where:{subscriptionId_periodStart_periodEnd:{subscriptionId:subscription.id,periodStart,periodEnd}},include:{invoice:true}});
+    if(existing?.invoice){results.push(existing.invoice);continue}
+    const period=existing??await tx.billingPeriod.create({data:{organizationId:input.organizationId,subscriptionId:subscription.id,periodStart,periodEnd,amount:subscription.amount}});
+    const total=decimal(period.amount).add(period.proration).toDecimalPlaces(2);
+    const invoice=await tx.invoice.create({data:{organizationId:input.organizationId,number:`INV-R-${Date.now().toString().slice(-8)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`,billingKey:`SUBSCRIPTION_PERIOD:${period.id}`,quoteId:subscription.quoteId!,orderId:subscription.orderId,customerId:subscription.customerId!,customer:subscription.customer,currency:subscription.customerRecord?.currency??subscription.order?.currency??'INR',amount:total,dueAt:addDays(input.now,subscription.customerRecord?.paymentTerms??DEFAULT_CONFIRMATION_INVOICE_DUE_DAYS),lines:asJson([{description:subscription.productName,productId:subscription.productId,cadence:subscription.cadence,quantity:1,unitPrice:decimal(subscription.amount).toNumber(),net:decimal(subscription.amount).toNumber(),tax:0,proration:decimal(period.proration).toNumber(),amount:total.toNumber(),billingPeriodStart:periodStart.toISOString(),billingPeriodEnd:periodEnd.toISOString()}])}});
+    await tx.billingPeriod.update({where:{id:period.id},data:{state:'INVOICED',invoiceId:invoice.id}});
+    await tx.subscription.update({where:{id:subscription.id},data:{nextBillAt:periodEnd,version:{increment:1}}});
+    await tx.auditEvent.create({data:{organizationId:input.organizationId,actorId:input.actorId,action:'RECURRING_PERIOD_INVOICED',resource:'Invoice',resourceId:invoice.id,requestId:input.requestId,reason:`${subscription.productName}: ${periodStart.toISOString()} - ${periodEnd.toISOString()}`}});
+    results.push(invoice);
+  }
+  return {processed:results.length,invoices:results};
 }
 
 const paymentFingerprint = (value: unknown) => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -165,6 +186,23 @@ export async function changeSubscription(tx: Prisma.TransactionClient, input: Ch
   const kind: SubscriptionChangeKind = input.action === 'PAUSE' ? 'PAUSED' : input.action === 'RESUME' ? 'RESUMED' : input.action === 'CANCEL' ? 'CANCELLED' : 'AMOUNT_CHANGED';
   const nextAmount = input.amount === undefined ? decimal(subscription.amount) : decimal(input.amount).toDecimalPlaces(2);
   if (nextAmount.lessThanOrEqualTo(0)) throw new BillingError(422, 'VALIDATION_ERROR', 'Subscription amount must be positive.');
+  if(input.amount!==undefined&&!nextAmount.equals(subscription.amount)){
+    const period=await tx.billingPeriod.findFirst({where:{subscriptionId:subscription.id,periodStart:{lte:input.effectiveAt},periodEnd:{gt:input.effectiveAt}},orderBy:{periodStart:'desc'}});
+    if(period){
+      const totalMs=Math.max(1,period.periodEnd.getTime()-period.periodStart.getTime());
+      const remaining=Math.max(0,period.periodEnd.getTime()-input.effectiveAt.getTime())/totalMs;
+      const proration=nextAmount.sub(subscription.amount).mul(remaining).toDecimalPlaces(2);
+      await tx.billingPeriod.update({where:{id:period.id},data:{proration:{increment:proration}}});
+      await tx.subscriptionChange.create({data:{subscriptionId:subscription.id,actorId:input.actorId,kind:'PRORATED',previousAmount:subscription.amount,newAmount:nextAmount,previousState:subscription.state,newState:nextState,effectiveAt:input.effectiveAt,reason:`${input.reason} · proration ${proration.toFixed(2)}`}});
+      if(proration.lessThan(0)&&period.invoiceId){
+        const creditAmount=proration.abs();
+        await tx.creditNote.create({data:{organizationId:input.organizationId,invoiceId:period.invoiceId,number:`CR-${Date.now().toString().slice(-8)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`,amount:creditAmount,reason:input.reason}});
+        const invoice=await tx.invoice.findUniqueOrThrow({where:{id:period.invoiceId}});
+        const reduced=Prisma.Decimal.max(decimal(invoice.paidAmount),decimal(invoice.amount).sub(creditAmount));
+        await tx.invoice.update({where:{id:invoice.id},data:{amount:reduced,state:decimal(invoice.paidAmount).greaterThanOrEqualTo(reduced)?'PAID':decimal(invoice.paidAmount).greaterThan(0)?'PARTIAL':'UNPAID',version:{increment:1}}});
+      }
+    }
+  }
   const updated = await tx.subscription.update({ where: { id: subscription.id }, data: { amount: nextAmount, state: nextState, cancelledAt: input.action === 'CANCEL' ? input.effectiveAt : subscription.cancelledAt, version: { increment: 1 } } });
   await tx.subscriptionChange.create({ data: { subscriptionId: subscription.id, actorId: input.actorId, kind, previousAmount: subscription.amount, newAmount: nextAmount, previousState: subscription.state, newState: nextState, effectiveAt: input.effectiveAt, reason: input.reason } });
   await tx.auditEvent.create({ data: { organizationId: input.organizationId, actorId: input.actorId, action: `SUBSCRIPTION_${kind}`, resource: 'Subscription', resourceId: subscription.id, requestId: input.requestId, reason: input.reason } });

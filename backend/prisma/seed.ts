@@ -394,7 +394,7 @@ async function createConfirmedFixture(input: {
   specs: LineSpec[];
   manager: User;
   finance: User;
-  orderState: 'CONFIRMED' | 'PARTIALLY_FULFILLED' | 'FULFILLED';
+  orderState: 'CONFIRMED' | 'PARTIALLY_ALLOCATED' | 'ALLOCATED';
   createdAt: Date;
   promisedDeliveryAt?: Date;
 }) : Promise<ConfirmedFixture> {
@@ -605,7 +605,7 @@ async function validateSeed() {
   assertScenario('Q-0109', scenarios.get('Q-0109')?.stage === 'REJECTED', 'represent a rejected terminal outcome');
   assertScenario('Q-0111', scenarios.get('Q-0111')?.currentRevision?.revisionNumber === 2 && scenarios.get('Q-0111')?.negotiation.some((item) => item.state === 'ADOPTED') === true, 'retain an adopted counteroffer and replacement Draft');
   const q0202 = scenarios.get('Q-0202')!;
-  assertScenario('Q-0202', q0202.order?.state === 'PARTIALLY_FULFILLED' && q0202.order.fulfillment?.state === 'BACKORDER', 'represent partial fulfillment with a backorder');
+  assertScenario('Q-0202', q0202.order?.state === 'PARTIALLY_ALLOCATED' && q0202.order.fulfillment?.state === 'BACKORDER', 'represent partial allocation with a backorder');
   assertScenario('Q-0202', q0202.order?.invoices[0]?.state === 'PARTIAL' && q0202.order.subscriptions[0]?.state === 'ACTIVE', 'link partial billing and an active subscription');
   assertScenario('NS-Q-0002', scenarios.get('NS-Q-0002')?.stage === 'DRAFT', 'represent the Direct-Draft intake result');
   const balances = await db.stockBalance.findMany({ select: { id: true, reserved: true } });
@@ -793,8 +793,8 @@ async function main() {
   await db.negotiation.create({ data: { quoteId: q0111.quote.id, revisionId: q0111Old.revision.id, kind: 'PROPOSAL', state: 'ADOPTED', author: acmeCustomer.name, message: 'Increase the discount to 8% and we will proceed.', messageType: 'COUNTER_DISCOUNT', counterDiscount: 8, respondedById: rep.id, responseReason: 'Adopted for a revised approval cycle.', respondedAt: atDay(-1), adoptedRevisionId: q0111.revision.id, createdAt: atDay(-2) } });
 
   const q0201 = await createConfirmedFixture({ organizationId: primaryOrganizationId, number: 'Q-0201', customer: beta, customerUser: betaCustomer, owner: rep, team: enterpriseTeam, policy: silverPolicy, specs: [{ product: tablet, quantity: 12 }], manager, finance, orderState: 'CONFIRMED', createdAt: atDay(-6), promisedDeliveryAt: atDay(-2) });
-  const q0202 = await createConfirmedFixture({ organizationId: primaryOrganizationId, number: 'Q-0202', customer: acme, customerUser: acmeCustomer, owner: rep, team: enterpriseTeam, policy: goldPolicy, specs: [{ product: laptop, quantity: 14 }, { product: setup, quantity: 1 }, { product: care, quantity: 14 }], manager, finance, orderState: 'PARTIALLY_FULFILLED', createdAt: atDay(-12), promisedDeliveryAt: atDay(5) });
-  const q0203 = await createConfirmedFixture({ organizationId: primaryOrganizationId, number: 'Q-0203', customer: acme, customerUser: acmeCustomer, owner: rep, team: enterpriseTeam, policy: goldPolicy, specs: [{ product: docking, quantity: 12 }], manager, finance, orderState: 'FULFILLED', createdAt: atDay(-20), promisedDeliveryAt: atDay(3) });
+  const q0202 = await createConfirmedFixture({ organizationId: primaryOrganizationId, number: 'Q-0202', customer: acme, customerUser: acmeCustomer, owner: rep, team: enterpriseTeam, policy: goldPolicy, specs: [{ product: laptop, quantity: 14 }, { product: setup, quantity: 1 }, { product: care, quantity: 14 }], manager, finance, orderState: 'PARTIALLY_ALLOCATED', createdAt: atDay(-12), promisedDeliveryAt: atDay(5) });
+  const q0203 = await createConfirmedFixture({ organizationId: primaryOrganizationId, number: 'Q-0203', customer: acme, customerUser: acmeCustomer, owner: rep, team: enterpriseTeam, policy: goldPolicy, specs: [{ product: docking, quantity: 12 }], manager, finance, orderState: 'ALLOCATED', createdAt: atDay(-20), promisedDeliveryAt: atDay(3) });
   const q0204 = await createConfirmedFixture({ organizationId: primaryOrganizationId, number: 'Q-0204', customer: beta, customerUser: betaCustomer, owner: rep, team: enterpriseTeam, policy: silverPolicy, specs: [{ product: compliance, quantity: 1 }, { product: setup, quantity: 1 }], manager, finance, orderState: 'CONFIRMED', createdAt: atDay(-8) });
   const q0205 = await createConfirmedFixture({ organizationId: primaryOrganizationId, number: 'Q-0205', customer: beta, customerUser: betaCustomer, owner: rep, team: enterpriseTeam, policy: silverPolicy, specs: [{ product: warranty, quantity: 1 }], manager, finance, orderState: 'CONFIRMED', createdAt: atDay(-15) });
   const q0206 = await createConfirmedFixture({ organizationId: primaryOrganizationId, number: 'Q-0206', customer: acme, customerUser: acmeCustomer, owner: rep, team: enterpriseTeam, policy: goldPolicy, specs: [{ product: setup, quantity: 2 }], manager, finance, orderState: 'CONFIRMED', createdAt: atDay(-10) });
@@ -809,7 +809,7 @@ async function main() {
   ] });
   await db.backorder.create({ data: { fulfillmentId: partialFulfillment.id, orderId: q0202.order.id, orderLineId: q0202.orderLines[0]!.id, productId: laptop.id, productName: laptop.name, originalQuantity: 5, remainingQuantity: 3, state: 'OPEN', createdAt: atDay(-11) } });
   await db.stockMovement.create({ data: { organizationId: primaryOrganizationId, stockBalanceId: stock.get(`${mainWarehouse.id}:${laptop.id}`)!.id, orderId: q0202.order.id, productId: laptop.id, kind: 'RECEIPT', quantityDelta: 2, reference: 'GRN-SEED-0202', reason: 'Two backordered laptops arrived and were automatically reserved.', actorId: finance.id, createdAt: atDay(-2) } });
-  const fullFulfillment = await db.fulfillment.create({ data: { quoteId: q0203.quote.id, orderId: q0203.order.id, state: 'FULFILLED', split: json({ split: [
+  const fullFulfillment = await db.fulfillment.create({ data: { quoteId: q0203.quote.id, orderId: q0203.order.id, state: 'ALLOCATED', split: json({ split: [
     { orderLineId: q0203.orderLines[0]!.id, productId: docking.id, warehouseId: mainWarehouse.id, warehouseName: mainWarehouse.name, quantity: 7 },
     { orderLineId: q0203.orderLines[0]!.id, productId: docking.id, warehouseId: eastDepot.id, warehouseName: eastDepot.name, quantity: 5 },
   ], backorders: [] }), estimatedCost: Number(mainWarehouse.shippingCost) + Number(eastDepot.shippingCost), shipmentCount: 2, overridden: false } });

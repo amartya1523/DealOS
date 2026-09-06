@@ -131,6 +131,7 @@ export function CustomerAuthPage({ onSuccess, signedInRole }: { onSuccess: () =>
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [resetNotice,setResetNotice]=useState("");
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -144,6 +145,7 @@ export function CustomerAuthPage({ onSuccess, signedInRole }: { onSuccess: () =>
       setBusy(false);
     }
   }
+  async function forgotPassword(){setError("");setResetNotice("");try{await request('/auth/password/forgot',{method:'POST',body:JSON.stringify({email:email.trim().toLowerCase()})});setResetNotice('If an active account matches this email, a 30-minute reset link has been issued.')}catch(error){setError(error instanceof Error?error.message:'Could not request a password reset.')}}
   return <main className="customer-auth-page">
     <header className="customer-auth-header">
       <div className="customer-auth-brand"><Brand/><span>Customer portal</span></div>
@@ -168,16 +170,18 @@ export function CustomerAuthPage({ onSuccess, signedInRole }: { onSuccess: () =>
           <span><small>SECURE DEAL ROOM</small><b>Customer access</b></span>
         </div>
         <h2>Everything shared with you, in one place.</h2>
-        <p>Sign in to browse organizations or continue an approved private deal room.</p>
+        <p>Use the email address your DealOS invitation was sent to.</p>
         {signedInRole&&signedInRole!=="CUSTOMER"&&<div className="auth-error" role="status">Signing in below will switch this browser from the internal workspace to the customer portal.</div>}
         <form className="customer-login-form" onSubmit={submit}>
           <label className="customer-email-field">Customer Email ID<input required type="email" autoComplete="email" placeholder="you@company.com" value={email} onChange={event=>{setEmail(event.target.value);setError("")}}/></label>
           <label className="customer-email-field">Password<span className="customer-password-field"><input required minLength={8} type={visible?"text":"password"} autoComplete="current-password" placeholder="Enter your password" value={password} onChange={event=>{setPassword(event.target.value);setError("")}}/><button type="button" aria-label={visible?"Hide password":"Show password"} onClick={()=>setVisible(!visible)}>{visible?<EyeOff/>:<Eye/>}</button></span></label>
           <button className="customer-email-submit" disabled={busy}>{busy?"Signing in…":"Sign in with Email ID"}<ArrowUpRight/></button>
+          <button className="back-step" type="button" disabled={!email.includes('@')||busy} onClick={()=>void forgotPassword()}>Forgot password?</button>
         </form>
         <div className="customer-auth-divider"><span>or continue with Google</span></div>
         <GoogleAuth mode="customer" email={email.trim().toLowerCase()} hideDivider onComplete={onSuccess} onError={setError}/>
         {error&&<div className="auth-error" role="alert">{error}</div>}
+        {resetNotice&&<div className="auth-error" role="status">{resetNotice}</div>}
         <div className="customer-signup-link"><span>New to the customer portal?</span><a href="/customer/sign-up">Create an account request <ArrowRight/></a></div>
         <div className="customer-auth-trust"><span><Check/>Verified email matching</span><span><LockKeyhole/>Customer-scoped access</span></div>
       </section>
@@ -203,6 +207,7 @@ export function AuthPage({
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [resetNotice,setResetNotice]=useState("");
   useEffect(() => {
     if (signup) return;
     const generated = window.sessionStorage.getItem("dealos_generated_login");
@@ -246,6 +251,7 @@ export function AuthPage({
       setBusy(false);
     }
   }
+  async function forgotPassword(){setError("");setResetNotice("");try{await request('/auth/password/forgot',{method:'POST',body:JSON.stringify({email:email.trim().toLowerCase()})});setResetNotice('If an active account matches this email, a 30-minute reset link has been issued.')}catch(error){setError(error instanceof Error?error.message:'Could not request a password reset.')}}
   return (
     <div className="auth-page">
       <div className="auth-story">
@@ -308,6 +314,7 @@ export function AuthPage({
                   {error || externalError}
                 </div>
               )}
+              {resetNotice&&<div className="auth-error" role="status">{resetNotice}</div>}
               {signup && step === 1 && (
                 <label>
                   Organization name
@@ -395,6 +402,7 @@ export function AuthPage({
               </>}
               <div className="onboarding-actions">
                 {signup && step > 1 && <button className="back-step" type="button" onClick={() => setStep(step - 1)}>Back</button>}
+                {!signup&&<button className="back-step" type="button" disabled={!email.includes('@')||busy} onClick={()=>void forgotPassword()}>Forgot password?</button>}
               <button className="cta" disabled={busy}>
                 {busy
                   ? "Just a moment…"

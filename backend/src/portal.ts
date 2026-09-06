@@ -84,22 +84,32 @@ export function customerSafeQuotationDto(quote: any) {
   const hasOpenProposal = (quote.negotiation ?? []).some((item: any) => item.kind === 'PROPOSAL' && item.state === 'OPEN' && item.revisionId === revision.id);
   const accepted = Boolean(quote.order || quote.acceptance);
   const customerStatus = accepted ? 'ACCEPTED' : hasOpenProposal || quote.stage === 'NEGOTIATION' ? 'NEGOTIATION' : 'SENT';
-  const lines = snapshotLines(revision.linesSnapshot).map((line, index) => ({
+  const lines = snapshotLines(revision.linesSnapshot).map((line, index) => {
+    const source = (quote.lines ?? []).find((item: any) => item.productId === line.productId);
+    const product = source?.product;
+    const quantity = Number(line.quantity ?? source?.quantity ?? 0);
+    const unitPrice = Number(line.unitPrice ?? source?.unitPrice ?? 0);
+    const discount = Number(line.discount ?? source?.discount ?? 0);
+    const gross = Number(line.gross ?? quantity * unitPrice);
+    const net = Number(line.net ?? gross * (1 - discount / 100));
+    const tax = Number(line.tax ?? net * Number(product?.taxRate ?? 0) / 100);
+    const cadence = line.cadence ?? (product?.recurring ? product.cadence : 'One-time');
+    return ({
     id: `${revision.id}:${index}`,
     productId: String(line.productId ?? ''),
-    quantity: Number(line.quantity ?? 0),
-    unitPrice: stringValue(line.unitPrice),
-    discount: stringValue(line.discount),
-    gross: stringValue(line.gross),
-    net: stringValue(line.net),
-    tax: stringValue(line.tax),
-    cadence: line.cadence ? String(line.cadence) : null,
+    quantity,
+    unitPrice: stringValue(unitPrice),
+    discount: stringValue(discount),
+    gross: stringValue(gross),
+    net: stringValue(net),
+    tax: stringValue(tax),
+    cadence: cadence ? String(cadence) : null,
     product: {
-      id: String(line.productId ?? ''), name: String(line.name ?? 'Line item'), sku: String(line.sku ?? ''),
-      category: String(line.category ?? ''), description: String(line.description ?? ''),
-      recurring: Boolean(line.cadence && line.cadence !== 'One-time'), cadence: line.cadence ? String(line.cadence) : null,
+      id: String(line.productId ?? ''), name: String(line.name ?? product?.name ?? 'Line item'), sku: String(line.sku ?? product?.sku ?? ''),
+      category: String(line.category ?? product?.category ?? ''), description: String(line.description ?? product?.description ?? ''),
+      recurring: Boolean(cadence && cadence !== 'One-time'), cadence: cadence ? String(cadence) : null,
     },
-  }));
+  });});
   return {
     id: quote.id,
     number: quote.number,

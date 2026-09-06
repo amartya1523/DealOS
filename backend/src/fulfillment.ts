@@ -229,7 +229,7 @@ async function fulfillmentView(client: DbClient, orderId: string) {
   const order = await client.order.findUnique({
     where: { id: orderId },
     include: {
-      lines: { include: { product: { select: { name: true } } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
+      lines: { include: { product: { select: { name: true } }, shipmentLines: { include: { shipment: true } } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
       fulfillment: {
         include: {
           reservations: { include: { orderLine: true, stockBalance: { include: { warehouse: true } } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
@@ -260,6 +260,7 @@ async function fulfillmentView(client: DbClient, orderId: string) {
   }));
   const reservedByLine = new Map<string, number>();
   for (const reservation of order.fulfillment.reservations) reservedByLine.set(reservation.orderLineId, (reservedByLine.get(reservation.orderLineId) ?? 0) + reservation.quantity);
+  const shippedByLine = new Map(order.lines.map((line) => [line.id, line.shipmentLines.filter((item) => item.shipment.state === 'SHIPPED').reduce((sum, item) => sum + item.quantity, 0)]));
   return {
     id: order.fulfillment.id,
     orderId: order.id,
@@ -276,14 +277,15 @@ async function fulfillmentView(client: DbClient, orderId: string) {
       productName: item.productName,
       orderedQuantity: item.quantity,
       reservedQuantity: reservedByLine.get(item.orderLineId) ?? 0,
-      fulfilledQuantity: reservedByLine.get(item.orderLineId) ?? 0,
+      fulfilledQuantity: shippedByLine.get(item.orderLineId) ?? 0,
+      shippedQuantity: shippedByLine.get(item.orderLineId) ?? 0,
       backorderedQuantity: backorders.find((backorder) => backorder.orderLineId === item.orderLineId)?.quantity ?? 0,
     })),
     estimatedCost: order.fulfillment.estimatedCost.toString(),
     shipmentCount: order.fulfillment.shipmentCount,
     consolidationAvailable: backorders.some((backorder) => balances.some((balance) => balance.productId === backorder.productId && balance.onHand - balance.reserved > 0)),
-    physicalDispatchImplemented: false,
-    statusMeaning: 'FULFILLED means all hardware is reserved; it does not mean picked, dispatched, delivered, or consumed from on-hand.',
+    physicalDispatchImplemented: true,
+    statusMeaning: 'ALLOCATED means stock is reserved; SHIPPED means stock left the warehouse and its invoice was issued.',
     updatedAt: order.fulfillment.updatedAt,
   };
 }
@@ -322,8 +324,8 @@ export async function previewSplit(client: DbClient, input: { organizationId: st
     shipmentCount: allocationMetrics.shipmentCount,
     stockFingerprint: availabilityFingerprint(balances),
     preview: true,
-    physicalDispatchImplemented: false,
-    statusMeaning: 'FULFILLED means all hardware is reserved; it does not mean picked, dispatched, delivered, or consumed from on-hand.',
+    physicalDispatchImplemented: true,
+    statusMeaning: 'ALLOCATED means all hardware is reserved. Shipping is a separate audited transition.',
   };
 }
 
@@ -393,7 +395,7 @@ export async function reserveStock(tx: Prisma.TransactionClient, input: ReserveI
     data: {
       quoteId: order.quote.id,
       orderId: order.id,
-      state: fulfilled ? 'FULFILLED' : 'BACKORDER',
+      state: fulfilled ? 'ALLOCATED' : 'BACKORDER',
       split: json({ split: allocation.split, backorders: allocation.backorders }),
       estimatedCost: allocationMetrics.estimatedCost,
       shipmentCount: allocationMetrics.shipmentCount,
@@ -423,7 +425,7 @@ export async function reserveStock(tx: Prisma.TransactionClient, input: ReserveI
       state: 'OPEN',
     })) });
   }
-  await tx.order.update({ where: { id: order.id }, data: { state: fulfilled ? 'FULFILLED' : 'PARTIALLY_FULFILLED' } });
+  await tx.order.update({ where: { id: order.id }, data: { state: fulfilled ? 'ALLOCATED' : 'PARTIALLY_ALLOCATED' } });
   await tx.auditEvent.create({ data: { organizationId: input.organizationId, actorId: input.actorId, action: input.mode === 'MANUAL' ? 'STOCK_ALLOCATION_OVERRIDDEN' : 'STOCK_RESERVED', resource: 'Order', resourceId: order.id, revisionId: order.revisionId, reason: input.mode === 'MANUAL' ? input.reason : 'Suggested allocation accepted.', requestId: input.requestId } });
   const body = await fulfillmentView(tx, order.id);
   await tx.idempotencyRecord.create({ data: { actorId: input.actorId, operation, resourceKey: order.id, key: input.idempotencyKey, payloadHash: fingerprint, responseStatus: 201, responseBody: json(body) } });
@@ -441,8 +443,8 @@ async function refreshFulfillment(tx: Prisma.TransactionClient, orderId: string)
   const warehouses = await tx.warehouse.findMany({ where: { id: { in: used } } });
   const estimatedCost = warehouses.reduce((sum, warehouse) => sum + number(warehouse.shippingCost), 0);
   const complete = backorders.length === 0;
-  await tx.fulfillment.update({ where: { id: fulfillment.id }, data: { split: json({ split, backorders }), state: complete ? 'FULFILLED' : 'BACKORDER', shipmentCount: used.length, estimatedCost, version: { increment: 1 } } });
-  await tx.order.update({ where: { id: orderId }, data: { state: complete ? 'FULFILLED' : 'PARTIALLY_FULFILLED' } });
+  await tx.fulfillment.update({ where: { id: fulfillment.id }, data: { split: json({ split, backorders }), state: complete ? 'ALLOCATED' : 'BACKORDER', shipmentCount: used.length, estimatedCost, version: { increment: 1 } } });
+  await tx.order.update({ where: { id: orderId }, data: { state: complete ? 'ALLOCATED' : 'PARTIALLY_ALLOCATED' } });
 }
 
 async function consolidateLocked(tx: Prisma.TransactionClient, input: { organizationId: string; actorId: string; orderId: string; reason: string; requestId?: string; requireAllocation: boolean }) {
