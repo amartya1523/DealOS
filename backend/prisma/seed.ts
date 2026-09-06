@@ -9,16 +9,20 @@ import {
   type Invoice,
   type Order,
   type OrderLine,
+  type PriceList,
   type Product,
+  type ProductVariant,
   type Quote,
   type QuoteLine,
   type QuoteRevision,
   type SalesTeam,
+  type Shipment,
   type StockBalance,
   type User,
   type Warehouse,
 } from '@prisma/client';
 import { evaluateRisk } from '../src/governance.js';
+import { paymentWebhookKey } from '../src/payments.js';
 import { calculateQuote } from '../src/rules.js';
 import { roleModulePresets, workspaceModules } from '../src/access-policy.js';
 
@@ -47,13 +51,24 @@ const atDay = (offset: number, hour = 10) => {
   value.setUTCDate(value.getUTCDate() + offset);
   return value;
 };
+const nextBillingDate = (from: Date, cadence: string) => {
+  const months = cadence.toLowerCase() === 'quarterly' ? 3 : cadence.toLowerCase() === 'yearly' ? 12 : 1;
+  const anchor = from.getUTCDate();
+  const targetMonth = from.getUTCMonth() + months;
+  const year = from.getUTCFullYear() + Math.floor(targetMonth / 12);
+  const month = targetMonth % 12;
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(year, month, Math.min(anchor, lastDay), from.getUTCHours(), from.getUTCMinutes(), from.getUTCSeconds(), from.getUTCMilliseconds()));
+};
 
 // This is a disposable local-demo token, not a production credential. Reseeding restores it.
 export const demoPortalInvitationToken = digest('DealOS Gamma Health portal invitation seed token');
 
 type LineSpec = {
   product: Product;
+  variant?: ProductVariant;
   quantity: number;
+  unitPrice?: number;
   discount?: number;
   allowedDiscount?: number;
 };
@@ -70,6 +85,7 @@ type PricedRevision = {
 type QuoteFixture = PricedRevision & {
   specs: LineSpec[];
   quoteLines: QuoteLine[];
+  priceList?: PriceList;
 };
 
 type ConfirmedFixture = QuoteFixture & {
@@ -86,12 +102,15 @@ function allowedDiscount(product: Product, policy: DiscountPolicy) {
   return Number(value.toString());
 }
 
-function priceRevision(specs: LineSpec[], orderDiscount: number, policy: DiscountPolicy) {
+const lineUnitPrice = (spec: LineSpec) => money(spec.unitPrice ?? number(spec.product.price) + number(spec.variant?.priceDelta));
+const lineUnitCost = (spec: LineSpec) => money(number(spec.product.cost) + number(spec.variant?.costDelta));
+
+function priceRevision(specs: LineSpec[], orderDiscount: number, policy: DiscountPolicy, priceList?: PriceList) {
   const inputs = specs.map((spec) => ({
     productId: spec.product.id,
     quantity: spec.quantity,
-    unitPrice: spec.product.price,
-    unitCost: spec.product.cost,
+    unitPrice: lineUnitPrice(spec),
+    unitCost: lineUnitCost(spec),
     discount: spec.discount ?? 0,
     allowedDiscount: spec.allowedDiscount ?? allowedDiscount(spec.product, policy),
     taxRate: spec.product.taxRate,
@@ -107,14 +126,19 @@ function priceRevision(specs: LineSpec[], orderDiscount: number, policy: Discoun
     const priced = calculation.lines[index]!;
     return {
       productId: spec.product.id,
+      variantId: spec.variant?.id ?? null,
+      variantName: spec.variant?.name ?? null,
+      variantSku: spec.variant?.sku ?? null,
+      priceListId: priceList?.id ?? null,
+      priceListName: priceList?.name ?? null,
       name: spec.product.name,
       sku: spec.product.sku,
       brand: spec.product.brand,
       category: spec.product.category,
       description: spec.product.description,
       quantity: spec.quantity,
-      unitPrice: spec.product.price.toString(),
-      unitCost: spec.product.cost.toString(),
+      unitPrice: lineUnitPrice(spec).toFixed(2),
+      unitCost: lineUnitCost(spec).toFixed(2),
       taxRate: spec.product.taxRate.toString(),
       cadence: spec.product.recurring ? spec.product.cadence : 'One-time',
       discount: spec.discount ?? 0,
@@ -132,19 +156,27 @@ function priceRevision(specs: LineSpec[], orderDiscount: number, policy: Discoun
 }
 
 async function resetApplicationData() {
+  await db.notification.deleteMany();
+  await db.passwordResetToken.deleteMany();
+  await db.paymentWebhookEvent.deleteMany();
+  await db.recommendationAction.deleteMany();
   await db.directoryJoinRequest.deleteMany();
   await db.organizationProfile.deleteMany();
   await db.idempotencyRecord.deleteMany();
+  await db.creditNote.deleteMany();
+  await db.billingPeriod.deleteMany();
   await db.invoiceNote.deleteMany();
   await db.payment.deleteMany({ where: { reversalOfId: { not: null } } });
   await db.payment.deleteMany();
+  await db.invoice.deleteMany();
+  await db.shipmentLine.deleteMany();
+  await db.shipment.deleteMany();
   await db.subscriptionChange.deleteMany();
+  await db.subscription.deleteMany();
   await db.stockMovement.deleteMany();
   await db.backorder.deleteMany();
   await db.reservation.deleteMany();
   await db.fulfillment.deleteMany();
-  await db.invoice.deleteMany();
-  await db.subscription.deleteMany();
   await db.orderLine.deleteMany();
   await db.order.deleteMany();
   await db.customerAcceptance.deleteMany();
@@ -169,6 +201,9 @@ async function resetApplicationData() {
   await db.salesTeam.deleteMany();
   await db.stockBalance.deleteMany();
   await db.warehouse.deleteMany();
+  await db.priceListItem.deleteMany();
+  await db.productVariant.deleteMany();
+  await db.priceList.deleteMany();
   await db.product.deleteMany();
   await db.discountPolicy.deleteMany();
   await db.organizationMembership.deleteMany();
@@ -205,6 +240,7 @@ async function createQuoteFixture(input: {
   createdBy?: User;
   team: SalesTeam;
   policy: DiscountPolicy;
+  priceList?: PriceList;
   specs: LineSpec[];
   orderDiscount?: number;
   stage: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'NEGOTIATION' | 'CONFIRMED' | 'REJECTED';
@@ -223,7 +259,7 @@ async function createQuoteFixture(input: {
   const revisionNumber = input.revisionNumber ?? 1;
   const createdAt = input.createdAt ?? atDay(-3);
   const sentAt = input.revisionState === 'SENT' ? input.sentAt ?? atDay(-2) : null;
-  const { calculation, evaluation, snapshots } = priceRevision(input.specs, orderDiscount, input.policy);
+  const { calculation, evaluation, snapshots } = priceRevision(input.specs, orderDiscount, input.policy, input.priceList);
   const quote = await db.quote.create({ data: {
     organizationId: input.organizationId,
     number: input.number,
@@ -233,6 +269,7 @@ async function createQuoteFixture(input: {
     ownerId: input.owner.id,
     createdById: (input.createdBy ?? input.owner).id,
     teamId: input.team.id,
+    priceListId: input.priceList?.id,
     stage: input.stage,
     version: input.version ?? 1,
     orderDiscount,
@@ -250,9 +287,10 @@ async function createQuoteFixture(input: {
     quoteLines.push(await db.quoteLine.create({ data: {
       quoteId: quote.id,
       productId: spec.product.id,
+      variantId: spec.variant?.id,
       quantity: spec.quantity,
-      unitPrice: spec.product.price,
-      unitCost: spec.product.cost,
+      unitPrice: lineUnitPrice(spec),
+      unitCost: lineUnitCost(spec),
       discount: spec.discount ?? 0,
       allowedDiscount: spec.allowedDiscount ?? allowedDiscount(spec.product, input.policy),
       createdAt,
@@ -282,7 +320,7 @@ async function createQuoteFixture(input: {
     createdAt,
   } });
   await db.quote.update({ where: { id: quote.id }, data: { currentRevisionId: revision.id, lastActivity: input.lastActivity ?? createdAt } });
-  return { quote, revision, quoteLines, specs: input.specs, policy: input.policy, calculation, evaluation, snapshots };
+  return { quote, revision, quoteLines, specs: input.specs, priceList: input.priceList, policy: input.policy, calculation, evaluation, snapshots };
 }
 
 async function createHistoricalRevision(input: {
@@ -296,7 +334,7 @@ async function createHistoricalRevision(input: {
   terms?: string;
 }): Promise<PricedRevision> {
   const orderDiscount = input.orderDiscount ?? 0;
-  const { calculation, evaluation, snapshots } = priceRevision(input.specs, orderDiscount, input.fixture.policy);
+  const { calculation, evaluation, snapshots } = priceRevision(input.specs, orderDiscount, input.fixture.policy, input.fixture.priceList);
   const revision = await db.quoteRevision.create({ data: {
     quoteId: input.fixture.quote.id,
     revisionNumber: input.revisionNumber,
@@ -391,6 +429,7 @@ async function createConfirmedFixture(input: {
   owner: User;
   team: SalesTeam;
   policy: DiscountPolicy;
+  priceList?: PriceList;
   specs: LineSpec[];
   manager: User;
   finance: User;
@@ -405,6 +444,7 @@ async function createConfirmedFixture(input: {
     owner: input.owner,
     team: input.team,
     policy: input.policy,
+    priceList: input.priceList,
     specs: input.specs,
     stage: 'CONFIRMED',
     revisionState: 'SENT',
@@ -455,10 +495,16 @@ async function createInvoice(input: {
   state: 'UNPAID' | 'PARTIAL' | 'PAID' | 'REVERSED';
   dueAt: Date;
   finance: User;
+  lineIndexes?: number[];
+  billingKey?: string;
+  shipment?: Shipment;
+  paymentProvider?: 'MANUAL' | 'RAZORPAY';
   customerUser?: User;
   dueDateRequest?: boolean;
 }): Promise<Invoice> {
-  const total = Number(input.fixture.revision.total.toString());
+  const selectedSnapshots = input.fixture.snapshots.filter((_, index) => !input.lineIndexes || input.lineIndexes.includes(index));
+  if (selectedSnapshots.length === 0) throw new Error(`Invoice ${input.fixture.order.number} has no selected lines.`);
+  const total = money(selectedSnapshots.reduce((sum, snapshot) => sum + number(snapshot.net) + number(snapshot.tax), 0));
   const partialAmount = money(total * 0.35);
   const reversedAmount = money(total * 0.25);
   const paidAmount = input.state === 'PAID' ? total : input.state === 'PARTIAL' ? partialAmount : 0;
@@ -466,9 +512,10 @@ async function createInvoice(input: {
   const invoice = await db.invoice.create({ data: {
     organizationId: input.fixture.quote.organizationId,
     number: `INV-${input.fixture.order.number.replace(/^SO-/, '')}`,
-    billingKey: `SEED_CONFIRMATION:${input.fixture.order.id}`,
+    billingKey: input.billingKey ?? (input.shipment ? `SHIPMENT:${input.shipment.id}` : `SEED_CONFIRMATION:${input.fixture.order.id}`),
     quoteId: input.fixture.quote.id,
     orderId: input.fixture.order.id,
+    shipmentId: input.shipment?.id,
     customer: input.fixture.quote.customer,
     customerId: input.fixture.quote.customerId,
     currency: input.fixture.revision.currency,
@@ -477,9 +524,11 @@ async function createInvoice(input: {
     state: invoiceState,
     dueAt: input.dueAt,
     version: input.state === 'REVERSED' ? 3 : input.state === 'UNPAID' ? 1 : 2,
-    lines: json(input.fixture.snapshots.map((snapshot) => ({
+    lines: json(selectedSnapshots.map((snapshot) => ({
       description: String(snapshot.name ?? 'Order charge'),
       productId: String(snapshot.productId),
+      variantId: snapshot.variantId ? String(snapshot.variantId) : null,
+      variantName: snapshot.variantName ? String(snapshot.variantName) : null,
       cadence: String(snapshot.cadence ?? 'One-time'),
       quantity: number(snapshot.quantity),
       unitPrice: number(snapshot.unitPrice),
@@ -487,11 +536,27 @@ async function createInvoice(input: {
       net: number(snapshot.net),
       tax: number(snapshot.tax),
       amount: money(number(snapshot.net) + number(snapshot.tax)),
+      ...(input.shipment ? { shipmentNumber: input.shipment.number } : {}),
     }))),
-    createdAt: input.fixture.order.createdAt,
+    createdAt: input.shipment?.shippedAt ?? input.fixture.order.createdAt,
   } });
   if (input.state === 'PARTIAL' || input.state === 'PAID') {
-    await db.payment.create({ data: { organizationId: input.fixture.quote.organizationId, invoiceId: invoice.id, amount: paidAmount, currency: input.fixture.revision.currency, reference: `UTR-${invoice.number}-${input.state}`, provider: 'MANUAL', status: 'SUCCESS', verifiedAt: atDay(-2, 12), paidAt: atDay(-2, 12), createdAt: atDay(-2, 12) } });
+    const razorpay = input.paymentProvider === 'RAZORPAY';
+    await db.payment.create({ data: {
+      organizationId: input.fixture.quote.organizationId,
+      invoiceId: invoice.id,
+      amount: paidAmount,
+      currency: input.fixture.revision.currency,
+      reference: razorpay ? `pay_seed_${invoice.number.toLowerCase().replaceAll('-', '_')}` : `UTR-${invoice.number}-${input.state}`,
+      provider: razorpay ? 'RAZORPAY' : 'MANUAL',
+      status: 'SUCCESS',
+      razorpayOrderId: razorpay ? `order_seed_${invoice.number.toLowerCase().replaceAll('-', '_')}` : null,
+      razorpayPaymentId: razorpay ? `pay_seed_${invoice.number.toLowerCase().replaceAll('-', '_')}` : null,
+      razorpaySignature: razorpay ? digest(`seed-checkout:${invoice.id}`) : null,
+      verifiedAt: atDay(-2, 12),
+      paidAt: atDay(-2, 12),
+      createdAt: atDay(-2, 12),
+    } });
   }
   if (input.state === 'REVERSED') {
     const original = await db.payment.create({ data: { organizationId: input.fixture.quote.organizationId, invoiceId: invoice.id, amount: reversedAmount, currency: input.fixture.revision.currency, reference: `UTR-${invoice.number}-ORIGINAL`, provider: 'MANUAL', status: 'SUCCESS', verifiedAt: atDay(-4, 12), paidAt: atDay(-4, 12), createdAt: atDay(-4, 12) } });
@@ -500,7 +565,7 @@ async function createInvoice(input: {
   if (input.dueDateRequest && input.customerUser) {
     await db.invoiceNote.create({ data: { invoiceId: invoice.id, customerId: input.fixture.quote.customerId, authorId: input.customerUser.id, kind: 'DUE_DATE_CHANGE_REQUEST', requestedDueAt: atDay(14), message: 'Please align payment with our next procurement settlement run.', createdAt: atDay(-1, 9) } });
   }
-  await db.auditEvent.create({ data: { organizationId: input.fixture.quote.organizationId, actorId: input.finance.id, action: 'INVOICE_ISSUED_ON_CONFIRMATION', resource: 'Invoice', resourceId: invoice.id, revisionId: input.fixture.revision.id, requestId: `seed-${invoice.number.toLowerCase()}`, reason: `Seeded ${input.state.toLowerCase()} invoice scenario.`, createdAt: input.fixture.order.createdAt } });
+  await db.auditEvent.create({ data: { organizationId: input.fixture.quote.organizationId, actorId: input.finance.id, action: input.shipment ? 'ORDER_SHIPPED_AND_INVOICED' : 'INVOICE_ISSUED_ON_CONFIRMATION', resource: input.shipment ? 'Shipment' : 'Invoice', resourceId: input.shipment?.id ?? invoice.id, revisionId: input.fixture.revision.id, requestId: `seed-${invoice.number.toLowerCase()}`, reason: input.shipment ? `${input.shipment.number}; ${input.shipment.carrier}; ${input.shipment.trackingNumber}; invoice ${invoice.number}` : `Seeded ${input.state.toLowerCase()} invoice scenario.`, createdAt: input.shipment?.shippedAt ?? input.fixture.order.createdAt } });
   return invoice;
 }
 
@@ -515,7 +580,8 @@ async function createSubscription(input: {
   const orderLine = input.fixture.orderLines[index]!;
   const snapshot = input.fixture.snapshots[index]!;
   const originalAmount = money(number(snapshot.net) + number(snapshot.tax));
-  const changedAmount = money(originalAmount + 250);
+  const changedAmount = money(Math.max(1, originalAmount - 250));
+  const amountChangedAt = new Date(input.fixture.order.createdAt.getTime() + 14 * 86_400_000);
   const state = input.scenario === 'PAUSED' ? 'PAUSED' : input.scenario === 'CANCELLED' ? 'CANCELLED' : 'ACTIVE';
   const subscription = await db.subscription.create({ data: {
     organizationId: input.fixture.quote.organizationId,
@@ -528,20 +594,21 @@ async function createSubscription(input: {
     productName: input.product.name,
     cadence: input.product.cadence!,
     amount: input.scenario === 'ACTIVE_WITH_HISTORY' ? changedAmount : originalAmount,
-    nextBillAt: atDay(input.product.cadence === 'Yearly' ? 365 : input.product.cadence === 'Quarterly' ? 90 : 30),
+    nextBillAt: nextBillingDate(input.fixture.order.createdAt, input.product.cadence!),
     state,
     version: input.scenario === 'ACTIVE_WITH_HISTORY' ? 4 : 2,
-    cancelledAt: input.scenario === 'CANCELLED' ? atDay(10) : null,
+    cancelledAt: input.scenario === 'CANCELLED' ? atDay(-1) : null,
     createdAt: input.fixture.order.createdAt,
   } });
   if (input.scenario === 'ACTIVE_WITH_HISTORY') {
     await db.subscriptionChange.createMany({ data: [
-      { subscriptionId: subscription.id, actorId: input.admin.id, kind: 'AMOUNT_CHANGED', previousAmount: originalAmount, newAmount: changedAmount, previousState: 'ACTIVE', newState: 'ACTIVE', effectiveAt: atDay(15), reason: 'Add future premium support coverage.', createdAt: atDay(-3) },
-      { subscriptionId: subscription.id, actorId: input.admin.id, kind: 'PAUSED', previousAmount: changedAmount, newAmount: changedAmount, previousState: 'ACTIVE', newState: 'PAUSED', effectiveAt: atDay(16), reason: 'Customer requested a temporary service hold.', createdAt: atDay(-2) },
-      { subscriptionId: subscription.id, actorId: input.admin.id, kind: 'RESUMED', previousAmount: changedAmount, newAmount: changedAmount, previousState: 'PAUSED', newState: 'ACTIVE', effectiveAt: atDay(18), reason: 'Customer confirmed service should resume.', createdAt: atDay(-1) },
+      { subscriptionId: subscription.id, actorId: input.admin.id, kind: 'PRORATED', previousAmount: originalAmount, newAmount: changedAmount, previousState: 'ACTIVE', newState: 'ACTIVE', effectiveAt: amountChangedAt, reason: 'Apply a mid-cycle loyalty adjustment and issue the unused-service credit.', createdAt: amountChangedAt },
+      { subscriptionId: subscription.id, actorId: input.admin.id, kind: 'AMOUNT_CHANGED', previousAmount: originalAmount, newAmount: changedAmount, previousState: 'ACTIVE', newState: 'ACTIVE', effectiveAt: amountChangedAt, reason: 'Apply a recurring loyalty adjustment.', createdAt: amountChangedAt },
+      { subscriptionId: subscription.id, actorId: input.admin.id, kind: 'PAUSED', previousAmount: changedAmount, newAmount: changedAmount, previousState: 'ACTIVE', newState: 'PAUSED', effectiveAt: atDay(-2), reason: 'Customer requested a temporary service hold.', createdAt: atDay(-2) },
+      { subscriptionId: subscription.id, actorId: input.admin.id, kind: 'RESUMED', previousAmount: changedAmount, newAmount: changedAmount, previousState: 'PAUSED', newState: 'ACTIVE', effectiveAt: atDay(-1), reason: 'Customer confirmed service should resume.', createdAt: atDay(-1) },
     ] });
   } else {
-    await db.subscriptionChange.create({ data: { subscriptionId: subscription.id, actorId: input.admin.id, kind: input.scenario === 'PAUSED' ? 'PAUSED' : 'CANCELLED', previousAmount: originalAmount, newAmount: originalAmount, previousState: 'ACTIVE', newState: state, effectiveAt: atDay(10), reason: input.scenario === 'PAUSED' ? 'Pause requested for the next billing period.' : 'Customer will not renew after the current period.', createdAt: atDay(-1) } });
+    await db.subscriptionChange.create({ data: { subscriptionId: subscription.id, actorId: input.admin.id, kind: input.scenario === 'PAUSED' ? 'PAUSED' : 'CANCELLED', previousAmount: originalAmount, newAmount: originalAmount, previousState: 'ACTIVE', newState: state, effectiveAt: atDay(-1), reason: input.scenario === 'PAUSED' ? 'Pause requested for the next billing period.' : 'Customer will not renew after the current period.', createdAt: atDay(-1) } });
   }
   return subscription;
 }
@@ -564,16 +631,41 @@ async function createSeedOrganizations() {
 }
 
 async function validateSeed() {
-  const [organizations, directoryProfiles, directoryPending, directoryApproved, directoryDeclined, quotes, orders, invoices, subscriptions, fulfillments, portalRequests, leads] = await Promise.all([
+  const [
+    organizations,
+    directoryProfiles,
+    directoryPending,
+    directoryApproved,
+    directoryDeclined,
+    quotes,
+    orders,
+    invoices,
+    subscriptions,
+    fulfillments,
+    portalRequests,
+    leads,
+    productVariants,
+    priceLists,
+    priceListItems,
+    shipments,
+    shipmentLines,
+    billingPeriods,
+    creditNotes,
+    notifications,
+    paymentWebhookEvents,
+    recommendationActions,
+    passwordResetTokens,
+  ] = await Promise.all([
     db.organization.count(),
     db.organizationProfile.count({ where: { isDiscoverable: true } }),
     db.directoryJoinRequest.count({ where: { status: 'PENDING' } }),
     db.directoryJoinRequest.count({ where: { status: 'APPROVED' } }),
     db.directoryJoinRequest.count({ where: { status: 'DECLINED' } }),
     db.quote.count(), db.order.count(), db.invoice.count(), db.subscription.count(), db.fulfillment.count(), db.portalRequest.count(), db.lead.count(),
+    db.productVariant.count(), db.priceList.count(), db.priceListItem.count(), db.shipment.count(), db.shipmentLine.count(), db.billingPeriod.count(), db.creditNote.count(), db.notification.count(), db.paymentWebhookEvent.count(), db.recommendationAction.count(), db.passwordResetToken.count(),
   ]);
-  const expected = { organizations: 2, directoryProfiles: 2, directoryPending: 1, directoryApproved: 1, directoryDeclined: 1, quotes: 20, orders: 6, invoices: 6, subscriptions: 3, fulfillments: 2, portalRequests: 4, leads: 3 };
-  const actual = { organizations, directoryProfiles, directoryPending, directoryApproved, directoryDeclined, quotes, orders, invoices, subscriptions, fulfillments, portalRequests, leads };
+  const expected = { organizations: 2, directoryProfiles: 2, directoryPending: 1, directoryApproved: 1, directoryDeclined: 1, quotes: 20, orders: 6, invoices: 5, subscriptions: 3, fulfillments: 2, portalRequests: 4, leads: 3, productVariants: 5, priceLists: 3, priceListItems: 12, shipments: 1, shipmentLines: 1, billingPeriods: 3, creditNotes: 1, notifications: 5, paymentWebhookEvents: 1, recommendationActions: 2, passwordResetTokens: 0 };
+  const actual = { organizations, directoryProfiles, directoryPending, directoryApproved, directoryDeclined, quotes, orders, invoices, subscriptions, fulfillments, portalRequests, leads, productVariants, priceLists, priceListItems, shipments, shipmentLines, billingPeriods, creditNotes, notifications, paymentWebhookEvents, recommendationActions, passwordResetTokens };
   for (const [key, value] of Object.entries(expected)) {
     if (actual[key as keyof typeof actual] !== value) throw new Error(`Seed validation failed: expected ${value} ${key}, found ${actual[key as keyof typeof actual]}.`);
   }
@@ -582,9 +674,11 @@ async function validateSeed() {
     where: { number: { in: scenarioNumbers } },
     include: {
       currentRevision: true,
+      priceList: true,
+      lines: { include: { variant: true } },
       approvalCases: { include: { steps: { orderBy: { sequence: 'asc' } } }, orderBy: { cycle: 'desc' } },
       negotiation: true,
-      order: { include: { fulfillment: true, invoices: true, subscriptions: true } },
+      order: { include: { fulfillment: true, invoices: true, subscriptions: true, shipments: { include: { lines: true, invoices: true } } } },
     },
   });
   if (scenarioRows.length !== scenarioNumbers.length) throw new Error('Seed validation failed: one or more named quotation scenarios are missing.');
@@ -595,6 +689,7 @@ async function validateSeed() {
   const q0102 = scenarios.get('Q-0102')!;
   assertScenario('Q-0102', q0102.stage === 'PENDING_APPROVAL' && q0102.approvalCases[0]?.route === 'MANAGER_FINANCE', 'await Manager then Finance approval');
   assertScenario('Q-0102', q0102.approvalCases[0]?.steps.map((step) => step.state).join(',') === 'PENDING,WAITING', 'start with Manager pending and Finance waiting');
+  assertScenario('Q-0102', q0102.priceList?.name === 'Gold Contract Pricing' && q0102.lines.some((line) => line.variant?.sku === 'HW-LP14-32-1TB'), 'use a governed price list and product variant');
   assertScenario('Q-0103', scenarios.get('Q-0103')?.approvalCases[0]?.route === 'MANAGER', 'exercise the Manager-only route');
   const q0104 = scenarios.get('Q-0104')!;
   assertScenario('Q-0104', q0104.approvalCases[0]?.steps.map((step) => step.state).join(',') === 'APPROVED,PENDING', 'retain the Manager-to-Finance handoff');
@@ -604,10 +699,23 @@ async function validateSeed() {
   assertScenario('Q-0108', scenarios.get('Q-0108')?.currentRevision?.revisionNumber === 2 && scenarios.get('Q-0108')?.approvalCases.some((item) => item.state === 'RETURNED') === true, 'retain a returned first cycle and current revision 2');
   assertScenario('Q-0109', scenarios.get('Q-0109')?.stage === 'REJECTED', 'represent a rejected terminal outcome');
   assertScenario('Q-0111', scenarios.get('Q-0111')?.currentRevision?.revisionNumber === 2 && scenarios.get('Q-0111')?.negotiation.some((item) => item.state === 'ADOPTED') === true, 'retain an adopted counteroffer and replacement Draft');
+  const q0201 = scenarios.get('Q-0201')!;
+  assertScenario('Q-0201', q0201.order?.state === 'CONFIRMED' && q0201.order.invoices.length === 0, 'keep unshipped hardware out of billing');
   const q0202 = scenarios.get('Q-0202')!;
   assertScenario('Q-0202', q0202.order?.state === 'PARTIALLY_ALLOCATED' && q0202.order.fulfillment?.state === 'BACKORDER', 'represent partial allocation with a backorder');
   assertScenario('Q-0202', q0202.order?.invoices[0]?.state === 'PARTIAL' && q0202.order.subscriptions[0]?.state === 'ACTIVE', 'link partial billing and an active subscription');
+  const q0203 = scenarios.get('Q-0203')!;
+  assertScenario('Q-0203', q0203.order?.state === 'SHIPPED' && q0203.order.fulfillment?.state === 'FULFILLED', 'represent a completed stock-backed shipment');
+  assertScenario('Q-0203', q0203.order?.shipments[0]?.state === 'SHIPPED' && q0203.order.shipments[0]?.lines[0]?.quantity === 12 && q0203.order.shipments[0]?.invoices[0]?.shipmentId === q0203.order.shipments[0]?.id, 'link shipment lines to the generated invoice');
   assertScenario('NS-Q-0002', scenarios.get('NS-Q-0002')?.stage === 'DRAFT', 'represent the Direct-Draft intake result');
+  const creditedInvoice = await db.invoice.findUnique({ where: { number: 'INV-0202' }, include: { billingPeriod: { include: { subscription: true } }, credits: true } });
+  if (!creditedInvoice?.billingPeriod || number(creditedInvoice.billingPeriod.proration) >= 0 || creditedInvoice.credits.length !== 1) throw new Error('Seed validation failed: INV-0202 must demonstrate invoiced recurring proration with one credit note.');
+  if (creditedInvoice.billingPeriod.subscription.state !== 'ACTIVE' || creditedInvoice.billingPeriod.subscription.nextBillAt > seedStartedAt) throw new Error('Seed validation failed: the active Care Plan must be due for the recurring-billing demo action.');
+  const acmeWithPricing = await db.customer.findUnique({ where: { id: q0102.customerId }, include: { defaultPriceList: true } });
+  if (acmeWithPricing?.defaultPriceList?.id !== q0102.priceListId) throw new Error('Seed validation failed: Acme must default to the Gold price list used by Q-0102.');
+  const razorpayPayment = await db.payment.findFirst({ where: { invoice: { number: 'INV-0203' }, provider: 'RAZORPAY', status: 'SUCCESS' } });
+  const webhook = await db.paymentWebhookEvent.findFirst({ where: { organizationId: primaryOrganizationId, eventType: 'payment.captured' } });
+  if (!razorpayPayment?.razorpayPaymentId || !webhook?.eventKey.includes(razorpayPayment.razorpayPaymentId)) throw new Error('Seed validation failed: the captured Razorpay payment and processed webhook are not linked.');
   const balances = await db.stockBalance.findMany({ select: { id: true, reserved: true } });
   const reservationTotals = await db.reservation.groupBy({ by: ['stockBalanceId'], _sum: { quantity: true } });
   const totalsByBalance = new Map(reservationTotals.map((item) => [item.stockBalanceId, item._sum.quantity ?? 0]));
@@ -738,6 +846,62 @@ async function main() {
     db.product.create({ data: { organizationId: northstarOrganizationId, name: 'Northstar Edge Gateway', sku: 'NS-HW-EDGE', brand: 'Northstar', category: 'Hardware', description: 'Secure distribution edge appliance.', unit: 'Unit', price: 180000, cost: 112000, taxRate: 18 } }),
   ]);
 
+  const [laptopPerformance, laptopMobility, dockingThunderbolt, tablet5g, gatewayHa] = await Promise.all([
+    db.productVariant.create({ data: { organizationId: primaryOrganizationId, productId: laptop.id, name: '32 GB / 1 TB', sku: 'HW-LP14-32-1TB', attributes: json({ memory: '32 GB', storage: '1 TB SSD', finish: 'Graphite' }), priceDelta: 22000, costDelta: 15000 } }),
+    db.productVariant.create({ data: { organizationId: primaryOrganizationId, productId: laptop.id, name: '16 GB / 512 GB Ultralight', sku: 'HW-LP14-16-512-UL', attributes: json({ memory: '16 GB', storage: '512 GB SSD', chassis: 'Ultralight' }), priceDelta: 8000, costDelta: 5000 } }),
+    db.productVariant.create({ data: { organizationId: primaryOrganizationId, productId: docking.id, name: 'Thunderbolt 4', sku: 'HW-DOCK-TB4', attributes: json({ connector: 'Thunderbolt 4', displays: 3, powerDelivery: '130 W' }), priceDelta: 4500, costDelta: 2800 } }),
+    db.productVariant.create({ data: { organizationId: primaryOrganizationId, productId: tablet.id, name: '5G / 256 GB', sku: 'HW-TABLET-5G-256', attributes: json({ connectivity: '5G', storage: '256 GB', ingressProtection: 'IP68' }), priceDelta: 9000, costDelta: 6000 } }),
+    db.productVariant.create({ data: { organizationId: northstarOrganizationId, productId: northstarGateway.id, name: 'High Availability Pair', sku: 'NS-HW-EDGE-HA', attributes: json({ deployment: 'Active/passive pair', support: '24x7' }), priceDelta: 52000, costDelta: 34000 } }),
+  ]);
+
+  const [goldPriceList, silverPriceList, enterprisePriceList] = await Promise.all([
+    db.priceList.create({ data: {
+      organizationId: primaryOrganizationId,
+      name: 'Gold Contract Pricing',
+      customerTier: 'Gold',
+      currency: 'INR',
+      effectiveFrom: atDay(-90),
+      effectiveTo: atDay(180),
+      items: { create: [
+        { productId: laptop.id, unitPrice: 82000 },
+        { productId: laptop.id, variantId: laptopPerformance.id, unitPrice: 101500 },
+        { productId: docking.id, unitPrice: 13250 },
+        { productId: docking.id, variantId: dockingThunderbolt.id, unitPrice: 17250 },
+        { productId: setup.id, unitPrice: 23500 },
+        { productId: care.id, unitPrice: 1650 },
+      ] },
+    } }),
+    db.priceList.create({ data: {
+      organizationId: primaryOrganizationId,
+      name: 'Silver Business Pricing',
+      customerTier: 'Silver',
+      currency: 'INR',
+      effectiveFrom: atDay(-90),
+      items: { create: [
+        { productId: tablet.id, unitPrice: 47000 },
+        { productId: tablet.id, variantId: tablet5g.id, unitPrice: 55500 },
+        { productId: docking.id, unitPrice: 13750 },
+        { productId: setup.id, unitPrice: 24500 },
+      ] },
+    } }),
+    db.priceList.create({ data: {
+      organizationId: northstarOrganizationId,
+      name: 'Enterprise Distribution Pricing',
+      customerTier: 'Enterprise',
+      currency: 'INR',
+      effectiveFrom: atDay(-120),
+      items: { create: [
+        { productId: northstarGateway.id, unitPrice: 172000 },
+        { productId: northstarGateway.id, variantId: gatewayHa.id, unitPrice: 218000 },
+      ] },
+    } }),
+  ]);
+  await Promise.all([
+    db.customer.update({ where: { id: acme.id }, data: { defaultPriceListId: goldPriceList.id } }),
+    db.customer.update({ where: { id: beta.id }, data: { defaultPriceListId: silverPriceList.id } }),
+    db.customer.update({ where: { id: orion.id }, data: { defaultPriceListId: enterprisePriceList.id } }),
+  ]);
+
   const [bronzePolicy, silverPolicy, goldPolicy, enterprisePolicy] = await Promise.all([
     db.discountPolicy.create({ data: { organizationId: primaryOrganizationId, tier: 'Bronze', maxDiscount: 5, hardwareLimit: 5, servicesLimit: 5, subscriptionLimit: 3, financeThreshold: 5, aggregateDiscountLimit: 12, minimumMarginPercent: 12, version: 3 } }),
     db.discountPolicy.create({ data: { organizationId: primaryOrganizationId, tier: 'Silver', maxDiscount: 10, hardwareLimit: 10, servicesLimit: 8, subscriptionLimit: 6, financeThreshold: 5, aggregateDiscountLimit: 15, minimumMarginPercent: 12, version: 3 } }),
@@ -764,8 +928,8 @@ async function main() {
     addStock(northstarWarehouse, northstarGateway, 20, 0, 5),
   ]);
 
-  const q0101 = await createQuoteFixture({ organizationId: primaryOrganizationId, number: 'Q-0101', customer: beta, owner: rep, team: enterpriseTeam, policy: silverPolicy, specs: [{ product: docking, quantity: 2 }, { product: setup, quantity: 1 }], stage: 'DRAFT', revisionState: 'DRAFT', lastActivity: atDay(-10), createdAt: atDay(-12), internalNote: 'Requirements captured from an external sales call.' });
-  const q0102 = await createQuoteFixture({ organizationId: primaryOrganizationId, number: 'Q-0102', customer: acme, owner: rep, team: enterpriseTeam, policy: goldPolicy, specs: [{ product: laptop, quantity: 2, discount: 12 }, { product: setup, quantity: 1, discount: 18 }, { product: care, quantity: 30, discount: 5 }], stage: 'PENDING_APPROVAL', revisionState: 'SUBMITTED', createdAt: atDay(-2), lastActivity: atDay(-1) });
+  const q0101 = await createQuoteFixture({ organizationId: primaryOrganizationId, number: 'Q-0101', customer: beta, owner: rep, team: enterpriseTeam, policy: silverPolicy, priceList: silverPriceList, specs: [{ product: docking, quantity: 2, unitPrice: 13750 }, { product: setup, quantity: 1, unitPrice: 24500 }], stage: 'DRAFT', revisionState: 'DRAFT', lastActivity: atDay(-10), createdAt: atDay(-12), internalNote: 'Requirements captured from an external sales call.' });
+  const q0102 = await createQuoteFixture({ organizationId: primaryOrganizationId, number: 'Q-0102', customer: acme, owner: rep, team: enterpriseTeam, policy: goldPolicy, priceList: goldPriceList, specs: [{ product: laptop, variant: laptopPerformance, quantity: 2, unitPrice: 101500, discount: 12 }, { product: setup, quantity: 1, unitPrice: 23500, discount: 18 }, { product: care, quantity: 30, unitPrice: 1650, discount: 5 }], stage: 'PENDING_APPROVAL', revisionState: 'SUBMITTED', createdAt: atDay(-2), lastActivity: atDay(-1) });
   await createApprovalCase({ priced: q0102, state: 'PENDING', manager, finance });
   const q0103 = await createQuoteFixture({ organizationId: primaryOrganizationId, number: 'Q-0103', customer: beta, owner: rep, team: enterpriseTeam, policy: silverPolicy, specs: [{ product: docking, quantity: 5, discount: 5 }, { product: setup, quantity: 1, discount: 5 }], stage: 'PENDING_APPROVAL', revisionState: 'SUBMITTED', createdAt: atDay(-2) });
   await createApprovalCase({ priced: q0103, state: 'PENDING', manager, finance });
@@ -792,9 +956,9 @@ async function main() {
   await createApprovalCase({ priced: q0111Old, state: 'APPROVED', manager, finance, reason: 'Original sent terms approved.' });
   await db.negotiation.create({ data: { quoteId: q0111.quote.id, revisionId: q0111Old.revision.id, kind: 'PROPOSAL', state: 'ADOPTED', author: acmeCustomer.name, message: 'Increase the discount to 8% and we will proceed.', messageType: 'COUNTER_DISCOUNT', counterDiscount: 8, respondedById: rep.id, responseReason: 'Adopted for a revised approval cycle.', respondedAt: atDay(-1), adoptedRevisionId: q0111.revision.id, createdAt: atDay(-2) } });
 
-  const q0201 = await createConfirmedFixture({ organizationId: primaryOrganizationId, number: 'Q-0201', customer: beta, customerUser: betaCustomer, owner: rep, team: enterpriseTeam, policy: silverPolicy, specs: [{ product: tablet, quantity: 12 }], manager, finance, orderState: 'CONFIRMED', createdAt: atDay(-6), promisedDeliveryAt: atDay(-2) });
-  const q0202 = await createConfirmedFixture({ organizationId: primaryOrganizationId, number: 'Q-0202', customer: acme, customerUser: acmeCustomer, owner: rep, team: enterpriseTeam, policy: goldPolicy, specs: [{ product: laptop, quantity: 14 }, { product: setup, quantity: 1 }, { product: care, quantity: 14 }], manager, finance, orderState: 'PARTIALLY_ALLOCATED', createdAt: atDay(-12), promisedDeliveryAt: atDay(5) });
-  const q0203 = await createConfirmedFixture({ organizationId: primaryOrganizationId, number: 'Q-0203', customer: acme, customerUser: acmeCustomer, owner: rep, team: enterpriseTeam, policy: goldPolicy, specs: [{ product: docking, quantity: 12 }], manager, finance, orderState: 'ALLOCATED', createdAt: atDay(-20), promisedDeliveryAt: atDay(3) });
+  const q0201 = await createConfirmedFixture({ organizationId: primaryOrganizationId, number: 'Q-0201', customer: beta, customerUser: betaCustomer, owner: rep, team: enterpriseTeam, policy: silverPolicy, priceList: silverPriceList, specs: [{ product: tablet, variant: tablet5g, quantity: 12, unitPrice: 55500 }], manager, finance, orderState: 'CONFIRMED', createdAt: atDay(-6), promisedDeliveryAt: atDay(-2) });
+  const q0202 = await createConfirmedFixture({ organizationId: primaryOrganizationId, number: 'Q-0202', customer: acme, customerUser: acmeCustomer, owner: rep, team: enterpriseTeam, policy: goldPolicy, priceList: goldPriceList, specs: [{ product: laptop, variant: laptopPerformance, quantity: 14, unitPrice: 101500 }, { product: setup, quantity: 1, unitPrice: 23500 }, { product: care, quantity: 14, unitPrice: 1650 }], manager, finance, orderState: 'PARTIALLY_ALLOCATED', createdAt: atDay(-42), promisedDeliveryAt: atDay(5) });
+  const q0203 = await createConfirmedFixture({ organizationId: primaryOrganizationId, number: 'Q-0203', customer: acme, customerUser: acmeCustomer, owner: rep, team: enterpriseTeam, policy: goldPolicy, priceList: goldPriceList, specs: [{ product: docking, variant: dockingThunderbolt, quantity: 12, unitPrice: 17250 }], manager, finance, orderState: 'ALLOCATED', createdAt: atDay(-20), promisedDeliveryAt: atDay(3) });
   const q0204 = await createConfirmedFixture({ organizationId: primaryOrganizationId, number: 'Q-0204', customer: beta, customerUser: betaCustomer, owner: rep, team: enterpriseTeam, policy: silverPolicy, specs: [{ product: compliance, quantity: 1 }, { product: setup, quantity: 1 }], manager, finance, orderState: 'CONFIRMED', createdAt: atDay(-8) });
   const q0205 = await createConfirmedFixture({ organizationId: primaryOrganizationId, number: 'Q-0205', customer: beta, customerUser: betaCustomer, owner: rep, team: enterpriseTeam, policy: silverPolicy, specs: [{ product: warranty, quantity: 1 }], manager, finance, orderState: 'CONFIRMED', createdAt: atDay(-15) });
   const q0206 = await createConfirmedFixture({ organizationId: primaryOrganizationId, number: 'Q-0206', customer: acme, customerUser: acmeCustomer, owner: rep, team: enterpriseTeam, policy: goldPolicy, specs: [{ product: setup, quantity: 2 }], manager, finance, orderState: 'CONFIRMED', createdAt: atDay(-10) });
@@ -818,18 +982,67 @@ async function main() {
     { fulfillmentId: fullFulfillment.id, orderId: q0203.order.id, orderLineId: q0203.orderLines[0]!.id, stockBalanceId: stock.get(`${eastDepot.id}:${docking.id}`)!.id, quantity: 5, source: 'SUGGESTED' },
   ] });
 
-  await createInvoice({ fixture: q0201, state: 'UNPAID', dueAt: atDay(8), finance });
-  await createInvoice({ fixture: q0202, state: 'PARTIAL', dueAt: atDay(-2), finance, customerUser: acmeCustomer, dueDateRequest: true });
-  await createInvoice({ fixture: q0203, state: 'PAID', dueAt: atDay(-5), finance });
-  await createInvoice({ fixture: q0204, state: 'UNPAID', dueAt: atDay(6), finance });
-  await createInvoice({ fixture: q0205, state: 'PAID', dueAt: atDay(2), finance });
-  await createInvoice({ fixture: q0206, state: 'REVERSED', dueAt: atDay(-1), finance });
-  await createSubscription({ fixture: q0202, product: care, admin, scenario: 'ACTIVE_WITH_HISTORY' });
-  await createSubscription({ fixture: q0204, product: compliance, admin, scenario: 'PAUSED' });
-  await createSubscription({ fixture: q0205, product: warranty, admin, scenario: 'CANCELLED' });
+  const shippedAt = atDay(-7, 14);
+  const shipment0203 = await db.$transaction(async (tx) => {
+    const shipment = await tx.shipment.create({ data: {
+      organizationId: primaryOrganizationId,
+      orderId: q0203.order.id,
+      number: 'SHP-0203-01',
+      state: 'SHIPPED',
+      carrier: 'Blue Dart',
+      trackingNumber: 'BD-DEMO-0203-01',
+      shippedAt,
+      createdAt: shippedAt,
+      lines: { create: [{ orderLineId: q0203.orderLines[0]!.id, quantity: 12, createdAt: shippedAt }] },
+    } });
+    const mainDocking = stock.get(`${mainWarehouse.id}:${docking.id}`)!;
+    const eastDocking = stock.get(`${eastDepot.id}:${docking.id}`)!;
+    await tx.stockBalance.update({ where: { id: mainDocking.id }, data: { onHand: { decrement: 7 }, reserved: { decrement: 7 } } });
+    await tx.stockBalance.update({ where: { id: eastDocking.id }, data: { onHand: { decrement: 5 }, reserved: { decrement: 5 } } });
+    await tx.stockMovement.createMany({ data: [
+      { organizationId: primaryOrganizationId, stockBalanceId: mainDocking.id, orderId: q0203.order.id, productId: docking.id, kind: 'SHIPMENT', quantityDelta: -7, reference: shipment.number, reason: `Dispatched via ${shipment.carrier} (${shipment.trackingNumber}).`, actorId: finance.id, createdAt: shippedAt },
+      { organizationId: primaryOrganizationId, stockBalanceId: eastDocking.id, orderId: q0203.order.id, productId: docking.id, kind: 'SHIPMENT', quantityDelta: -5, reference: shipment.number, reason: `Dispatched via ${shipment.carrier} (${shipment.trackingNumber}).`, actorId: finance.id, createdAt: shippedAt },
+    ] });
+    await tx.reservation.deleteMany({ where: { orderId: q0203.order.id } });
+    await tx.fulfillment.update({ where: { id: fullFulfillment.id }, data: { state: 'FULFILLED', version: { increment: 1 } } });
+    await tx.order.update({ where: { id: q0203.order.id }, data: { state: 'SHIPPED' } });
+    return shipment;
+  });
+
+  const [subscription0202, subscription0204, subscription0205] = await Promise.all([
+    createSubscription({ fixture: q0202, product: care, admin, scenario: 'ACTIVE_WITH_HISTORY' }),
+    createSubscription({ fixture: q0204, product: compliance, admin, scenario: 'PAUSED' }),
+    createSubscription({ fixture: q0205, product: warranty, admin, scenario: 'CANCELLED' }),
+  ]);
+
+  const invoice0202 = await createInvoice({ fixture: q0202, state: 'PARTIAL', dueAt: atDay(-2), finance, lineIndexes: [2], billingKey: `SUBSCRIPTION:${subscription0202.id}:${q0202.order.createdAt.toISOString()}`, customerUser: acmeCustomer, dueDateRequest: true });
+  const invoice0203 = await createInvoice({ fixture: q0203, state: 'PAID', dueAt: atDay(23), finance, shipment: shipment0203, paymentProvider: 'RAZORPAY' });
+  const invoice0204 = await createInvoice({ fixture: q0204, state: 'UNPAID', dueAt: atDay(6), finance, lineIndexes: [0], billingKey: `SUBSCRIPTION:${subscription0204.id}:${q0204.order.createdAt.toISOString()}` });
+  const invoice0205 = await createInvoice({ fixture: q0205, state: 'PAID', dueAt: atDay(2), finance, lineIndexes: [0], billingKey: `SUBSCRIPTION:${subscription0205.id}:${q0205.order.createdAt.toISOString()}` });
+  const invoice0206 = await createInvoice({ fixture: q0206, state: 'REVERSED', dueAt: atDay(-1), finance });
+
+  const originalCareAmount = money(number(q0202.snapshots[2]!.net) + number(q0202.snapshots[2]!.tax));
+  const periodStart0202 = q0202.order.createdAt;
+  const periodEnd0202 = subscription0202.nextBillAt;
+  const adjustmentAt = new Date(periodStart0202.getTime() + 14 * 86_400_000);
+  const remainingShare = Math.max(0, periodEnd0202.getTime() - adjustmentAt.getTime()) / Math.max(1, periodEnd0202.getTime() - periodStart0202.getTime());
+  const loyaltyCredit = money((originalCareAmount - number(subscription0202.amount)) * remainingShare);
+  await Promise.all([
+    db.billingPeriod.create({ data: { organizationId: primaryOrganizationId, subscriptionId: subscription0202.id, periodStart: periodStart0202, periodEnd: periodEnd0202, amount: originalCareAmount, proration: -loyaltyCredit, state: 'INVOICED', invoiceId: invoice0202.id, createdAt: periodStart0202 } }),
+    db.billingPeriod.create({ data: { organizationId: primaryOrganizationId, subscriptionId: subscription0204.id, periodStart: q0204.order.createdAt, periodEnd: subscription0204.nextBillAt, amount: subscription0204.amount, state: 'INVOICED', invoiceId: invoice0204.id, createdAt: q0204.order.createdAt } }),
+    db.billingPeriod.create({ data: { organizationId: primaryOrganizationId, subscriptionId: subscription0205.id, periodStart: q0205.order.createdAt, periodEnd: subscription0205.nextBillAt, amount: subscription0205.amount, state: 'INVOICED', invoiceId: invoice0205.id, createdAt: q0205.order.createdAt } }),
+  ]);
+  await db.creditNote.create({ data: { organizationId: primaryOrganizationId, invoiceId: invoice0202.id, number: 'CR-0202-LOYALTY', amount: loyaltyCredit, reason: 'Mid-cycle loyalty adjustment for unused Care Plan service.', createdAt: adjustmentAt } });
+  await db.invoice.update({ where: { id: invoice0202.id }, data: { amount: { decrement: loyaltyCredit }, version: { increment: 1 } } });
+
+  const razorpayPayment = await db.payment.findFirstOrThrow({ where: { invoiceId: invoice0203.id, provider: 'RAZORPAY', status: 'SUCCESS' } });
+  const webhookPayload = { event: 'payment.captured', payload: { payment: { entity: { id: razorpayPayment.razorpayPaymentId, order_id: razorpayPayment.razorpayOrderId, amount: Math.round(number(razorpayPayment.amount) * 100), currency: razorpayPayment.currency, status: 'captured' } } } };
+  const webhookRawBody = Buffer.from(JSON.stringify(webhookPayload));
+  const webhookEventId = `seed-payment-captured-${razorpayPayment.razorpayPaymentId}`;
+  await db.paymentWebhookEvent.create({ data: { organizationId: primaryOrganizationId, eventKey: paymentWebhookKey(webhookRawBody, webhookEventId), eventType: 'payment.captured', payloadHash: digest(webhookRawBody.toString('base64')), processedAt: atDay(-2, 12), createdAt: atDay(-2, 12) } });
 
   const convertedRequest = await db.portalRequest.create({ data: { organizationId: primaryOrganizationId, customerId: beta.id, submittedByUserId: betaCustomer.id, requirementsText: 'Please quote docking stations and onsite setup for our Pune expansion.', preferredDeliveryDate: atDay(20), status: 'NEW', createdAt: atDay(-6), lines: { create: [{ productId: docking.id, freeTextDescription: docking.name, quantity: 6 }, { productId: setup.id, freeTextDescription: setup.name, quantity: 1 }] } } });
-  const q0301 = await createQuoteFixture({ organizationId: primaryOrganizationId, number: 'Q-0301', customer: beta, owner: rep, createdBy: rep, team: enterpriseTeam, policy: silverPolicy, specs: [{ product: docking, quantity: 6 }, { product: setup, quantity: 1 }], stage: 'DRAFT', revisionState: 'DRAFT', createdAt: atDay(-5), internalNote: `Created from portal request ${convertedRequest.id}.` });
+  const q0301 = await createQuoteFixture({ organizationId: primaryOrganizationId, number: 'Q-0301', customer: beta, owner: rep, createdBy: rep, team: enterpriseTeam, policy: silverPolicy, priceList: silverPriceList, specs: [{ product: docking, quantity: 6, unitPrice: 13750 }, { product: setup, quantity: 1, unitPrice: 24500 }], stage: 'DRAFT', revisionState: 'DRAFT', createdAt: atDay(-5), internalNote: `Created from portal request ${convertedRequest.id}.` });
   const convertedLead = await db.lead.create({ data: { organizationId: primaryOrganizationId, customerId: beta.id, portalRequestId: convertedRequest.id, assignedRepId: rep.id, status: 'CONVERTED', requirementsSummary: convertedRequest.requirementsText, convertedQuotationId: q0301.quote.id, createdAt: atDay(-6) } });
   await db.portalRequest.update({ where: { id: convertedRequest.id }, data: { status: 'PROCESSED', resultingLeadId: convertedLead.id, resultingQuotationId: q0301.quote.id, processedAt: atDay(-5), processedById: rep.id } });
   const newRequest = await db.portalRequest.create({ data: { organizationId: primaryOrganizationId, customerId: acme.id, submittedByUserId: acmeCustomer.id, requirementsText: 'We need five field laptops plus a migration plan for a new project team.', preferredDeliveryDate: atDay(25), status: 'NEW', createdAt: atDay(-1), lines: { create: [{ productId: laptop.id, freeTextDescription: laptop.name, quantity: 5 }, { freeTextDescription: 'Data migration and onboarding plan', quantity: 1 }] } } });
@@ -839,10 +1052,15 @@ async function main() {
   const dismissedLead = await db.lead.create({ data: { organizationId: primaryOrganizationId, customerId: acme.id, portalRequestId: dismissedRequest.id, assignedRepId: rep.id, status: 'DISMISSED', requirementsSummary: dismissedRequest.requirementsText, dismissReason: 'Requested item is unavailable and no approved substitute exists.', createdAt: atDay(-8) } });
   await db.portalRequest.update({ where: { id: dismissedRequest.id }, data: { status: 'DISMISSED', resultingLeadId: dismissedLead.id, processedAt: atDay(-7), processedById: rep.id } });
   const directRequest = await db.portalRequest.create({ data: { organizationId: northstarOrganizationId, customerId: orion.id, submittedByUserId: orionCustomer.id, requirementsText: 'Quote three edge gateways for the new regional stores.', preferredDeliveryDate: atDay(18), status: 'NEW', createdAt: atDay(-2), lines: { create: [{ productId: northstarGateway.id, freeTextDescription: northstarGateway.name, quantity: 3 }] } } });
-  const nsQ0002 = await createQuoteFixture({ organizationId: northstarOrganizationId, number: 'NS-Q-0002', customer: orion, owner: northstarRep, team: northstarTeam, policy: enterprisePolicy, specs: [{ product: northstarGateway, quantity: 3 }], stage: 'DRAFT', revisionState: 'DRAFT', createdAt: atDay(-2), internalNote: `Direct Draft from portal request ${directRequest.id}.` });
+  const nsQ0002 = await createQuoteFixture({ organizationId: northstarOrganizationId, number: 'NS-Q-0002', customer: orion, owner: northstarRep, team: northstarTeam, policy: enterprisePolicy, priceList: enterprisePriceList, specs: [{ product: northstarGateway, quantity: 3, unitPrice: 172000 }], stage: 'DRAFT', revisionState: 'DRAFT', createdAt: atDay(-2), internalNote: `Direct Draft from portal request ${directRequest.id}.` });
   await db.portalRequest.update({ where: { id: directRequest.id }, data: { status: 'PROCESSED', resultingQuotationId: nsQ0002.quote.id, processedAt: atDay(-2, 11), processedById: northstarRep.id } });
-  const nsQ0001 = await createQuoteFixture({ organizationId: northstarOrganizationId, number: 'NS-Q-0001', customer: orion, owner: northstarRep, team: northstarTeam, policy: enterprisePolicy, specs: [{ product: northstarGateway, quantity: 4, discount: 4 }], stage: 'PENDING_APPROVAL', revisionState: 'SUBMITTED', createdAt: atDay(-1) });
+  const nsQ0001 = await createQuoteFixture({ organizationId: northstarOrganizationId, number: 'NS-Q-0001', customer: orion, owner: northstarRep, team: northstarTeam, policy: enterprisePolicy, priceList: enterprisePriceList, specs: [{ product: northstarGateway, variant: gatewayHa, quantity: 4, unitPrice: 218000, discount: 4 }], stage: 'PENDING_APPROVAL', revisionState: 'SUBMITTED', createdAt: atDay(-1) });
   await createApprovalCase({ priced: nsQ0001, state: 'PENDING', manager: northstarManager, finance, managerState: 'PENDING' });
+
+  await db.recommendationAction.createMany({ data: [
+    { quoteId: q0101.quote.id, productId: care.id, actorId: rep.id, action: 'DISMISSED', reason: 'Keep this first conversation focused on deployment hardware and setup.', createdAt: atDay(-9) },
+    { quoteId: q0111.quote.id, productId: care.id, actorId: rep.id, action: 'ACCEPTED', reason: 'Customer accepted proactive device monitoring with the docking-station rollout.', createdAt: atDay(-2) },
+  ] });
 
   await db.alert.createMany({ data: [
     { organizationId: primaryOrganizationId, kind: 'STALLED', title: 'Q-0101 has stalled', detail: 'No persisted deal activity for 10 days.', severity: 'medium', resourceId: q0101.quote.id, evaluationKey: `${primaryOrganizationId}:${q0101.quote.id}:STALLED`, lastEvaluatedAt: atDay(0), createdAt: atDay(0) },
@@ -852,7 +1070,14 @@ async function main() {
     { organizationId: primaryOrganizationId, kind: 'PORTAL_REQUEST', title: 'New quote request from Acme Corp', detail: 'Review the customer requirements and qualify the Lead.', severity: 'medium', resourceId: newRequest.id, resourceType: 'PORTAL_REQUEST', recipientId: rep.id, createdAt: atDay(-1) },
   ] });
 
-  const invoice0202 = await db.invoice.findUniqueOrThrow({ where: { number: 'INV-0202' } });
+  await db.notification.createMany({ data: [
+    { organizationId: primaryOrganizationId, recipientId: rep.id, title: 'Q-0101 needs attention', body: 'This draft has had no activity for ten days. Review requirements or close the opportunity.', resourceType: 'Quote', resourceId: q0101.quote.id, dedupeKey: 'seed:q0101:stalled:rep', createdAt: atDay(0, 8) },
+    { organizationId: primaryOrganizationId, recipientId: manager.id, title: 'Approval required for Q-0102', body: 'The Gold customer quote exceeds the governed service-discount threshold.', resourceType: 'Quote', resourceId: q0102.quote.id, dedupeKey: 'seed:q0102:approval:manager', createdAt: atDay(0, 9) },
+    { organizationId: primaryOrganizationId, recipientId: finance.id, title: 'INV-0202 is partially paid', body: 'A due-date request and a mid-cycle loyalty credit are ready for Finance review.', resourceType: 'Invoice', resourceId: invoice0202.id, dedupeKey: 'seed:inv0202:finance', createdAt: atDay(0, 9) },
+    { organizationId: primaryOrganizationId, recipientId: admin.id, title: 'Gold contract pricing is active', body: 'The price list includes governed base and product-variant prices through the current demo period.', resourceType: 'Product', resourceId: laptop.id, state: 'READ', readAt: atDay(-1, 15), dedupeKey: 'seed:gold-price-list:admin', createdAt: atDay(-2, 15) },
+    { organizationId: primaryOrganizationId, recipientId: rep.id, title: 'SHP-0203-01 delivered to billing', body: 'The Blue Dart shipment generated INV-0203 and its Razorpay payment was verified.', resourceType: 'Invoice', resourceId: invoice0203.id, dedupeKey: 'seed:shipment0203:rep', createdAt: atDay(-2, 13) },
+  ] });
+
   await db.auditEvent.createMany({ data: [
     { organizationId: primaryOrganizationId, actorId: admin.id, action: 'DIRECTORY_JOIN_CUSTOMER_CREATED', resource: 'Customer', resourceId: lumen.id, reason: `Approved directory request ${approvedDirectoryRequest.id}`, requestId: 'seed-directory-lumen-approve', createdAt: atDay(-40) },
     { organizationId: primaryOrganizationId, actorId: admin.id, action: 'CUSTOMER_PORTAL_PASSWORD_CREATED', resource: 'Customer', resourceId: lumen.id, reason: lumenCustomer.email, requestId: 'seed-directory-lumen-approve', createdAt: atDay(-40) },
@@ -864,6 +1089,8 @@ async function main() {
     { organizationId: primaryOrganizationId, actorId: rep.id, action: 'QUOTE_SENT', resource: 'Quote', resourceId: q0106.quote.id, revisionId: q0106.revision.id, reason: 'Sent the approved revision to the customer portal.', requestId: 'seed-q0106-send', createdAt: atDay(-2) },
     { organizationId: primaryOrganizationId, actorId: acmeCustomer.id, action: 'CUSTOMER_PROPOSAL_CREATED', resource: 'Quote', resourceId: q0107.quote.id, revisionId: q0107.revision.id, reason: 'Customer proposed a 12% order discount.', requestId: 'seed-q0107-counter', createdAt: atDay(-1) },
     { organizationId: primaryOrganizationId, actorId: rep.id, action: 'CUSTOMER_PROPOSAL_ADOPTED', resource: 'Quote', resourceId: q0111.quote.id, revisionId: q0111.revision.id, reason: 'Created a new Draft and cleared the previous send boundary.', requestId: 'seed-q0111-adopt', createdAt: atDay(-1) },
+    { organizationId: primaryOrganizationId, actorId: rep.id, action: 'RECOMMENDATION_DISMISSED', resource: 'Quote', resourceId: q0101.quote.id, revisionId: q0101.revision.id, reason: `${care.name}: Keep the first conversation focused on deployment.`, requestId: 'seed-q0101-recommendation', createdAt: atDay(-9) },
+    { organizationId: primaryOrganizationId, actorId: rep.id, action: 'RECOMMENDATION_ACCEPTED', resource: 'Quote', resourceId: q0111.quote.id, revisionId: q0111.revision.id, reason: `${care.name}: Added proactive monitoring to the rollout.`, requestId: 'seed-q0111-recommendation', createdAt: atDay(-2) },
     { organizationId: primaryOrganizationId, actorId: acmeCustomer.id, action: 'QUOTATION_ACCEPTED', resource: 'Order', resourceId: q0202.order.id, revisionId: q0202.revision.id, reason: 'Accepted exact approved and sent revision.', requestId: 'seed-q0202-accept', createdAt: q0202.order.createdAt },
     { organizationId: primaryOrganizationId, actorId: finance.id, action: 'STOCK_ALLOCATION_OVERRIDDEN', resource: 'Order', resourceId: q0202.order.id, revisionId: q0202.revision.id, reason: 'Keep the East Depot stock on the customer preferred route.', requestId: 'seed-q0202-allocation', createdAt: atDay(-11) },
     { organizationId: primaryOrganizationId, actorId: finance.id, action: 'STOCK_RECEIVED', resource: 'Order', resourceId: q0202.order.id, revisionId: q0202.revision.id, reason: 'GRN-SEED-0202 added two units and consolidated the backorder.', requestId: 'seed-q0202-receipt', createdAt: atDay(-2) },
