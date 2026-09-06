@@ -17,6 +17,10 @@ type JoinRequest = {
   email: string;
   companyName: string;
   message: string;
+  contactName?: string|null;
+  marketplaceInterest?: boolean;
+  requestedProduct?: {id:string|null;name:string;sku:string|null}|null;
+  requestedQuantity?: string|null;
   status: 'PENDING'|'APPROVED'|'DECLINED';
   decidedBy: { id: string; name: string } | null;
   decidedAt: string | null;
@@ -149,8 +153,8 @@ export function JoinRequestsPage({ onCustomerCreated }: { onCustomerCreated?: ()
     if (!selected || !teamId || !repId) return;
     setBusy(true);setError('');setCredentials(null);
     try {
-      const result = await request<{ credentials:{email:string;password:string;signInPath:string} }>(`/directory/join-requests/${selected.id}/approve`, { method:'POST', body:JSON.stringify({primarySalesTeamId:teamId,primaryRepId:repId,collaboratorIds:[],customerTier:tier,currency}) });
-      setCredentials(result.credentials);
+      const result = await request<{ credentials:{email:string;password:string;signInPath:string}|null; accountReady?:boolean }>(`/directory/join-requests/${selected.id}/approve`, { method:'POST', body:JSON.stringify({primarySalesTeamId:teamId,primaryRepId:repId,collaboratorIds:[],customerTier:tier,currency}) });
+      setCredentials(result.credentials?.password ? result.credentials : null);
       await onCustomerCreated?.();
       await load();
     } catch (cause) { setError(cause instanceof Error?cause.message:'Could not approve this request.'); }
@@ -169,7 +173,7 @@ export function JoinRequestsPage({ onCustomerCreated }: { onCustomerCreated?: ()
 
   return <div className="join-requests-page">
     <div className="join-requests-intro">
-      <div><span className="eyebrow">CUSTOMER DISCOVERY</span><h2>Join requests</h2><p>Review organizations that want to become customers, then approve and assign them or record a clear decline reason.</p></div>
+      <div><span className="eyebrow">CUSTOMER DISCOVERY</span><h2>Join requests</h2><p>Review customer interest, assign the account team, and send the selected offering into the governed lead or quotation flow.</p></div>
       <button className="button ghost join-refresh" onClick={()=>void load()} disabled={loading}><RefreshCw className={loading?'spin':''}/>Refresh</button>
     </div>
 
@@ -202,13 +206,13 @@ export function JoinRequestsPage({ onCustomerCreated }: { onCustomerCreated?: ()
           <div><span className={`status ${selected.status.toLowerCase()}`}>{selected.status.toLowerCase()}</span><h3 id="selected-request-title">{selected.companyName}</h3><div className="request-meta"><a href={`mailto:${selected.email}`}><Mail/>{selected.email}</a><span><CalendarDays/>Received {prettyDate(selected.createdAt)}</span></div></div>
         </header>
 
-        <section className="request-message" aria-labelledby="request-message-title"><span className="eyebrow" id="request-message-title">CUSTOMER MESSAGE</span><blockquote>{selected.message}</blockquote></section>
+        <section className="request-message" aria-labelledby="request-message-title"><span className="eyebrow" id="request-message-title">CUSTOMER MESSAGE</span><blockquote>{selected.message}</blockquote>{selected.marketplaceInterest&&selected.requestedProduct&&<p><b>Selected offering:</b> {selected.requestedProduct.name}{selected.requestedQuantity?` · Quantity ${selected.requestedQuantity}`:''}{selected.contactName?` · Contact ${selected.contactName}`:''}</p>}</section>
 
         {selected.status==='PENDING'?<section className="request-decision" aria-labelledby="request-decision-title">
           <div className="request-decision-head"><div><span className="eyebrow">DECISION</span><h4 id="request-decision-title">Review this request</h4><p>Choose one action. Nothing is created until you approve.</p></div><div className="decision-mode-switch" role="tablist" aria-label="Decision action"><button type="button" role="tab" aria-selected={decisionMode==='APPROVE'} className={decisionMode==='APPROVE'?'active approve':''} onClick={()=>setDecisionMode('APPROVE')}><Check/>Approve</button><button type="button" role="tab" aria-selected={decisionMode==='DECLINE'} className={decisionMode==='DECLINE'?'active decline':''} onClick={()=>setDecisionMode('DECLINE')}><X/>Decline</button></div></div>
 
           {decisionMode==='APPROVE'?<div className="approval-workspace">
-            <div className="decision-explainer approve"><UserRoundCheck/><span><b>Approve and configure customer access</b><small>This creates the customer profile, assigns ownership, and generates one-time portal credentials.</small></span></div>
+            <div className="decision-explainer approve"><UserRoundCheck/><span><b>Approve and configure customer access</b><small>{selected.marketplaceInterest?'This connects the existing customer login, assigns ownership, and starts the governed sales intake.':'This creates the customer profile, assigns ownership, and generates one-time portal credentials.'}</small></span></div>
             <div className="approval-fields">
               <fieldset><legend>Account ownership</legend><div className="join-pair"><label>Primary sales team<select value={teamId} onChange={(event)=>setTeamId(event.target.value)}>{teams.map((team)=><option value={team.id} key={team.id}>{team.name}</option>)}</select></label><label>Primary representative<select value={repId} onChange={(event)=>setRepId(event.target.value)} disabled={!selectedTeam?.representatives.length}>{selectedTeam?.representatives.map((rep)=><option value={rep.id} key={rep.id}>{rep.name}</option>)}</select></label></div></fieldset>
               <fieldset><legend>Commercial profile</legend><div className="join-pair"><label>Customer tier<select value={tier} onChange={(event)=>setTier(event.target.value)}><option>Bronze</option><option>Silver</option><option>Gold</option><option>Enterprise</option></select></label><label>Currency<input value={currency} maxLength={3} onChange={(event)=>setCurrency(event.target.value.toUpperCase())}/></label></div></fieldset>

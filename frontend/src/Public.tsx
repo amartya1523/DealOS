@@ -182,10 +182,11 @@ export function CustomerAuthPage({ onSuccess, signedInRole }: { onSuccess: () =>
         <GoogleAuth mode="customer" email={email.trim().toLowerCase()} hideDivider onComplete={onSuccess} onError={setError}/>
         {error&&<div className="auth-error" role="alert">{error}</div>}
         {resetNotice&&<div className="auth-error" role="status">{resetNotice}</div>}
+        <div className="customer-signup-link"><span>New to the customer portal?</span><a href="/customer/sign-up">Create an account request <ArrowRight/></a></div>
         <div className="customer-auth-trust"><span><Check/>Verified email matching</span><span><LockKeyhole/>Customer-scoped access</span></div>
       </section>
     </div>
-    <footer className="customer-auth-footer"><span>Access begins after the business assigns your account and sends a portal invitation.</span><b>Made with <i>♥</i> by Amartya, Sanket, Hitesh &amp; Aryan.</b></footer>
+    <footer className="customer-auth-footer"><span>Marketplace access starts immediately. Private deal access begins after seller approval and assignment.</span><b>Made with <i>♥</i> by Amartya, Sanket, Hitesh &amp; Aryan.</b></footer>
   </main>;
 }
 

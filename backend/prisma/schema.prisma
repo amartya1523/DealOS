@@ -211,6 +211,7 @@ enum DirectoryJoinRequestStatus {
 model User {
   id                       String                   @id @default(uuid())
   name                     String
+  companyName              String?
   email                    String                   @unique
   loginId                  String?                  @unique
   googleSubject            String?                  @unique
@@ -347,6 +348,13 @@ model DirectoryJoinRequest {
   email               String
   companyName         String
   message             String
+  contactName         String?
+  marketplaceInterest Boolean                    @default(false)
+  requestedProductId  String?
+  requestedProduct    Product?                   @relation(fields: [requestedProductId], references: [id], onDelete: SetNull)
+  requestedProductName String?
+  requestedQuantity   Decimal?                   @db.Decimal(14, 3)
+  portalPasswordHash  String?
   status              DirectoryJoinRequestStatus @default(PENDING)
   decidedById         String?
   decidedBy           User?                      @relation("DirectoryJoinRequestDecider", fields: [decidedById], references: [id], onDelete: Restrict)
@@ -360,6 +368,7 @@ model DirectoryJoinRequest {
   @@unique([organizationId, email, status])
   @@index([organizationId, status, createdAt])
   @@index([email, createdAt])
+  @@index([requestedProductId])
 }
 
 model CustomerRepresentative {
@@ -389,6 +398,7 @@ model Session {
   viewAsOrganizationId String?
   viewAsUserId         String?
   viewAsStartedAt      DateTime?
+  activeOrganizationId String?
   createdAt            DateTime  @default(now())
 }
 
@@ -473,6 +483,7 @@ model Product {
   backorders            Backorder[]
   stockMovements        StockMovement[]
   portalRequestLines    PortalRequestLine[]
+  directoryInterests    DirectoryJoinRequest[]
   variants              ProductVariant[]
   priceListItems        PriceListItem[]
   recommendationActions RecommendationAction[]

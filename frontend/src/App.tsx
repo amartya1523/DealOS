@@ -90,6 +90,8 @@ import {
   DirectoryProfileSettings,
   JoinRequestsPage,
 } from "./features/customers/BusinessDirectory";
+import { CustomerMarketplace } from "./features/portal/CustomerMarketplace";
+import { CustomerSignupPage } from "./features/portal/CustomerSignupPage";
 
 type View =
   | "dashboard"
@@ -394,11 +396,13 @@ export function App() {
     body: unknown,
     method = "POST",
     message = "Updated",
+    onError?: (message: string) => void,
   ) => {
     if (workspace?.user.viewContext?.readOnly) {
-      setError(
-        "View As mode is read-only. Exit the simulated context before making changes.",
-      );
+      const problem =
+        "View As mode is read-only. Exit the simulated context before making changes.";
+      if (onError) onError(problem);
+      else setError(problem);
       return false;
     }
     try {
@@ -414,7 +418,9 @@ export function App() {
       }, 2400);
       return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Action failed");
+      const problem = e instanceof Error ? e.message : "Action failed";
+      if (onError) onError(problem);
+      else setError(problem);
       return false;
     } finally {
       setBusy(false);
@@ -484,6 +490,13 @@ export function App() {
             navigate("/app");
           }}
         />
+        <DealAssistant />
+      </>
+    );
+  if (route === "/customer/sign-up")
+    return (
+      <>
+        <CustomerSignupPage />
         <DealAssistant />
       </>
     );
@@ -6054,7 +6067,12 @@ function PortalSectionTitle({
 }
 
 type CustomerPortalView =
-  "requests" | "quotations" | "invoices" | "messages" | "profile";
+  | "organizations"
+  | "requests"
+  | "quotations"
+  | "invoices"
+  | "messages"
+  | "profile";
 function CustomerPortalV2({
   data,
   mutate,
@@ -6066,7 +6084,7 @@ function CustomerPortalV2({
   reload: () => Promise<void>;
   logout: () => Promise<void>;
 }) {
-  const [active, setActive] = useState<CustomerPortalView>("quotations");
+  const [active, setActive] = useState<CustomerPortalView>("organizations");
   useEffect(() => {
     const sync = () => {
       if (document.visibilityState === "visible") void reload();
@@ -6078,6 +6096,7 @@ function CustomerPortalV2({
       document.removeEventListener("visibilitychange", sync);
     };
   }, [reload]);
+  const hasDealRoom = Boolean(data.organization.id);
   const pendingQuotes = data.quotes.filter((q) =>
     ["SENT", "NEGOTIATION"].includes(q.stage),
   ).length;
@@ -6086,15 +6105,20 @@ function CustomerPortalV2({
     (sum, q) => sum + q.negotiation.length,
     0,
   );
-  const tabs: Array<[CustomerPortalView, string, ReactNode, number]> = [
-    ["requests", "Request a quote", <Inbox />, 0],
-    ["quotations", "My quotations", <FileCheck />, pendingQuotes],
-    ["invoices", "Invoices", <Receipt />, openInvoices],
-    ["messages", "Messages", <MessageSquare />, messages],
-    ["profile", "Profile", <UserRound />, 0],
+  const tabs: Array<
+    [CustomerPortalView, string, ReactNode, number, boolean]
+  > = [
+    ["organizations", "Organizations", <Store />, 0, false],
+    ["requests", "Requests", <Inbox />, 0, !hasDealRoom],
+    ["quotations", "My quotations", <FileCheck />, pendingQuotes, !hasDealRoom],
+    ["invoices", "Invoices", <Receipt />, openInvoices, !hasDealRoom],
+    ["messages", "Messages", <MessageSquare />, messages, !hasDealRoom],
+    ["profile", "Profile", <UserRound />, 0, false],
   ];
   const heading =
-    active === "requests"
+    active === "organizations"
+      ? "Organization marketplace"
+      : active === "requests"
       ? "Request a quotation"
       : active === "quotations"
         ? "Review your quotations"
@@ -6104,21 +6128,27 @@ function CustomerPortalV2({
             ? "Commercial conversation"
             : "Your portal profile";
   const intro =
-    active === "requests"
+    active === "organizations"
+      ? hasDealRoom
+        ? `Browse verified organizations or continue your active deal room with ${data.organization.name}.`
+        : "Browse verified organizations and choose a product or service. Your private deal room opens after the seller approves your interest and assigns a representative."
+      : active === "requests"
       ? "Describe what you need. Your assigned representative will review it before anything is shared back."
       : active === "quotations"
         ? "Review terms, request a change, or accept the latest approved quotation."
         : active === "invoices"
-          ? "Every invoice shared with your invited email appears here automatically."
+          ? "Every invoice shared with your customer account appears here automatically."
           : active === "messages"
             ? "All quotation comments and negotiation updates stay synchronized here."
-            : "This verified identity controls which documents you can access.";
+            : "Manage your verified customer identity and relationship access.";
   return (
     <div className="deal-room">
       <header className="deal-room-header">
         <div className="deal-room-brand">
           <Brand />
-          <span>Customer portal</span>
+          <span>
+            Customer portal · {hasDealRoom ? data.organization.name : "Marketplace"}
+          </span>
         </div>
         <div className="deal-room-user">
           <span>{data.user.name.slice(0, 1).toUpperCase()}</span>
@@ -6143,10 +6173,16 @@ function CustomerPortalV2({
         </div>
       </header>
       <nav className="deal-room-tabs" aria-label="Customer portal">
-        {tabs.map(([id, text, icon, count]) => (
+        {tabs.map(([id, text, icon, count, disabled]) => (
           <button
             key={id}
             className={active === id ? "active" : ""}
+            disabled={disabled}
+            title={
+              disabled
+                ? "Available after a seller approves your relationship and assigns a representative."
+                : undefined
+            }
             onClick={() => setActive(id)}
           >
             {icon}
@@ -6158,16 +6194,24 @@ function CustomerPortalV2({
       <main className="deal-room-main">
         <div className="deal-room-intro">
           <div>
-            <span className="eyebrow">Secure deal room</span>
+            <span className="eyebrow">
+              {hasDealRoom ? "SECURE DEAL ROOM" : "CUSTOMER MARKETPLACE"}
+            </span>
             <h1>{heading}</h1>
             <p>{intro}</p>
           </div>
           <span className="portal-sync">
             <i />
-            Live sync
+            {hasDealRoom ? "Live sync" : "Account active"}
           </span>
         </div>
-        {active === "requests" ? (
+        {active === "organizations" ? (
+          <CustomerMarketplace
+            companyName={data.user.companyName ?? data.user.name}
+            currentOrganizationId={data.organization.id}
+            onWorkspaceChanged={reload}
+          />
+        ) : active === "requests" ? (
           <PortalRequests />
         ) : active === "quotations" ? (
           <CustomerQuotationRoom quotes={data.quotes} mutate={mutate} />
@@ -6927,6 +6971,7 @@ function CustomerMessages({ quotes }: { quotes: Quote[] }) {
 }
 
 function CustomerProfile({ data }: { data: Workspace }) {
+  const connected = Boolean(data.organization.id);
   return (
     <section className="profile-card">
       <div className="profile-avatar">
@@ -6942,12 +6987,12 @@ function CustomerProfile({ data }: { data: Workspace }) {
       </div>
       <dl>
         <div>
-          <dt>Organization</dt>
-          <dd>{data.organization?.name}</dd>
+          <dt>Active deal room</dt>
+          <dd>{connected ? data.organization.name : "Not connected yet"}</dd>
         </div>
         <div>
-          <dt>Portal access</dt>
-          <dd>Customer verified</dd>
+          <dt>Marketplace access</dt>
+          <dd>Active</dd>
         </div>
         <div>
           <dt>Quotations shared</dt>
@@ -6961,8 +7006,12 @@ function CustomerProfile({ data }: { data: Workspace }) {
       <div className="approval-note">
         <ShieldCheck />
         <span>
-          <b>Your data is isolated</b>Only records assigned to this customer
-          identity and organization are returned by the server.
+          <b>
+            {connected ? "Your data is isolated" : "Your account is ready to browse"}
+          </b>
+          {connected
+            ? "Only records assigned to this customer identity and active organization are returned by the server."
+            : "Choose an organization and show interest. Private deal records unlock only after seller approval and representative assignment."}
         </span>
       </div>
     </section>
@@ -6995,43 +7044,53 @@ function CustomerModal({
     password: string;
   } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const f = new FormData(e.currentTarget);
-    const billingAddress = String(f.get("billingAddress") ?? "");
-    const email = String(f.get("email") ?? "") || null;
-    const profile = {
-      customerType: f.get("customerType"),
-      region: f.get("region"),
-      name: f.get("name"),
-      contactPerson: f.get("contactPerson") || null,
-      email,
-      countryCode: f.get("countryCode"),
-      phone: f.get("phone") || null,
-      gstin: f.get("gstin") || null,
-      billingAddress: billingAddress || null,
-      shippingAddress: same
-        ? billingAddress
-        : String(f.get("shippingAddress") ?? "") || null,
-      paymentTerms: Number(f.get("paymentTerms")),
-      tier: f.get("tier"),
-      currency: f.get("currency"),
-      active: true,
-      ...(canProvision ? { temporaryPassword } : {}),
-    };
-    const saved = await mutate(
-      editing ? `/customers/${customer!.id}` : "/customers",
-      profile,
-      editing ? "PATCH" : "POST",
-      editing ? "Customer updated" : "Customer and portal login created",
-    );
-    if (saved) {
-      onSaved?.();
-      if (canProvision && email) {
-        setCredentials({ email, password: temporaryPassword });
-        return;
+    if (saving) return;
+    setSaving(true);
+    setFormError("");
+    try {
+      const f = new FormData(e.currentTarget);
+      const billingAddress = String(f.get("billingAddress") ?? "");
+      const email = String(f.get("email") ?? "") || null;
+      const profile = {
+        customerType: f.get("customerType"),
+        region: f.get("region"),
+        name: f.get("name"),
+        contactPerson: f.get("contactPerson") || null,
+        email,
+        countryCode: f.get("countryCode"),
+        phone: f.get("phone") || null,
+        gstin: f.get("gstin") || null,
+        billingAddress: billingAddress || null,
+        shippingAddress: same
+          ? billingAddress
+          : String(f.get("shippingAddress") ?? "") || null,
+        paymentTerms: Number(f.get("paymentTerms")),
+        tier: f.get("tier"),
+        currency: f.get("currency"),
+        active: true,
+        ...(canProvision ? { temporaryPassword } : {}),
+      };
+      const saved = await mutate(
+        editing ? `/customers/${customer!.id}` : "/customers",
+        profile,
+        editing ? "PATCH" : "POST",
+        editing ? "Customer updated" : "Customer and portal login created",
+        setFormError,
+      );
+      if (saved) {
+        onSaved?.();
+        if (canProvision && email) {
+          setCredentials({ email, password: temporaryPassword });
+          return;
+        }
+        close();
       }
-      close();
+    } finally {
+      setSaving(false);
     }
   };
   const copyCredentials = async () => {
@@ -7090,7 +7149,7 @@ function CustomerModal({
   return (
     <div
       className="modal-wrap"
-      onMouseDown={(e) => e.target === e.currentTarget && close()}
+      onMouseDown={(e) => e.target === e.currentTarget && !saving && close()}
     >
       <div className="modal large-modal">
         <div className="panel-title">
@@ -7099,6 +7158,7 @@ function CustomerModal({
           </h3>
           <button
             aria-label={`Close ${editing ? "edit" : "new"} customer`}
+            disabled={saving}
             onClick={close}
           >
             <X />
@@ -7221,6 +7281,7 @@ function CustomerModal({
                   <button
                     className="button ghost"
                     type="button"
+                    disabled={saving}
                     onClick={() => setTemporaryPassword(generatedPassword())}
                   >
                     <RefreshCw />
@@ -7281,14 +7342,28 @@ function CustomerModal({
               maxLength={3}
             />
           </label>
+          {formError && (
+            <p className="dialog-error wide" role="alert">
+              {formError}
+            </p>
+          )}
           <div className="actions wide form-footer">
-            <button type="button" className="button ghost" onClick={close}>
+            <button
+              type="button"
+              className="button ghost"
+              disabled={saving}
+              onClick={close}
+            >
               <X />
               Cancel
             </button>
-            <button className="button primary">
+            <button className="button primary" disabled={saving}>
               <Check />
-              {editing ? "Save Changes" : "Add Customer"}
+              {saving
+                ? "Creating…"
+                : editing
+                  ? "Save Changes"
+                  : "Add Customer"}
             </button>
           </div>
         </form>
