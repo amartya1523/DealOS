@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { ArrowLeft, ArrowRight, Building2, Check, Copy, Globe2, RefreshCw, Send, ShieldCheck, Store, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Building2, CalendarDays, Check, CheckCircle2, ChevronRight, CircleX, Clock3, Copy, Globe2, Mail, RefreshCw, Send, ShieldAlert, ShieldCheck, UserRoundCheck, X } from 'lucide-react';
 import { Brand } from '../../Brand';
 import { request } from '../../api';
 import './business-directory.css';
+import './join-requests.css';
 
 type Business = {
   id: string;
@@ -113,6 +114,7 @@ export function JoinRequestsPage({ onCustomerCreated }: { onCustomerCreated?: ()
   const [tier, setTier] = useState('Gold');
   const [currency, setCurrency] = useState('INR');
   const [declineReason, setDeclineReason] = useState('');
+  const [decisionMode, setDecisionMode] = useState<'APPROVE'|'DECLINE'>('APPROVE');
   const [credentials, setCredentials] = useState<{ email:string; password:string; signInPath:string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -141,6 +143,7 @@ export function JoinRequestsPage({ onCustomerCreated }: { onCustomerCreated?: ()
   const selected = items.find((item)=>item.id===selectedId) ?? items[0];
   const selectedTeam = teams.find((team)=>team.id===teamId);
   useEffect(()=>{setRepId((current)=>selectedTeam?.representatives.some((rep)=>rep.id===current)?current:selectedTeam?.representatives[0]?.id??'')},[selectedTeam]);
+  useEffect(()=>{setDecisionMode('APPROVE');setDeclineReason('');setError('')},[selectedId,status]);
 
   const approve = async () => {
     if (!selected || !teamId || !repId) return;
@@ -165,11 +168,63 @@ export function JoinRequestsPage({ onCustomerCreated }: { onCustomerCreated?: ()
   };
 
   return <div className="join-requests-page">
-    <div className="join-requests-intro"><div><span className="eyebrow">CUSTOMER DISCOVERY</span><h2>Join requests</h2><p>Review public association requests. Approval creates the normal customer profile, assignment, and portal credential in one transaction.</p></div><button className="button ghost" onClick={()=>void load()} disabled={loading}><RefreshCw/>Refresh</button></div>
-    <div className="join-status-tabs" role="tablist">{(['PENDING','APPROVED','DECLINED'] as const).map((value)=><button role="tab" aria-selected={status===value} className={status===value?'active':''} onClick={()=>{setStatus(value);setCredentials(null)}} key={value}>{value.toLowerCase()}</button>)}</div>
-    {error&&<div className="directory-error" role="alert">{error}</div>}
+    <div className="join-requests-intro">
+      <div><span className="eyebrow">CUSTOMER DISCOVERY</span><h2>Join requests</h2><p>Review organizations that want to become customers, then approve and assign them or record a clear decline reason.</p></div>
+      <button className="button ghost join-refresh" onClick={()=>void load()} disabled={loading}><RefreshCw className={loading?'spin':''}/>Refresh</button>
+    </div>
+
+    <div className="join-status-tabs" role="tablist" aria-label="Request status">
+      {(['PENDING','APPROVED','DECLINED'] as const).map((value)=><button role="tab" aria-selected={status===value} className={status===value?'active':''} onClick={()=>{setStatus(value);setCredentials(null)}} key={value}>
+        {value==='PENDING'?<Clock3/>:value==='APPROVED'?<CheckCircle2/>:<CircleX/>}<span>{value.toLowerCase()}</span>{status===value&&!loading&&<em>{items.length}</em>}
+      </button>)}
+    </div>
+
+    {error&&<div className="directory-error join-request-error" role="alert"><ShieldAlert/>{error}</div>}
     {credentials&&<OneTimeCredentials credentials={credentials} onClose={()=>setCredentials(null)}/>}
-    {loading?<div className="directory-loading"><RefreshCw/>Loading requests…</div>:items.length?<div className="join-request-layout"><aside>{items.map((item)=><button className={item.id===selected?.id?'active':''} onClick={()=>setSelectedId(item.id)} key={item.id}><span><b>{item.companyName}</b><small>{item.email}</small></span><em>{prettyDate(item.createdAt)}</em></button>)}</aside>{selected&&<section className="join-request-detail"><header><div><span className={`status ${selected.status.toLowerCase()}`}>{selected.status.toLowerCase()}</span><h3>{selected.companyName}</h3><a href={`mailto:${selected.email}`}>{selected.email}</a></div><Store/></header><blockquote>{selected.message}</blockquote>{selected.status==='PENDING'?<div className="join-decision-grid"><section><h4>Approve and configure customer</h4><label>Primary sales team<select value={teamId} onChange={(event)=>setTeamId(event.target.value)}>{teams.map((team)=><option value={team.id} key={team.id}>{team.name}</option>)}</select></label><label>Primary representative<select value={repId} onChange={(event)=>setRepId(event.target.value)}>{selectedTeam?.representatives.map((rep)=><option value={rep.id} key={rep.id}>{rep.name}</option>)}</select></label><div className="join-pair"><label>Customer tier<select value={tier} onChange={(event)=>setTier(event.target.value)}><option>Bronze</option><option>Silver</option><option>Gold</option><option>Enterprise</option></select></label><label>Currency<input value={currency} maxLength={3} onChange={(event)=>setCurrency(event.target.value.toUpperCase())}/></label></div><button className="button primary" onClick={approve} disabled={busy||!teamId||!repId}>{busy?'Working…':'Approve & create customer'}</button></section><section><h4>Decline request</h4><label>Decision reason<textarea value={declineReason} minLength={5} maxLength={1000} onChange={(event)=>setDeclineReason(event.target.value)} placeholder="Explain why this request is not being accepted."/></label><button className="button danger" onClick={decline} disabled={busy||declineReason.trim().length<5}>Decline request</button></section></div>:<dl><div><dt>Decided by</dt><dd>{selected.decidedBy?.name??'—'}</dd></div><div><dt>Decision time</dt><dd>{selected.decidedAt?prettyDate(selected.decidedAt):'—'}</dd></div><div><dt>Result</dt><dd>{selected.resultingCustomer?.name??selected.decisionReason??'No customer created'}</dd></div></dl>}</section>}</div>:<div className="directory-empty"><ShieldCheck/><h3>No {status.toLowerCase()} requests</h3><p>Requests will appear here without creating customer access automatically.</p></div>}
+
+    {loading?<div className="directory-loading join-request-loading"><RefreshCw/>Loading requests…</div>:items.length?<div className="join-request-layout">
+      <aside aria-label={`${status.toLowerCase()} requests`}>
+        <div className="request-list-head"><span>{status.toLowerCase()} requests</span><b>{items.length}</b></div>
+        <div className="request-list-items">{items.map((item)=>{
+          const active=item.id===selected?.id;
+          const initials=item.companyName.split(' ').map((part)=>part[0]).join('').slice(0,2).toUpperCase();
+          return <button aria-pressed={active} className={active?'active':''} onClick={()=>setSelectedId(item.id)} key={item.id}>
+            <span className="request-company-mark">{initials}</span>
+            <span className="request-list-copy"><b>{item.companyName}</b><small>{item.email}</small><em>{prettyDate(item.createdAt)}</em></span>
+            <ChevronRight/>
+          </button>;
+        })}</div>
+      </aside>
+
+      {selected&&<section className="join-request-detail" aria-labelledby="selected-request-title">
+        <header className="request-detail-head">
+          <span className="request-detail-icon"><Building2/></span>
+          <div><span className={`status ${selected.status.toLowerCase()}`}>{selected.status.toLowerCase()}</span><h3 id="selected-request-title">{selected.companyName}</h3><div className="request-meta"><a href={`mailto:${selected.email}`}><Mail/>{selected.email}</a><span><CalendarDays/>Received {prettyDate(selected.createdAt)}</span></div></div>
+        </header>
+
+        <section className="request-message" aria-labelledby="request-message-title"><span className="eyebrow" id="request-message-title">CUSTOMER MESSAGE</span><blockquote>{selected.message}</blockquote></section>
+
+        {selected.status==='PENDING'?<section className="request-decision" aria-labelledby="request-decision-title">
+          <div className="request-decision-head"><div><span className="eyebrow">DECISION</span><h4 id="request-decision-title">Review this request</h4><p>Choose one action. Nothing is created until you approve.</p></div><div className="decision-mode-switch" role="tablist" aria-label="Decision action"><button type="button" role="tab" aria-selected={decisionMode==='APPROVE'} className={decisionMode==='APPROVE'?'active approve':''} onClick={()=>setDecisionMode('APPROVE')}><Check/>Approve</button><button type="button" role="tab" aria-selected={decisionMode==='DECLINE'} className={decisionMode==='DECLINE'?'active decline':''} onClick={()=>setDecisionMode('DECLINE')}><X/>Decline</button></div></div>
+
+          {decisionMode==='APPROVE'?<div className="approval-workspace">
+            <div className="decision-explainer approve"><UserRoundCheck/><span><b>Approve and configure customer access</b><small>This creates the customer profile, assigns ownership, and generates one-time portal credentials.</small></span></div>
+            <div className="approval-fields">
+              <fieldset><legend>Account ownership</legend><div className="join-pair"><label>Primary sales team<select value={teamId} onChange={(event)=>setTeamId(event.target.value)}>{teams.map((team)=><option value={team.id} key={team.id}>{team.name}</option>)}</select></label><label>Primary representative<select value={repId} onChange={(event)=>setRepId(event.target.value)} disabled={!selectedTeam?.representatives.length}>{selectedTeam?.representatives.map((rep)=><option value={rep.id} key={rep.id}>{rep.name}</option>)}</select></label></div></fieldset>
+              <fieldset><legend>Commercial profile</legend><div className="join-pair"><label>Customer tier<select value={tier} onChange={(event)=>setTier(event.target.value)}><option>Bronze</option><option>Silver</option><option>Gold</option><option>Enterprise</option></select></label><label>Currency<input value={currency} maxLength={3} onChange={(event)=>setCurrency(event.target.value.toUpperCase())}/></label></div></fieldset>
+            </div>
+            <div className="decision-action-row"><p><ShieldCheck/>The customer will be active immediately after approval.</p><button className="button primary" onClick={approve} disabled={busy||!teamId||!repId}>{busy?<><RefreshCw className="spin"/>Creating customer…</>:'Approve & create customer'}</button></div>
+          </div>:<div className="decline-workspace">
+            <div className="decision-explainer decline"><ShieldAlert/><span><b>Decline this association request</b><small>No customer account or portal access will be created. The reason is retained in request history.</small></span></div>
+            <label>Decision reason<textarea aria-label="Decision reason" value={declineReason} minLength={5} maxLength={1000} onChange={(event)=>setDeclineReason(event.target.value)} placeholder="Explain why this request is not being accepted."/><small>{declineReason.trim().length}/1000 characters · minimum 5</small></label>
+            <div className="decision-action-row decline"><button type="button" className="button ghost" onClick={()=>{setDecisionMode('APPROVE');setDeclineReason('')}}>Back to approval</button><button className="button danger" onClick={decline} disabled={busy||declineReason.trim().length<5}>{busy?<><RefreshCw className="spin"/>Declining…</>:'Decline request'}</button></div>
+          </div>}
+        </section>:<section className={`request-outcome ${selected.status.toLowerCase()}`}>
+          <div className="request-outcome-title">{selected.status==='APPROVED'?<CheckCircle2/>:<CircleX/>}<span><b>Request {selected.status.toLowerCase()}</b><small>This decision is complete and retained in request history.</small></span></div>
+          <dl><div><dt>Decided by</dt><dd>{selected.decidedBy?.name??'—'}</dd></div><div><dt>Decision time</dt><dd>{selected.decidedAt?prettyDate(selected.decidedAt):'—'}</dd></div><div><dt>{selected.status==='APPROVED'?'Customer created':'Decision reason'}</dt><dd>{selected.resultingCustomer?.name??selected.decisionReason??'No customer created'}</dd></div></dl>
+        </section>}
+      </section>}
+    </div>:<div className="directory-empty join-request-empty"><ShieldCheck/><h3>No {status.toLowerCase()} requests</h3><p>{status==='PENDING'?'New public association requests will appear here for review.':'Completed requests will appear here as an audit-friendly history.'}</p></div>}
   </div>;
 }
 

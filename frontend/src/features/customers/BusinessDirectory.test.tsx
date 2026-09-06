@@ -46,6 +46,25 @@ describe('business directory',()=>{
     await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith('/api/v1/directory/join-requests/22222222-2222-4222-8222-222222222222/approve',expect.objectContaining({method:'POST'})));
   });
 
+  it('keeps declining separate and requires a retained decision reason',async()=>{
+    fetchMock.mockImplementation((url:string,options?:RequestInit)=>{
+      if(url.startsWith('/api/v1/directory/join-requests?'))return response({items:[{id:'22222222-2222-4222-8222-222222222222',email:'buyer@example.com',companyName:'Buyer Co',message:'Please configure our account.',status:'PENDING',decidedBy:null,decidedAt:null,decisionReason:null,resultingCustomer:null,createdAt:'2026-09-06T00:00:00.000Z',updatedAt:'2026-09-06T00:00:00.000Z'}]});
+      if(url==='/api/v1/sales-teams')return response({items:[{id:'33333333-3333-4333-8333-333333333333',name:'Enterprise',representatives:[{id:'44444444-4444-4444-8444-444444444444',name:'Representative'}]}]});
+      if(url.endsWith('/decline')&&options?.method==='POST')return response({status:'DECLINED'});
+      return response({},404);
+    });
+    render(<JoinRequestsPage/>);
+    expect(await screen.findByRole('heading',{name:'Buyer Co'})).toBeInTheDocument();
+    expect(screen.queryByLabelText('Decision reason')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab',{name:'Decline'}));
+    const declineButton=screen.getByRole('button',{name:'Decline request'});
+    expect(declineButton).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Decision reason'),{target:{value:'Outside our current service area.'}});
+    expect(declineButton).toBeEnabled();
+    fireEvent.click(declineButton);
+    await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith('/api/v1/directory/join-requests/22222222-2222-4222-8222-222222222222/decline',expect.objectContaining({method:'POST',body:JSON.stringify({reason:'Outside our current service area.'})})));
+  });
+
   it('allows an Admin to publish an allowlisted directory profile',async()=>{
     fetchMock.mockImplementation((url:string,options?:RequestInit)=>{
       const profile={organizationId:'org-1',displayName:'Visible Business',shortDescription:null,category:null,isDiscoverable:false,updatedAt:null};
