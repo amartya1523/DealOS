@@ -1,0 +1,551 @@
+.assignment-dialog-backdrop {
+  padding: 20px;
+  background: rgba(18, 18, 16, .78);
+  backdrop-filter: blur(5px);
+}
+
+.quotation-dialog.customer-assignment-dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(920px, calc(100dvh - 32px));
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #aaa297;
+  border-radius: 10px;
+  background: #fbfaf7;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, .36);
+}
+
+.customer-assignment-dialog .assignment-dialog-head {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 22px 24px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 38px;
+  align-items: center;
+  gap: 14px;
+  border-bottom: 1px solid #ded8ce;
+  background: #fff;
+}
+
+.assignment-dialog-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #171713;
+  color: #ffbd0a;
+}
+
+.assignment-dialog-icon svg {
+  width: 21px;
+  height: 21px;
+}
+
+.customer-assignment-dialog .assignment-dialog-head h2 {
+  margin: 4px 0 2px;
+  font: 750 23px 'Manrope', sans-serif;
+  letter-spacing: -.5px;
+}
+
+.customer-assignment-dialog .assignment-dialog-head p {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #77736b;
+  font-size: 11px;
+}
+
+.assignment-dialog-head p i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #aaa49a;
+}
+
+.customer-assignment-dialog .assignment-dialog-head > button {
+  width: 38px;
+  height: 38px;
+  border-radius: 6px;
+  transition: border-color .18s, background .18s;
+}
+
+.customer-assignment-dialog .assignment-dialog-head > button:hover:not(:disabled) {
+  border-color: #171713;
+  background: #f4f0e8;
+}
+
+.customer-assignment-dialog .assignment-dialog-form {
+  min-height: 0;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0;
+}
+
+.assignment-dialog-body {
+  min-height: 0;
+  padding: 20px 24px;
+  overflow-y: auto;
+  display: grid;
+  gap: 14px;
+  scrollbar-width: thin;
+  scrollbar-color: #aaa49a transparent;
+}
+
+.assignment-impact-note {
+  padding: 13px 15px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  gap: 11px;
+  border: 1px solid #dfc368;
+  border-left: 4px solid #d59a16;
+  border-radius: 6px;
+  background: #fff7d9;
+  color: #624b09;
+}
+
+.assignment-impact-note > svg {
+  width: 19px;
+  height: 19px;
+  margin-top: 1px;
+}
+
+.assignment-impact-note span,
+.assignment-impact-note b,
+.assignment-impact-note small {
+  display: block;
+}
+
+.assignment-impact-note b {
+  font-size: 12px;
+}
+
+.assignment-impact-note small {
+  margin-top: 3px;
+  color: #765e18;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.assignment-section {
+  padding: 17px;
+  border: 1px solid #ddd7cd;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.assignment-section-title {
+  margin-bottom: 14px;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+}
+
+.assignment-section-title > span {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #171713;
+  color: #ffbd0a;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.assignment-section-title h3,
+.assignment-section-title p {
+  margin: 0;
+}
+
+.assignment-section-title h3 {
+  font: 750 13px 'Manrope', sans-serif;
+}
+
+.assignment-section-title h3 em {
+  margin-left: 6px;
+  padding: 3px 6px;
+  border-radius: 99px;
+  background: #f0ece4;
+  color: #77736b;
+  font-size: 8px;
+  font-style: normal;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.assignment-section-title p {
+  margin-top: 3px;
+  color: #77736b;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.assignment-primary-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.customer-assignment-dialog .assignment-primary-grid > label,
+.customer-assignment-dialog .assignment-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #4d4943;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.customer-assignment-dialog .assignment-primary-grid select {
+  width: 100%;
+  height: 43px;
+  padding: 0 11px;
+  border-color: #cfc8bd;
+  border-radius: 5px;
+  background: #fff;
+  font-size: 12px;
+}
+
+.customer-assignment-dialog .collaborator-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.customer-assignment-dialog .collaborator-options > label {
+  min-width: 0;
+  min-height: 52px;
+  padding: 8px 10px;
+  display: grid !important;
+  grid-template-columns: 34px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 9px !important;
+  border: 1px solid #dcd6cc;
+  border-radius: 6px;
+  background: #fbfaf7;
+  color: #171713;
+  cursor: pointer;
+  transition: border-color .18s, background .18s;
+}
+
+.customer-assignment-dialog .collaborator-options > label:hover {
+  border-color: #aaa297;
+  background: #f7f4ed;
+}
+
+.customer-assignment-dialog .collaborator-options > label.selected {
+  border-color: #171713;
+  background: #fff7d9;
+  box-shadow: inset 3px 0 #ffbd0a;
+}
+
+.customer-assignment-dialog .collaborator-options input[type='checkbox'],
+.customer-assignment-dialog .open-quote-options input[type='checkbox'] {
+  width: 17px !important;
+  min-width: 17px;
+  height: 17px;
+  margin: 0;
+  padding: 0;
+  accent-color: #171713;
+  box-shadow: none;
+}
+
+.customer-assignment-dialog .collaborator-options label > span {
+  margin: 0;
+}
+
+.collaborator-avatar {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #ece7de;
+  color: #3f3b35 !important;
+  font-size: 9px;
+  font-weight: 900 !important;
+}
+
+.collaborator-copy {
+  min-width: 0;
+}
+
+.collaborator-copy b,
+.collaborator-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collaborator-copy b {
+  color: #171713;
+  font-size: 11px;
+}
+
+.collaborator-copy small {
+  margin-top: 3px;
+  color: #77736b;
+  font-size: 8px;
+  font-weight: 550;
+}
+
+.customer-assignment-dialog .assignment-reason > span {
+  margin: 0;
+  color: #4d4943;
+  font-weight: 800;
+}
+
+.customer-assignment-dialog .assignment-reason textarea {
+  min-height: 74px;
+  padding: 11px 12px;
+  border-color: #cfc8bd;
+  border-radius: 5px;
+  background: #fff;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.customer-assignment-dialog .assignment-reason > small {
+  align-self: flex-end;
+  color: #8c867d;
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.customer-assignment-dialog .open-quote-options {
+  display: grid;
+  gap: 7px;
+}
+
+.customer-assignment-dialog .open-quote-options > label {
+  min-height: 48px;
+  padding: 9px 11px;
+  display: grid !important;
+  grid-template-columns: 17px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px !important;
+  border: 1px solid #ded8ce;
+  border-radius: 5px;
+  background: #fbfaf7;
+  cursor: pointer;
+}
+
+.customer-assignment-dialog .open-quote-options > label.selected {
+  border-color: #171713;
+  background: #fff7d9;
+}
+
+.customer-assignment-dialog .open-quote-options > label.frozen {
+  cursor: not-allowed;
+  opacity: .58;
+}
+
+.customer-assignment-dialog .open-quote-options label > span {
+  margin: 0;
+}
+
+.customer-assignment-dialog .open-quote-options b {
+  font-size: 11px;
+}
+
+.customer-assignment-dialog .open-quote-options small {
+  margin-top: 2px;
+  color: #77736b;
+  font-size: 9px;
+}
+
+.assignment-empty-state {
+  grid-column: 1 / -1;
+  min-height: 68px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border: 1px dashed #cfc8bd;
+  border-radius: 6px;
+  background: #fbfaf7;
+  color: #77736b;
+}
+
+.assignment-empty-state.compact {
+  min-height: 58px;
+}
+
+.assignment-empty-state > svg {
+  width: 24px;
+  height: 24px;
+  color: #9b958b;
+}
+
+.assignment-empty-state span,
+.assignment-empty-state b,
+.assignment-empty-state small {
+  display: block;
+}
+
+.assignment-empty-state b {
+  color: #393630;
+  font-size: 11px;
+}
+
+.assignment-empty-state small {
+  margin-top: 2px;
+  font-size: 9px;
+}
+
+.customer-assignment-dialog .dialog-error {
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #e8b2ac;
+  border-radius: 5px;
+}
+
+.customer-assignment-dialog .dialog-error svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.assignment-dialog-footer {
+  flex: 0 0 auto;
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border-top: 1px solid #dcd6cc;
+  background: #fff;
+  box-shadow: 0 -8px 24px rgba(23, 23, 19, .04);
+}
+
+.assignment-summary span,
+.assignment-summary b,
+.assignment-summary small {
+  display: block;
+}
+
+.assignment-summary span {
+  color: #8a857d;
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.assignment-summary b {
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+.assignment-summary small {
+  margin-top: 2px;
+  color: #77736b;
+  font-size: 8px;
+}
+
+.customer-assignment-dialog .quotation-dialog-actions {
+  flex: 0 0 auto;
+  padding: 0;
+}
+
+.customer-assignment-dialog .quotation-dialog-actions .button {
+  min-height: 42px;
+  padding-inline: 16px;
+}
+
+.customer-assignment-dialog .assignment-loading {
+  min-height: 260px;
+  padding: 36px;
+  justify-content: center;
+}
+
+.assignment-loading span,
+.assignment-loading b,
+.assignment-loading small {
+  display: block;
+}
+
+.assignment-loading small {
+  margin-top: 3px;
+  font-size: 9px;
+}
+
+@media (max-width: 680px) {
+  .assignment-dialog-backdrop {
+    padding: 8px;
+  }
+
+  .quotation-dialog.customer-assignment-dialog {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+    border-radius: 7px;
+  }
+
+  .customer-assignment-dialog .assignment-dialog-head {
+    padding: 16px;
+    grid-template-columns: 38px minmax(0, 1fr) 36px;
+    gap: 10px;
+  }
+
+  .assignment-dialog-icon {
+    width: 38px;
+    height: 38px;
+  }
+
+  .customer-assignment-dialog .assignment-dialog-head h2 {
+    font-size: 19px;
+  }
+
+  .assignment-dialog-body {
+    padding: 14px 16px;
+  }
+
+  .assignment-section {
+    padding: 14px;
+  }
+
+  .assignment-primary-grid,
+  .customer-assignment-dialog .collaborator-options {
+    grid-template-columns: 1fr;
+  }
+
+  .assignment-dialog-footer {
+    padding: 12px 16px;
+  }
+
+  .assignment-summary {
+    display: none;
+  }
+
+  .customer-assignment-dialog .quotation-dialog-actions {
+    width: 100%;
+  }
+
+  .customer-assignment-dialog .quotation-dialog-actions .button {
+    flex: 1;
+  }
+}
+
+@media (max-height: 720px) {
+  .customer-assignment-dialog .assignment-dialog-head {
+    padding-block: 15px;
+  }
+
+  .assignment-dialog-body {
+    padding-block: 14px;
+  }
+
+  .assignment-section {
+    padding: 14px;
+  }
+}
