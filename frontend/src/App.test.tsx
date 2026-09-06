@@ -99,6 +99,7 @@ describe("DealOS public routes", () => {
     fireEvent.change(screen.getByLabelText('Customer Email ID'),{target:{value:'buyer@example.com'}});
     fireEvent.change(screen.getByLabelText('Password'),{target:{value:'CustomerPass12!'}});
     fireEvent.click(screen.getByRole('button',{name:'Sign in with Email ID'}));
+    fireEvent.click(await screen.findByRole('button',{name:/My quotations/}));
     expect((await screen.findAllByText('Q-EMAIL-1')).length).toBeGreaterThan(0);
     expect(screen.getByText('Revision 2 · frozen customer copy')).toBeInTheDocument();
     expect(screen.getByRole('button',{name:'Accept quotation'})).toBeEnabled();
@@ -130,6 +131,22 @@ describe("DealOS public routes", () => {
     expect(JSON.parse(String(requestCall?.[1]?.body))).toMatchObject({email:'portal@example.com',temporaryPassword:generated.value});
     expect(await screen.findByRole('heading',{name:'Copy these credentials now'})).toBeInTheDocument();
     expect(screen.getByText('/customer/sign-in')).toBeInTheDocument();
+  });
+  it("shows customer creation conflicts inside the modal", async () => {
+    window.history.replaceState({}, "", "/app?screen=customers");
+    const workspace = { user:{id:'admin',name:'Admin User',email:'admin@example.com',role:'ADMIN',moduleAccess:[],actorType:'USER',platformSuperAdmin:false,viewContext:null}, organization:{id:'org',name:'Acme'}, users:[], customers:[], quotes:[], products:[], policies:[], warehouses:[], subscriptions:[], invoices:[], alerts:[], audits:[] };
+    fetchMock.mockImplementation((url:string,options?:RequestInit)=>Promise.resolve(url==='/api/v1/customers'&&options?.method==='POST'
+      ? {ok:false,status:409,json:async()=>({success:false,error:{code:'CUSTOMER_EMAIL_EXISTS',message:'This customer email is already used in this workspace.'}})}
+      : {ok:true,status:200,json:async()=>({success:true,data:workspace})}));
+    render(<App/>);
+    expect(await screen.findByRole("heading", {name:"Customers"})).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name:"Add Customer"}));
+    fireEvent.change(screen.getByLabelText("Company Name *"), {target:{value:"Duplicate Customer"}});
+    fireEvent.change(screen.getByLabelText(/^Email ID/), {target:{value:"existing@example.com"}});
+    fireEvent.change(screen.getByPlaceholderText("e.g. 9876543210"), {target:{value:"9876543210"}});
+    fireEvent.click(screen.getAllByRole("button", {name:/Add Customer/}).at(-1)!);
+    expect(await screen.findByRole('alert')).toHaveTextContent('This customer email is already used in this workspace.');
+    expect(screen.getAllByRole("button", {name:/Add Customer/}).at(-1)).toBeEnabled();
   });
   it("lets an admin edit and safely delete a customer from customer details", async () => {
     window.history.replaceState({}, "", "/app?screen=customer&record=customer-1");
@@ -562,6 +579,7 @@ describe("DealOS public routes", () => {
       return Promise.resolve({ok:true,json:async()=>({success:true,data:current})});
     });
     render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /My quotations/ }));
     expect(await screen.findByRole("heading", { name: "Review your quotations" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Invoices/ }));
     expect(screen.getByRole("heading", { name: "INV-1042" })).toBeInTheDocument();

@@ -168,7 +168,7 @@ export function CustomerAuthPage({ onSuccess, signedInRole }: { onSuccess: () =>
           <span><small>SECURE DEAL ROOM</small><b>Customer access</b></span>
         </div>
         <h2>Everything shared with you, in one place.</h2>
-        <p>Use the email address your DealOS invitation was sent to.</p>
+        <p>Sign in to browse organizations or continue an approved private deal room.</p>
         {signedInRole&&signedInRole!=="CUSTOMER"&&<div className="auth-error" role="status">Signing in below will switch this browser from the internal workspace to the customer portal.</div>}
         <form className="customer-login-form" onSubmit={submit}>
           <label className="customer-email-field">Customer Email ID<input required type="email" autoComplete="email" placeholder="you@company.com" value={email} onChange={event=>{setEmail(event.target.value);setError("")}}/></label>
@@ -178,10 +178,11 @@ export function CustomerAuthPage({ onSuccess, signedInRole }: { onSuccess: () =>
         <div className="customer-auth-divider"><span>or continue with Google</span></div>
         <GoogleAuth mode="customer" email={email.trim().toLowerCase()} hideDivider onComplete={onSuccess} onError={setError}/>
         {error&&<div className="auth-error" role="alert">{error}</div>}
+        <div className="customer-signup-link"><span>New to the customer portal?</span><a href="/customer/sign-up">Create an account request <ArrowRight/></a></div>
         <div className="customer-auth-trust"><span><Check/>Verified email matching</span><span><LockKeyhole/>Customer-scoped access</span></div>
       </section>
     </div>
-    <footer className="customer-auth-footer"><span>Access begins after the business assigns your account and sends a portal invitation.</span><b>Made with <i>♥</i> by Amartya, Sanket, Hitesh &amp; Aryan.</b></footer>
+    <footer className="customer-auth-footer"><span>Marketplace access starts immediately. Private deal access begins after seller approval and assignment.</span><b>Made with <i>♥</i> by Amartya, Sanket, Hitesh &amp; Aryan.</b></footer>
   </main>;
 }
 

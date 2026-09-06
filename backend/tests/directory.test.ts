@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import bcrypt from 'bcryptjs';
 import type { PrismaClient } from '@prisma/client';
-import { approveDirectoryJoinRequest, createDirectoryJoinRequest, declineDirectoryJoinRequest, DirectoryError, listDirectoryBusinesses, resetDirectoryRateLimitsForTests } from '../src/directory.js';
+import { approveDirectoryJoinRequest, createDirectoryJoinRequest, customerAccountSignupSchema, declineDirectoryJoinRequest, DirectoryError, getDirectoryBusiness, listCustomerMarketplace, listDirectoryBusinesses, resetDirectoryRateLimitsForTests } from '../src/directory.js';
 
 const organizationId = '11111111-1111-4111-8111-111111111111';
 const requestId = '22222222-2222-4222-8222-222222222222';
@@ -12,6 +12,10 @@ const teamId = '66666666-6666-4666-8666-666666666666';
 const now = new Date('2026-09-06T10:00:00.000Z');
 
 describe('public business directory', () => {
+  it('creates a customer account without forcing an organization or offering selection', () => {
+    expect(customerAccountSignupSchema.safeParse({contactName:'Asha Rao',companyName:'Buyer Co',email:'ASHA@BUYER.EXAMPLE',password:'CustomerPass12!'})).toMatchObject({success:true,data:{email:'asha@buyer.example'}});
+  });
+
   it('queries only discoverable active profiles and returns an allowlisted projection', async () => {
     let where: unknown;
     const prisma = { organizationProfile:{ findMany:async(input:any)=>{where=input.where;return [{organizationId,displayName:'Visible Co',shortDescription:'Safe public text',category:'Services',internalSecret:'never return'}]} } } as unknown as PrismaClient;
@@ -28,6 +32,23 @@ describe('public business directory', () => {
   it('does not accept join requests for hidden or inactive organizations', async () => {
     const prisma = {organizationProfile:{findFirst:async()=>null}} as unknown as PrismaClient;
     await expect(createDirectoryJoinRequest(prisma,organizationId,{email:'buyer@example.com',companyName:'Buyer Co',message:'Please add our company.'},'127.0.0.1',now)).rejects.toMatchObject({status:404,code:'NOT_FOUND'});
+  });
+
+  it('returns only customer-visible offering fields for a selected business', async()=>{
+    const prisma={organization:{findFirst:async()=>({id:organizationId,name:'Visible Co',directoryProfile:{displayName:'Visible Co',shortDescription:'Safe public text',category:'Services'},products:[{id:'product-1',name:'Managed rollout',sku:'MR-1',category:'Services',description:'Regional rollout',unit:'Project',recurring:false,cadence:null,featured:true}]})}} as unknown as PrismaClient;
+    await expect(getDirectoryBusiness(prisma,organizationId)).resolves.toMatchObject({id:organizationId,displayName:'Visible Co',products:[{name:'Managed rollout'}]});
+    expect(JSON.stringify(await getDirectoryBusiness(prisma,organizationId))).not.toMatch(/price|cost|stock/i);
+  });
+
+  it('shows every active organization inside the authenticated customer marketplace', async()=>{
+    let organizationWhere:unknown;
+    const prisma={
+      organization:{findMany:async(input:any)=>{organizationWhere=input.where;return [{id:organizationId,name:'Internal Name',directoryProfile:null,_count:{products:2}}]}},
+      organizationMembership:{findMany:async()=>[]},
+      directoryJoinRequest:{findMany:async()=>[]},
+    } as unknown as PrismaClient;
+    await expect(listCustomerMarketplace(prisma,{id:'customer-user',email:'buyer@example.com',organizationId:''})).resolves.toEqual({items:[{id:organizationId,displayName:'Internal Name',shortDescription:null,category:null,offeringCount:2,relationship:'AVAILABLE'}]});
+    expect(organizationWhere).toEqual({status:'ACTIVE'});
   });
 });
 
@@ -96,6 +117,7 @@ function approvalTransaction(options:{repOnTeam?:boolean;crossOrganization?:bool
     organizationMembership:{upsert:async({create}:any)=>{state.memberships.push(create);return create}},
     session:{deleteMany:async()=>({count:0})},
     customerRepresentative:{create:async({data}:any)=>{state.assignments.push(data);return data},update:async()=>({})},
+    alert:{updateMany:async()=>({count:1})},
     auditEvent:{create:async({data}:any)=>{state.audits.push(data);return data}},
     privilegedAudit:{create:async({data}:any)=>{state.privilegedAudits.push(data);return data}},
   };

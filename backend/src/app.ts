@@ -28,11 +28,11 @@ import { assistantMessagesSchema, runAssistant, type AssistantContext } from './
 import { convertLead, dismissLead, dismissLeadSchema, getLead, leadListSchema, listLeads, listPortalRequests, portalRequestCatalog, PortalRequestError, portalRequestSchema, rfqHandlingSettingSchema, submitPortalRequest, updateRfqHandlingMode } from './portal-requests.js';
 import { createRazorpayClient, paymentWebhookKey, readRazorpayConfiguration, rupeesToPaise, verifyCheckoutSignature, verifyWebhookSignature } from './payments.js';
 import { createCustomerProfile, customerCreationSchema, customerProfileSchema, CustomerProfileError } from './customers.js';
-import { approveDirectoryJoinRequest, approveDirectoryJoinRequestSchema, createDirectoryJoinRequest, declineDirectoryJoinRequest, declineDirectoryJoinRequestSchema, directoryJoinListSchema, directoryJoinRequestSchema, DirectoryError, getOrganizationDirectoryProfile, listDirectoryBusinesses, listDirectoryJoinRequests, organizationProfileSchema, updateOrganizationDirectoryProfile } from './directory.js';
+import { approveDirectoryJoinRequest, approveDirectoryJoinRequestSchema, createDirectoryJoinRequest, customerAccountSignupSchema, customerMarketplaceInterestSchema, declineDirectoryJoinRequest, declineDirectoryJoinRequestSchema, directoryJoinListSchema, directoryJoinRequestSchema, DirectoryError, getDirectoryBusiness, getOrganizationDirectoryProfile, listCustomerMarketplace, listDirectoryBusinesses, listDirectoryJoinRequests, organizationProfileSchema, updateOrganizationDirectoryProfile } from './directory.js';
 import { createSalesTeam, SalesTeamError, salesTeamMutationSchema, updateSalesTeam } from './sales-teams.js';
 import { hasModuleAccess, provisionableRoles, roleModulePresets, workspaceDataAccess, workspaceModules as modules } from './access-policy.js';
 
-type Actor = { id: string; name: string; email: string; loginId: string | null; role: string; customerId: string | null; organizationId: string; moduleAccess: string[]; csrfToken: string; actorType: 'USER' | 'PLATFORM_OWNER'; platformSuperAdmin: boolean; readOnlyView: boolean; organization: { id: string; name: string; status: string } | null; viewContext: { readOnly: true; organizationId: string; organizationName: string; simulatedUserId: string | null; realActor: { id: string; name: string } } | null };
+type Actor = { id: string; name: string; companyName: string | null; email: string; loginId: string | null; role: string; customerId: string | null; organizationId: string; moduleAccess: string[]; csrfToken: string; actorType: 'USER' | 'PLATFORM_OWNER'; platformSuperAdmin: boolean; readOnlyView: boolean; organization: { id: string; name: string; status: string } | null; viewContext: { readOnly: true; organizationId: string; organizationName: string; simulatedUserId: string | null; realActor: { id: string; name: string } } | null };
 type AuthRequest = Request & { user?: Actor; requestId?: string };
 type Tx = Prisma.TransactionClient;
 
@@ -299,6 +299,12 @@ app.get('/api/v1/directory/businesses', async (req: AuthRequest, res) => {
   return ok(req, res, await listDirectoryBusinesses(db));
 });
 
+app.get('/api/v1/directory/businesses/:organizationId', async (req: AuthRequest, res) => {
+  const organizationId = z.string().uuid().safeParse(routeParam(req, 'organizationId'));
+  if (!organizationId.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Choose a valid business.');
+  return ok(req, res, await getDirectoryBusiness(db, organizationId.data));
+});
+
 app.post('/api/v1/directory/businesses/:organizationId/join-requests', async (req: AuthRequest, res) => {
   if (req.headers.origin !== allowedOrigin) return fail(req, res, 403, 'ORIGIN_INVALID', 'This request origin is not allowed.');
   const organizationId = z.string().uuid().safeParse(routeParam(req, 'organizationId'));
@@ -306,6 +312,35 @@ app.post('/api/v1/directory/businesses/:organizationId/join-requests', async (re
   if (!organizationId.success || !parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter a valid business, company, email, and request message.', parsed.success ? undefined : parsed.error.flatten());
   const result = await createDirectoryJoinRequest(db, organizationId.data, parsed.data, req.ip ?? 'unknown');
   return ok(req, res, result, 201);
+});
+
+app.post('/api/v1/auth/customer/signup', async (req: AuthRequest, res) => {
+  if (req.headers.origin !== allowedOrigin) return fail(req, res, 403, 'ORIGIN_INVALID', 'This request origin is not allowed.');
+  const parsed = customerAccountSignupSchema.safeParse(req.body);
+  if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter your name, company, business email, and a password of at least 12 characters.', parsed.error.flatten());
+  const existing = await db.user.findUnique({ where: { email: parsed.data.email }, select: { id: true } });
+  if (existing) return fail(req, res, 409, 'ACCOUNT_EXISTS', 'An account already exists for this email. Sign in instead.');
+  try {
+    const user = await db.user.create({ data: {
+      name: parsed.data.contactName,
+      companyName: parsed.data.companyName,
+      email: parsed.data.email,
+      passwordHash: await bcrypt.hash(parsed.data.password, 12),
+      status: 'ACTIVE',
+      role: 'CUSTOMER',
+      moduleAccess: [],
+    } });
+    const token = await startSession(user, res);
+    return ok(req, res, {
+      id: user.id, name: user.name, email: user.email, companyName: parsed.data.companyName,
+      role: user.role, destination: '/customer', csrfToken: csrfForToken(token),
+    }, 201);
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return fail(req, res, 409, 'ACCOUNT_EXISTS', 'An account already exists for this email. Sign in instead.');
+    }
+    throw error;
+  }
 });
 
 async function authenticate(req: AuthRequest, res: Response, next: NextFunction) {
@@ -322,7 +357,7 @@ async function authenticate(req: AuthRequest, res: Response, next: NextFunction)
     if (session.viewAsUserId && !simulated) return fail(req, res, 409, 'VIEW_CONTEXT_INVALID', 'The simulated user is no longer active in this organization. Exit View As mode.');
     const ownerId = `platform-owner:${hashPlatformToken(session.loginId).slice(0, 16)}`;
     req.user = {
-      id: simulated?.id ?? ownerId, name: simulated?.name ?? 'Platform Owner', email: simulated?.email ?? session.loginId,
+      id: simulated?.id ?? ownerId, name: simulated?.name ?? 'Platform Owner', companyName: simulated?.companyName ?? null, email: simulated?.email ?? session.loginId,
       loginId: simulated?.loginId ?? session.loginId, role: simulated?.role ?? 'ADMIN', customerId: simulated?.customerId ?? null,
       organizationId: organization?.id ?? '', moduleAccess: simulated?.moduleAccess ?? [...modules], csrfToken,
       actorType: 'PLATFORM_OWNER', platformSuperAdmin: true, readOnlyView: Boolean(organization),
@@ -334,9 +369,24 @@ async function authenticate(req: AuthRequest, res: Response, next: NextFunction)
   const token = cookies[cookieName];
   if (!token) return fail(req, res, 401, 'AUTH_REQUIRED', 'Please sign in to continue.');
   const session = await db.session.findUnique({ where: { tokenHash: hash(token) }, include: { user: { include: { organization: true } } } });
-  if (!session || !session.user.organizationId || session.user.status !== 'ACTIVE' || session.expiresAt < new Date()) return fail(req, res, 401, 'AUTH_REQUIRED', 'Your session has expired.');
-  if (session.user.organization?.status !== 'ACTIVE') return fail(req, res, 423, 'ORGANIZATION_SUSPENDED', 'This organization is not active.');
-  req.user = { id: session.user.id, name: session.user.name, email: session.user.email, loginId: session.user.loginId, role: session.user.role, customerId: session.user.customerId, organizationId: session.user.organizationId, moduleAccess: session.user.moduleAccess, csrfToken: csrfForToken(token), actorType: 'USER', platformSuperAdmin: false, readOnlyView: false, organization: session.user.organization ? { id: session.user.organization.id, name: session.user.organization.name, status: session.user.organization.status } : null, viewContext: null };
+  if (!session || session.user.status !== 'ACTIVE' || session.expiresAt < new Date() || (session.user.role !== 'CUSTOMER' && !session.user.organizationId)) return fail(req, res, 401, 'AUTH_REQUIRED', 'Your session has expired.');
+  let activeOrganization = session.user.organization;
+  let activeOrganizationId = session.user.organizationId ?? '';
+  let activeCustomerId = session.user.customerId;
+  if (session.user.role === 'CUSTOMER' && session.activeOrganizationId && session.activeOrganizationId !== session.user.organizationId) {
+    const [membership, customer, organization] = await Promise.all([
+      db.organizationMembership.findFirst({ where: { organizationId: session.activeOrganizationId, userId: session.user.id, accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' }, select: { id: true } }),
+      db.customer.findFirst({ where: { organizationId: session.activeOrganizationId, email: { equals: session.user.email, mode: 'insensitive' }, active: true }, select: { id: true } }),
+      db.organization.findUnique({ where: { id: session.activeOrganizationId } }),
+    ]);
+    if (membership && customer && organization) {
+      activeOrganization = organization;
+      activeOrganizationId = organization.id;
+      activeCustomerId = customer.id;
+    }
+  }
+  if (activeOrganization && activeOrganization.status !== 'ACTIVE') return fail(req, res, 423, 'ORGANIZATION_SUSPENDED', 'This organization is not active.');
+  req.user = { id: session.user.id, name: session.user.name, companyName: session.user.companyName, email: session.user.email, loginId: session.user.loginId, role: session.user.role, customerId: activeCustomerId, organizationId: activeOrganizationId, moduleAccess: session.user.moduleAccess, csrfToken: csrfForToken(token), actorType: 'USER', platformSuperAdmin: false, readOnlyView: false, organization: activeOrganization ? { id: activeOrganization.id, name: activeOrganization.name, status: activeOrganization.status } : null, viewContext: null };
   return next();
 }
 
@@ -540,7 +590,7 @@ app.post('/api/v1/auth/customer/login', async (req: AuthRequest, res) => {
   const parsed = z.object({ email: z.string().trim().email().toLowerCase(), password: z.string().min(8).max(128) }).strict().safeParse(req.body);
   if (!parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Enter a valid customer email and password.');
   const user = await db.user.findUnique({ where: { email: parsed.data.email }, include: { customer: { select: { active: true } } } });
-  if (!user || user.role !== 'CUSTOMER' || !user.customerId || !user.customer?.active || !(await bcrypt.compare(parsed.data.password, user.passwordHash))) {
+  if (!user || user.role !== 'CUSTOMER' || (user.customerId && !user.customer?.active) || !(await bcrypt.compare(parsed.data.password, user.passwordHash))) {
     loginAttempts.set(key, { count: (attempt?.resetAt ?? 0) > Date.now() ? attempt!.count + 1 : 1, resetAt: Date.now() + 15 * 60_000 });
     return fail(req, res, 401, 'INVALID_CUSTOMER_CREDENTIALS', 'Customer email or password is incorrect. You can also continue with Google.');
   }
@@ -668,7 +718,9 @@ app.get('/api/v1/workspace', authenticate, async (req: AuthRequest, res) => {
     return ok(req, res, { user: req.user, organization: null, users: [], customers: [], quotes: [], products: [], policies: [], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] });
   }
   const portal = req.user!.role === 'CUSTOMER';
-  if (portal && !req.user!.customerId) return fail(req, res, 403, 'FORBIDDEN', 'This portal account is not linked to a customer.');
+  if (portal && !req.user!.customerId) {
+    return ok(req, res, { user: req.user, organization: { id: '', name: 'Marketplace' }, users: [], customers: [], quotes: [], products: [], policies: [], warehouses: [], subscriptions: [], invoices: [], alerts: [], audits: [] });
+  }
   const quoteWhere = portal ? { organizationId: req.user!.organizationId, customerId: req.user!.customerId!, sentAt: { not: null } } : internalQuoteWhere(req.user!);
   const dataAccess = workspaceDataAccess(req.user!);
   const repScopingEnabled = process.env.NODE_ENV !== 'production' || process.env.CUSTOMER_ASSIGNMENT_SCOPING_ENABLED === 'true';
@@ -1300,6 +1352,60 @@ app.post('/api/v1/leads/:id/dismiss', authenticate, requireModule('quotations'),
 
 app.get('/api/v1/portal/requests/catalog', authenticate, requireRole('CUSTOMER'), async (req: AuthRequest, res) => {
   return ok(req, res, await portalRequestCatalog(db, req.user!));
+});
+
+app.get('/api/v1/portal/organizations', authenticate, requireRole('CUSTOMER'), async (req: AuthRequest, res) => {
+  return ok(req, res, await listCustomerMarketplace(db, req.user!));
+});
+
+app.get('/api/v1/portal/organizations/:organizationId', authenticate, requireRole('CUSTOMER'), async (req: AuthRequest, res) => {
+  const organizationId = z.string().uuid().safeParse(routeParam(req, 'organizationId'));
+  if (!organizationId.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Choose a valid organization.');
+  return ok(req, res, await getDirectoryBusiness(db, organizationId.data, req.user!.id));
+});
+
+app.post('/api/v1/portal/organizations/:organizationId/interest', authenticate, requireRole('CUSTOMER'), requireCsrf, async (req: AuthRequest, res) => {
+  const organizationId = z.string().uuid().safeParse(routeParam(req, 'organizationId'));
+  const parsed = customerMarketplaceInterestSchema.safeParse(req.body);
+  if (!organizationId.success || !parsed.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Choose an offering and describe what you need.', parsed.success ? undefined : parsed.error.flatten());
+  const membership = await db.organizationMembership.findFirst({ where: { organizationId: organizationId.data, userId: req.user!.id, accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' }, select: { id: true } });
+  const customer = membership ? await db.customer.findFirst({ where: { organizationId: organizationId.data, email: { equals: req.user!.email, mode: 'insensitive' }, active: true }, select: { id: true } }) : null;
+  if (customer) {
+    const product = await db.product.findFirst({ where: { id: parsed.data.productId, organizationId: organizationId.data, active: true, storeVisible: true }, select: { id: true } });
+    if (!product) return fail(req, res, 422, 'PRODUCT_UNAVAILABLE', 'That product or service is no longer available.');
+    const result = await db.$transaction((tx) => submitPortalRequest(tx, {
+      ...req.user!, organizationId: organizationId.data, customerId: customer.id,
+    }, {
+      requirementsText: parsed.data.message,
+      preferredDeliveryDate: null,
+      lines: [{ productId: product.id, quantity: parsed.data.quantity }],
+      idempotencyKey: idempotencyKey(req.headers['idempotency-key']),
+    }));
+    return ok(req, res, { kind: 'QUOTE_REQUEST', ...result }, 201);
+  }
+  const result = await createDirectoryJoinRequest(db, organizationId.data, {
+    email: req.user!.email,
+    companyName: parsed.data.companyName,
+    contactName: req.user!.name,
+    message: parsed.data.message,
+    productId: parsed.data.productId,
+    quantity: parsed.data.quantity,
+    marketplaceInterest: true,
+  }, req.ip ?? 'unknown', new Date(), true);
+  return ok(req, res, { kind: 'RELATIONSHIP_REQUEST', ...result }, 201);
+});
+
+app.post('/api/v1/portal/organizations/:organizationId/open', authenticate, requireRole('CUSTOMER'), requireCsrf, async (req: AuthRequest, res) => {
+  const organizationId = z.string().uuid().safeParse(routeParam(req, 'organizationId'));
+  if (!organizationId.success) return fail(req, res, 422, 'VALIDATION_ERROR', 'Choose a valid organization.');
+  const [membership, customer] = await Promise.all([
+    db.organizationMembership.findFirst({ where: { organizationId: organizationId.data, userId: req.user!.id, accessRole: 'PORTAL_USER', businessRole: 'CUSTOMER', status: 'ACTIVE' }, select: { id: true } }),
+    db.customer.findFirst({ where: { organizationId: organizationId.data, email: { equals: req.user!.email, mode: 'insensitive' }, active: true }, select: { id: true } }),
+  ]);
+  if (!membership || !customer) return fail(req, res, 403, 'RELATIONSHIP_REQUIRED', 'This organization must approve and assign your account before its deal room can be opened.');
+  const token = parseCookies(req.headers.cookie)[cookieName];
+  await db.session.update({ where: { tokenHash: hash(token!) }, data: { activeOrganizationId: organizationId.data } });
+  return ok(req, res, { organizationId: organizationId.data, customerId: customer.id });
 });
 
 app.get('/api/v1/portal/requests', authenticate, requireRole('CUSTOMER'), async (req: AuthRequest, res) => {
